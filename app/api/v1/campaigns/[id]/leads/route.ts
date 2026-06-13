@@ -1,0 +1,97 @@
+import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/auth/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ok, fail } from "@/lib/api-response";
+import { AddLeadsToCampaignSchema, CampaignLeadsQuerySchema } from "@/lib/validators/campaigns";
+
+const TERMINAL_STATUSES = new Set(["completed", "paused"]);
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try { await requireAuth(req); } catch (r) { return r as Response; }
+
+  const { id } = await params;
+  const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
+  const parsed = CampaignLeadsQuerySchema.safeParse(sp);
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
+
+  const { crm_status, page, limit } = parsed.data;
+  const db = createAdminClient();
+
+  let q = db
+    .from("campaign_leads")
+    .select(
+      "*, leads(first_name, last_name, email, email_status, title, country, email_domain_catchall, organization_id), email_drafts(subject, body, status)",
+      { count: "exact" }
+    )
+    .eq("campaign_id", id);
+
+  if (crm_status) q = q.eq("crm_status", crm_status);
+  q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
+
+  const { data, error, count } = await q;
+  if (error) return fail(500, "INTERNAL", error.message);
+
+  return ok({ campaign_leads: data, total: count, page, limit });
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  let user: { id: string };
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+
+  const { id } = await params;
+  const body = await req.json().catch(() => null);
+  const parsed = AddLeadsToCampaignSchema.safeParse(body);
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+
+  const db = createAdminClient();
+
+  // Validate campaign status
+  const { data: campaign } = await db.from("campaigns").select("status").eq("id", id).maybeSingle();
+  if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
+  if (TERMINAL_STATUSES.has(campaign.status)) {
+    return fail(409, "CONFLICT", `Cannot add leads to a campaign in status '${campaign.status}'`);
+  }
+
+  const added: string[] = [];
+  const notFound: string[] = [];
+  const blockedUnsubscribed: string[] = [];
+  const skippedExisting: string[] = [];
+
+  for (const leadId of parsed.data.lead_ids) {
+    // Check lead exists and org not unsubscribed
+    const { data: lead } = await db
+      .from("leads")
+      .select("id, organization_id, organizations(unsubscribed)")
+      .eq("id", leadId)
+      .maybeSingle();
+
+    if (!lead) { notFound.push(leadId); continue; }
+
+    const org = Array.isArray(lead.organizations) ? lead.organizations[0] : lead.organizations;
+    if (org?.unsubscribed) { blockedUnsubscribed.push(leadId); continue; }
+
+    const { error } = await db.from("campaign_leads").insert({
+      campaign_id: id,
+      lead_id: leadId,
+      crm_status: "new",
+      created_by: user.id,
+      created_at: new Date().toISOString(),
+    });
+
+    if (error?.code === "23505") { skippedExisting.push(leadId); continue; }
+    if (error) return fail(500, "INTERNAL", error.message);
+
+    added.push(leadId);
+  }
+
+  // Update total_leads counter from actual count (accurate, avoids needing an RPC)
+  if (added.length > 0) {
+    const { count } = await db
+      .from("campaign_leads")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", id);
+    await db.from("campaigns").update({ total_leads: count ?? 0 }).eq("id", id);
+  }
+
+  return ok({ added, not_found: notFound, blocked_unsubscribed: blockedUnsubscribed, skipped_existing: skippedExisting });
+}

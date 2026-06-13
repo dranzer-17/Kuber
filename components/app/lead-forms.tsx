@@ -1,0 +1,678 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import * as XLSX from "xlsx";
+import { AlertCircle, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { ALLOWED_KEYWORDS, LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES } from "@/lib/constants";
+import { apolloSearch, importExcelDirect, createLead } from "@/lib/api-client";
+import { supabase } from "@/lib/supabase";
+
+// ─── TagInput — combobox with pill selection ──────────────────────────────────
+
+function TagInput({
+  label,
+  pills,
+  suggestions,
+  onChange,
+  placeholder,
+  allowCustom = true,
+  max,
+  required,
+}: {
+  label: string;
+  pills: string[];
+  suggestions: readonly string[];
+  onChange: (pills: string[]) => void;
+  placeholder?: string;
+  allowCustom?: boolean;
+  max?: number;
+  required?: boolean;
+}) {
+  const [query,     setQuery    ] = useState("");
+  const [open,      setOpen     ] = useState(false);
+  const containerRef             = useRef<HTMLDivElement>(null);
+  const inputRef                 = useRef<HTMLInputElement>(null);
+
+  const maxReached = max !== undefined && pills.length >= max;
+  const q = query.trim().toLowerCase();
+  const filtered = suggestions.filter(
+    (s) => s.toLowerCase().includes(q) && !pills.includes(s)
+  );
+  const exactMatch = suggestions.some((s) => s.toLowerCase() === q);
+  const canAddCustom = allowCustom && q.length > 0 && !exactMatch && !pills.includes(query.trim());
+
+  function add(value: string) {
+    const v = value.trim();
+    if (!v || pills.includes(v) || maxReached) return;
+    onChange([...pills, v]);
+    setQuery("");
+    setOpen(false);
+    inputRef.current?.focus();
+  }
+
+  function remove(value: string) {
+    onChange(pills.filter((p) => p !== value));
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if ((e.key === "Enter" || e.key === ",") && query.trim() && !maxReached) {
+      e.preventDefault();
+      if (filtered.length > 0 && !canAddCustom) add(filtered[0]);
+      else if (allowCustom) add(query.trim());
+    }
+    if (e.key === "Backspace" && !query && pills.length > 0) {
+      onChange(pills.slice(0, -1));
+    }
+    if (e.key === "Escape") setOpen(false);
+  }
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const showDropdown = open && !maxReached && (filtered.length > 0 || canAddCustom);
+
+  return (
+    <div className="space-y-1.5" ref={containerRef}>
+      <Label>
+        {label}
+        {required && <span className="text-destructive ml-1">*</span>}
+      </Label>
+      <div
+        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-border bg-background px-3 py-2 cursor-text focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-shadow"
+        onClick={() => !maxReached && inputRef.current?.focus()}
+      >
+        {pills.map((p) => (
+          <span
+            key={p}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-xs font-medium text-primary"
+          >
+            {p}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); remove(p); }}
+              className="hover:text-destructive transition-colors"
+            >
+              <X className="size-2.5" />
+            </button>
+          </span>
+        ))}
+        {!maxReached && (
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={handleKeyDown}
+            placeholder={pills.length === 0 ? (placeholder ?? "Type to search…") : ""}
+            className="flex-1 min-w-[120px] bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
+          />
+        )}
+      </div>
+
+      {showDropdown && (
+        <div className="relative z-50">
+          <div className="absolute top-0 left-0 right-0 rounded-md border border-border bg-popover shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+            {filtered.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); add(s); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+            {canAddCustom && (
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); add(query.trim()); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors flex items-center gap-2 text-muted-foreground border-t border-border"
+              >
+                <Plus className="size-3.5 shrink-0" />
+                Add &ldquo;{query.trim()}&rdquo;
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+async function getToken(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? "";
+}
+
+// ─── Apollo ───────────────────────────────────────────────────────────────────
+
+export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
+  const [keywords,    setKeywords   ] = useState<string[]>([]);
+  const [positions,   setPositions  ] = useState<string[]>([]);
+  const [seniorities, setSeniorities] = useState<string[]>([]);
+  const [locations,   setLocations  ] = useState<string[]>([]);
+  const [maxPages,    setMaxPages   ] = useState(1);
+  const [searching,   setSearching  ] = useState(false);
+  const [result,      setResult     ] = useState<{ inserted: number; skipped: number } | null>(null);
+  const [error,       setError      ] = useState("");
+
+  function toggleSen(s: string) {
+    setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
+  }
+  function addLocation(loc: string) {
+    if (loc && !locations.includes(loc)) setLocations((p) => [...p, loc]);
+  }
+  function removeLocation(loc: string) {
+    setLocations((p) => p.filter((l) => l !== loc));
+  }
+
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (keywords.length === 0) { setError("Please select an industry keyword."); return; }
+    setSearching(true);
+    setResult(null);
+    setError("");
+    try {
+      const token = await getToken();
+      const res = await apolloSearch(token, {
+        keywords,
+        locations: locations.map((l) => LOCATION_MAP[l] ?? l),
+        max_pages: maxPages,
+        titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
+        seniorities: seniorities.length > 0 ? seniorities : undefined,
+      });
+      setResult({ inserted: res.inserted, skipped: res.skipped });
+      if (res.inserted > 0) onImport(res.inserted);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-muted-foreground">
+        Search Apollo&apos;s database to find plastic &amp; polymer industry leads.
+      </p>
+      <form onSubmit={handleSearch} className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <TagInput
+            label="Industry Keywords"
+            pills={keywords}
+            suggestions={ALLOWED_KEYWORDS}
+            onChange={setKeywords}
+            placeholder="e.g. plastics, polymer…"
+            required
+          />
+          <div className="space-y-1.5">
+            <Label>Pages to fetch (50 leads/page)</Label>
+            <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {[1,2,3,5,10].map((n) => (
+                  <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <TagInput
+          label="Positions / Job Titles"
+          pills={positions}
+          suggestions={APOLLO_TITLES}
+          onChange={setPositions}
+          placeholder="e.g. VP, Plant Manager…"
+        />
+
+        <div className="space-y-1.5">
+          <Label>Seniority</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {APOLLO_SENIORITIES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => toggleSen(s)}
+                className={cn(
+                  "px-2.5 py-1 text-xs rounded-full border transition-colors",
+                  seniorities.includes(s)
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground hover:border-foreground",
+                )}
+              >
+                {s.replace("_", " ")}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Locations</Label>
+          <Select value="" onValueChange={(v) => { addLocation(v); }}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select a country…" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 overflow-y-auto">
+              {Object.keys(LOCATION_MAP)
+                .filter((loc) => !locations.includes(loc))
+                .map((loc) => (
+                  <SelectItem key={loc} value={loc}>{loc}</SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          {locations.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {locations.map((loc) => (
+                <span
+                  key={loc}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-xs font-medium text-primary"
+                >
+                  {loc}
+                  <button
+                    type="button"
+                    onClick={() => removeLocation(loc)}
+                    className="hover:text-destructive transition-colors"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Button type="submit" disabled={searching || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
+          <Search className="size-3.5" />
+          {searching ? "Searching Apollo..." : "Search Apollo"}
+        </Button>
+      </form>
+
+      {error && (
+        <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
+          <AlertCircle className="size-3.5 shrink-0" /> {error}
+        </div>
+      )}
+      {result !== null && (
+        <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-4 space-y-1">
+          <p className="text-sm font-semibold text-green-400">{result.inserted} leads imported</p>
+          <p className="text-xs text-muted-foreground">{result.skipped} duplicates skipped</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Excel / CSV with column mapping ─────────────────────────────────────────
+
+const PLATFORM_FIELDS = [
+  { key: "email",               label: "Email",                    required: true,  recommended: false, note: "Blocks progress if unmapped" },
+  { key: "first_name",          label: "First Name",               required: true,  recommended: false, note: "" },
+  { key: "last_name",           label: "Last Name",                required: false, recommended: false, note: "" },
+  { key: "organization_name",   label: "Company Name",             required: false, recommended: false, note: "" },
+  { key: "organization_domain", label: "Company Website / Domain", required: false, recommended: true,  note: "Used by Firecrawl for enrichment" },
+  { key: "title",               label: "Job Title",                required: false, recommended: false, note: "" },
+  { key: "country",             label: "Country",                  required: false, recommended: false, note: "" },
+];
+
+type ParseResult = {
+  inserted: number;
+  skipped_blank_email: number;
+  skipped_invalid_email: number;
+  skipped_duplicate_in_file: number;
+  skipped_duplicate_in_db: number;
+};
+
+export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  type Stage = "upload" | "map" | "result";
+  const [stage,     setStage    ] = useState<Stage>("upload");
+  const [fileName,  setFileName ] = useState("");
+  const [headers,   setHeaders  ] = useState<string[]>([]);
+  const [rows,      setRows     ] = useState<Record<string, string>[]>([]);
+  const [mapping,   setMapping  ] = useState<Record<string, string>>({});
+  const [importing, setImporting] = useState(false);
+  const [result,    setResult   ] = useState<ParseResult | null>(null);
+  const [fileError, setFileError] = useState("");
+
+  function tryAutoMap(cols: string[]): Record<string, string> {
+    const auto: Record<string, string> = {};
+    const n = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+    for (const pf of PLATFORM_FIELDS) {
+      const match = cols.find((c) => {
+        const nc = n(c);
+        if (pf.key === "email"               && (nc.includes("email") || nc.includes("mail"))) return true;
+        if (pf.key === "first_name"          && (nc.includes("firstname") || nc.includes("contactperson") || nc.includes("contact") || nc === "name")) return true;
+        if (pf.key === "last_name"           && nc.includes("lastname")) return true;
+        if (pf.key === "organization_name"   && (nc.includes("company") || nc.includes("org"))) return true;
+        if (pf.key === "organization_domain" && (nc.includes("website") || nc.includes("domain") || nc.includes("url") || nc.includes("web"))) return true;
+        if (pf.key === "title"               && (nc.includes("title") || nc.includes("designation") || nc.includes("position") || nc.includes("role"))) return true;
+        if (pf.key === "country"             && nc.includes("country")) return true;
+        return false;
+      });
+      if (match) auto[pf.key] = match;
+    }
+    return auto;
+  }
+
+  function handleFile(file: File) {
+    setFileError("");
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const wb   = XLSX.read(data, { type: "array" });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
+        if (json.length === 0) { setFileError("The file appears to be empty."); return; }
+        const cols = Object.keys(json[0]);
+        setHeaders(cols);
+        setRows(json);
+        setMapping(tryAutoMap(cols));
+        setFileName(file.name);
+        setStage("map");
+      } catch {
+        setFileError("Could not read file. Make sure it is a valid .xlsx or .csv.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  async function handleConfirm() {
+    if (!mapping.email || !mapping.first_name) return;
+    setImporting(true);
+    try {
+      const token = await getToken();
+      const res = await importExcelDirect(token, rows, mapping);
+      setResult(res);
+      setStage("result");
+      onImport(res.inserted);
+    } catch (e) {
+      setFileError((e as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function reset() {
+    setStage("upload");
+    setFileName(""); setHeaders([]); setRows([]); setMapping({});
+    setResult(null); setFileError("");
+  }
+
+  if (stage === "upload") {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Every spreadsheet has different headers — we detect your columns and let you map them to platform fields.
+        </p>
+        <div
+          onClick={() => fileRef.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+          className="border-2 border-dashed border-border hover:border-muted-foreground rounded-xl p-12 flex flex-col items-center gap-3 cursor-pointer transition-colors"
+        >
+          <Upload className="size-8 text-muted-foreground/50" />
+          <p className="font-medium text-sm">Click or drag to upload</p>
+          <p className="text-xs text-muted-foreground">.xlsx or .csv · any column layout supported</p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            hidden
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+          />
+        </div>
+        {fileError && (
+          <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
+            <AlertCircle className="size-3.5 shrink-0" /> {fileError}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (stage === "map") {
+    const emailMapped     = !!mapping.email;
+    const firstNameMapped = !!mapping.first_name;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3">
+          <FileText className="size-4 text-muted-foreground shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{fileName}</p>
+            <p className="text-xs text-muted-foreground">{rows.length} rows · {headers.length} columns detected</p>
+          </div>
+          <Button variant="ghost" size="sm" className="shrink-0" onClick={reset}>Change</Button>
+        </div>
+
+        <div className="rounded-xl border border-border overflow-hidden">
+          <div className="grid grid-cols-2 px-4 py-2.5 bg-secondary/40 border-b border-border">
+            <span className="text-xs font-semibold text-muted-foreground">Platform field</span>
+            <span className="text-xs font-semibold text-muted-foreground">Your column</span>
+          </div>
+          {PLATFORM_FIELDS.map((pf) => {
+            const mapped = mapping[pf.key];
+            return (
+              <div key={pf.key} className="grid grid-cols-2 px-4 py-3 border-b border-border last:border-0 items-center gap-3">
+                <div>
+                  <span className="text-sm">
+                    {pf.label}
+                    {pf.required && <span className="text-destructive ml-1 text-xs">*</span>}
+                    {pf.recommended && !pf.required && (
+                      <span className="ml-1.5 text-[10px] font-medium text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                        recommended
+                      </span>
+                    )}
+                  </span>
+                  {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
+                </div>
+                <Select
+                  value={mapped || "__none"}
+                  onValueChange={(v) =>
+                    setMapping((m) => {
+                      const next = { ...m };
+                      if (v === "__none") delete next[pf.key];
+                      else next[pf.key] = v;
+                      return next;
+                    })
+                  }
+                >
+                  <SelectTrigger className={cn("h-8 text-xs", mapped && "border-primary/40 bg-primary/5")}>
+                    <SelectValue placeholder="Not mapped" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">
+                      <span className="text-muted-foreground">Not mapped</span>
+                    </SelectItem>
+                    {headers.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h.length > 40 ? `${h.slice(0, 38)}…` : h}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="space-y-1.5">
+          {!emailMapped && (
+            <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2">
+              <AlertCircle className="size-3.5 shrink-0" />
+              Email column must be mapped before importing
+            </div>
+          )}
+          {!firstNameMapped && emailMapped && (
+            <div className="flex items-center gap-2 text-xs text-amber-400 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+              <AlertCircle className="size-3.5 shrink-0" />
+              First Name is required
+            </div>
+          )}
+          {fileError && (
+            <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2">
+              <AlertCircle className="size-3.5 shrink-0" /> {fileError}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={reset}>Back</Button>
+            <Button
+              disabled={!emailMapped || !firstNameMapped || importing}
+              onClick={handleConfirm}
+            >
+              {importing ? "Importing..." : "Confirm & Import"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-green-500/20 bg-green-500/5 px-5 py-4 flex items-center gap-3">
+        <CheckCircle2 className="size-5 text-green-400 shrink-0" />
+        <div>
+          <p className="font-semibold text-green-400">{result?.inserted} leads imported</p>
+          <p className="text-xs text-muted-foreground mt-0.5">from {fileName}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Duplicates removed",  value: (result?.skipped_duplicate_in_file ?? 0) + (result?.skipped_duplicate_in_db ?? 0), accent: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
+          { label: "Blank emails skipped", value: result?.skipped_blank_email,   accent: "text-zinc-400",  bg: "bg-zinc-500/10",  border: "border-zinc-500/20"  },
+          { label: "Invalid format",       value: result?.skipped_invalid_email, accent: "text-red-400",   bg: "bg-red-500/10",   border: "border-red-500/20"   },
+        ].map(({ label, value, accent, bg, border }) => (
+          <div key={label} className={cn("rounded-lg border px-3 py-3 text-center", bg, border)}>
+            <p className={cn("text-xl font-bold tabular-nums", accent)}>{value ?? 0}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      <Button variant="outline" onClick={reset}>Upload another file</Button>
+    </div>
+  );
+}
+
+// ─── Manual ───────────────────────────────────────────────────────────────────
+
+export function ManualForm({ onImport }: { onImport: (n: number) => void }) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName,  setLastName ] = useState("");
+  const [email,     setEmail    ] = useState("");
+  const [company,   setCompany  ] = useState("");
+  const [domain,    setDomain   ] = useState("");
+  const [jobTitle,  setJobTitle ] = useState("");
+  const [country,   setCountry  ] = useState("");
+  const [saving,    setSaving   ] = useState(false);
+  const [saved,     setSaved    ] = useState(false);
+  const [error,     setError    ] = useState("");
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const token = await getToken();
+      await createLead(token, {
+        email,
+        first_name: firstName,
+        last_name: lastName || undefined,
+        organization_name: company || "Unknown",
+        organization_domain: domain || undefined,
+        title: jobTitle || undefined,
+        country: country || undefined,
+      });
+      onImport(1);
+      setSaved(true);
+      setFirstName(""); setLastName(""); setEmail(""); setCompany("");
+      setDomain(""); setJobTitle(""); setCountry("");
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-4">
+      <p className="text-sm text-muted-foreground">Add a single lead manually.</p>
+
+      {/* Name */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>First name <span className="text-destructive">*</span></Label>
+          <Input required value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Raj" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Last name</Label>
+          <Input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Sharma" />
+        </div>
+      </div>
+
+      {/* Email */}
+      <div className="space-y-1.5">
+        <Label>Email <span className="text-destructive">*</span></Label>
+        <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="raj@company.com" />
+      </div>
+
+      {/* Company + Domain */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Company name <span className="text-destructive">*</span></Label>
+          <Input required value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Plastics Ltd." />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Company website <span className="text-destructive">*</span></Label>
+          <Input
+            required
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            placeholder="acmeplastics.com"
+          />
+          <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
+        </div>
+      </div>
+
+      {/* Job title + Country */}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Job title</Label>
+          <Input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="VP Procurement" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Country</Label>
+          <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="India" />
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save lead"}</Button>
+      {saved && <p className="text-sm text-green-400">Lead saved successfully.</p>}
+    </form>
+  );
+}

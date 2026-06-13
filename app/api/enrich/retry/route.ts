@@ -1,0 +1,57 @@
+import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/auth/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ok, fail } from "@/lib/api-response";
+
+export async function POST(req: NextRequest) {
+  try { await requireAuth(req); } catch (r) { return r as Response; }
+
+  const body = await req.json().catch(() => null);
+  const orgId = body?.org_id;
+  if (!orgId || typeof orgId !== "string") return fail(400, "VALIDATION_ERROR", "org_id is required");
+
+  const db = createAdminClient();
+
+  const { data: org, error } = await db
+    .from("organizations")
+    .select("enrichment_stage, enrichment_attempts")
+    .eq("id", orgId)
+    .single();
+
+  if (error || !org) return fail(404, "NOT_FOUND", "Organization not found");
+  if (org.enrichment_stage === "scraping") {
+    return fail(409, "IN_PROGRESS", "Enrichment is already running for this organization");
+  }
+  if ((org.enrichment_attempts ?? 0) >= 3) {
+    return fail(409, "MAX_ATTEMPTS", "This organization has reached the maximum retry limit (3 attempts)");
+  }
+
+  // If already queued, just re-fire scrape-orgs without touching the DB
+  if (org.enrichment_stage !== "queued") {
+    await db.from("organizations").update({
+      enrichment_stage: "queued",
+      enrichment_status: "SCRAPE_QUEUED",
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", orgId);
+
+    await db.from("enrichment_logs").insert({
+      org_id: orgId,
+      source: "system",
+      event: "SCRAPE_QUEUED",
+      payload: { triggered_by: "manual_retry", previous_stage: org.enrichment_stage },
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  // Re-trigger scrape
+  if (process.env.INTERNAL_SECRET) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+      method: "POST",
+      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
+    }).catch(() => {});
+  }
+
+  return ok({ queued: true });
+}

@@ -1,0 +1,218 @@
+// Kuber Polyplast — Sales Automation Platform
+// Schema v5.1 — post live API testing (June 11)
+//   v5.1: + leads.time_zone, leads.email_domain_catchall (both confirmed in live
+//   bulk_match response); is_likely_to_engage noted as not-always-present.
+// Changes from June 10 meeting:
+//   1. organizations columns RENAMED — entity prefix dropped (company_domain → domain etc.)
+//      Rule: table name = entity, so columns never repeat the entity name.
+//   2. has_scraped boolean added — manual + scheduler-driven re-scrape control
+//      (replaces TTL-only logic; set false manually or by scheduler to force re-scrape)
+//   3. Firecrawl raw NOT stored in DB — too heavy (big MD files).
+//      MD files go to filesystem folder; only relative path stored (firecrawl_md_path).
+//   4. Tavily DROPPED for phase 1 — columns removed (re-add in later phase if needed)
+//   5. suppressions table DROPPED — unsubscribed boolean lives on organizations
+//      (org-level: if org says not interested, all its leads are blocked + highlighted in CRM)
+//   6. Follow-ups via INSTANTLY SEQUENCE STEPS (reversal of manual-cron design):
+//      follow_up_pattern on campaigns generates sequence steps at campaign creation;
+//      editable later via PATCH /api/v2/campaigns/{id} (live-test pending).
+//      campaign_leads thread-tracking columns removed.
+//   7. daily_limit added to campaigns (meeting: campaign inputs = window, limit, send days, HIL)
+// 6 tables: organizations, leads, campaigns, campaign_leads, email_drafts, reply_events
+
+// ─────────────────────────────────────────────
+// TABLE 1 — ORGANIZATIONS (entity: the company)
+// ─────────────────────────────────────────────
+Table organizations {
+  id                  uuid        [primary key, default: `gen_random_uuid()`]
+
+  // Identity / dedup keys
+  apollo_org_id       text        [unique, note: 'Apollo organization_id from bulk_match. NULL for Excel/manual companies. Always check existence before insert — Apollo data is not always consistent.']
+  domain              text        [note: 'RENAMED from company_domain. Nullable — many SMEs have no website. Partial unique index WHERE NOT NULL.']
+  website             text        [note: 'RENAMED from company_website. Full URL from Apollo organization.website_url.']
+  name                text        [not null, note: 'RENAMED from company_name']
+  industry            text        [note: 'RENAMED from company_industry']
+  keywords            text[]      [note: 'RENAMED from company_keywords. Apollo organization.keywords[].']
+  employees           integer     [note: 'RENAMED from company_employees. estimated_num_employees.']
+  city                text        [note: 'Company HQ city']
+  country             text        [note: 'Company HQ country']
+
+  // Enrichment (Firecrawl + LLM extraction) — Tavily dropped for phase 1
+  description         text        [note: 'LLM-extracted from Firecrawl MD: what they make, who they sell to']
+  primary_products    text[]      [note: 'ARRAY — company can deal in multiple products']
+  firecrawl_md_path   text        [note: 'RELATIVE path to the Firecrawl markdown file on the filesystem (e.g. /scrapes/{timestamp}/{org}.md). Raw MD is NOT stored in DB — too heavy. Keeps the Firecrawl→LLM pipeline replayable.']
+  has_scraped         boolean     [not null, default: false, note: 'true = scraped + extracted. Set FALSE manually (admin) or by scheduler to force a fresh scrape on next interval run. Scheduler: WHERE has_scraped = false → Firecrawl → extract → set true.']
+
+  // Org-level opt-out (replaces suppressions table)
+  unsubscribed        boolean     [not null, default: false, note: 'Org said not interested / unsubscribed. ALL leads of this org are highlighted in CRM and BLOCKED from sending even if selected in a campaign.']
+
+  created_at          timestamptz [not null, default: `now()`]
+  updated_at          timestamptz
+
+  indexes {
+    apollo_org_id [unique]
+    domain        [note: 'Postgres: CREATE UNIQUE INDEX ON organizations(domain) WHERE domain IS NOT NULL']
+    has_scraped   [note: 'Scheduler hot path: WHERE has_scraped = false']
+  }
+
+  note: 'One row = one unique company. Stage 1 inserts name/industry/apollo_org_id only (domain unknown until bulk_match). Enrichment fills the rest once per org — leads of the same org reuse it.'
+}
+
+// ─────────────────────────────────────────────
+// TABLE 2 — LEADS (entity: the person)
+// ─────────────────────────────────────────────
+Table leads {
+  id                  uuid        [primary key, default: `gen_random_uuid()`]
+  organization_id     uuid        [ref: > organizations.id, note: '1:many — one org, many leads']
+
+  // Stage 1 — Apollo search (free). Dedupe on apollo_id BEFORE insert.
+  apollo_id           text        [unique, not null, note: 'Person dedup key. Check existence before insert — avoid duplicate Apollo calls and rows.']
+  first_name          text
+  title               text
+  has_email           boolean     [note: 'Search flag — gate for bulk_match']
+
+  // Stage 2A — bulk_match (1 credit). Store ALL leads even if email not verified.
+  last_name           text
+  email               text
+  email_status        text        [note: 'verified | unverified | null — stored for all leads (analytics/audit). Only verified proceeds to send.']
+  headline            text
+  linkedin_url        text
+  city                text
+  state               text
+  country             text        [note: 'Priority UI field — Apollo person_locations[] filter + Instantly timezone routing']
+  time_zone           text        [note: 'LIVE-CONFIRMED field from bulk_match (e.g. "America/New_York") — use directly for Instantly schedule_timezone instead of guessing from country']
+  email_domain_catchall boolean   [note: 'LIVE-CONFIRMED from bulk_match. true = domain accepts all mail, so "verified" is weaker — flag in CRM, monitor bounces closely']
+  seniority           text
+  departments         text[]
+  is_likely_to_engage boolean     [note: 'NOT always present in live responses — keep nullable, never gate on it']
+
+  lead_source         varchar     [not null, note: 'apollo | excel | manual']
+
+  created_by          uuid        [not null]
+  updated_by          uuid
+  created_at          timestamptz [not null, default: `now()`]
+  updated_at          timestamptz
+
+  indexes {
+    apollo_id [unique]
+    organization_id
+    email
+    country
+  }
+
+  note: 'One row = one human. Filled in Stage 1 (campaign-independent). If organizations.unsubscribed = true, this lead is highlighted in the CRM and blocked from any campaign send.'
+}
+
+// ─────────────────────────────────────────────
+// TABLE 3 — CAMPAIGNS (entity: one outreach run)
+// ─────────────────────────────────────────────
+Table campaigns {
+  id                     uuid        [primary key, default: `gen_random_uuid()`]
+  name                   text        [not null]
+  instantly_campaign_id  text        [note: 'From Instantly POST /api/v2/campaigns response']
+  human_in_loop          boolean     [not null, default: true, note: 'Toggle in campaign-creation UI']
+  status                 varchar     [not null, default: 'draft', note: 'draft | processing | active | paused | completed']
+
+  // Scheduling — campaign-creation UI inputs (June 10 action item)
+  send_mode              varchar     [not null, default: 'now', note: 'now | scheduled']
+  schedule_start_at      timestamptz [note: 'NULL when send_mode = now']
+  window_from            text        [note: '"09:00" — Instantly timing.from']
+  window_to              text        [note: '"17:00" — Instantly timing.to']
+  send_days              jsonb       [note: 'Instantly format: {"1":true,"2":true,...} — 1=Monday. Weekends false by default.']
+  schedule_timezone      text        [note: 'From lead country']
+  daily_limit            integer     [not null, default: 30, note: 'Instantly daily_limit — max 30/inbox/day for deliverability']
+
+  // Follow-up pattern → GENERATES INSTANTLY SEQUENCE STEPS (June 10 reversal)
+  follow_up_pattern      jsonb       [note: 'e.g. [{"step":1,"delay":0},{"step":2,"delay":30},{"step":3,"delay":90}] — delay in DAYS (official: steps[].delay = days to wait before NEXT email). At campaign creation these become sequences[0].steps[] in Instantly. Default template offered (1st/3rd/6th month), user-editable. Later edits = PATCH /api/v2/campaigns/{id} — live-test pending. Instantly handles ALL scheduling — no cron on our side.']
+
+  // Counters
+  total_leads            integer     [not null, default: 0]
+  sent_count             integer     [not null, default: 0]
+  opened_count           integer     [not null, default: 0]
+  replied_count          integer     [not null, default: 0]
+  hot_count              integer     [not null, default: 0]
+
+  created_by             uuid        [not null]
+  updated_by             uuid
+  created_at             timestamptz [not null, default: `now()`]
+  updated_at             timestamptz
+
+  note: 'Created over already-fetched leads (broadcast model): user selects leads from the lead table → campaign created → campaign_leads rows inserted. Sequence steps (incl. follow-ups) live in Instantly; stop_on_reply halts them on reply.'
+}
+
+// ─────────────────────────────────────────────
+// TABLE 4 — CAMPAIGN_LEADS (junction: lead ∈ campaign)
+// ─────────────────────────────────────────────
+Table campaign_leads {
+  id                  uuid        [primary key, default: `gen_random_uuid()`]
+  campaign_id         uuid        [not null, ref: > campaigns.id]
+  lead_id             uuid        [not null, ref: > leads.id]
+
+  crm_status          varchar     [not null, default: 'new', note: 'new | enriched | draft | approved | sent | replied | hot | cold | bounced | unsubscribed | skipped | send_failed']
+  instantly_lead_id   text        [note: 'Instantly lead UUID in THIS campaign']
+  draft_id            uuid        [ref: > email_drafts.id]
+  interest_status     integer     [note: '1 Interested | 2 Meeting Booked | 3 Meeting Done | 4 Won | 0 OOO | -1 Not Interested | -2 Wrong Person | -3 Lost | -4 No Show']
+  last_reply_at       timestamptz
+  last_reply_body     text
+
+  created_by          uuid        [not null]
+  updated_by          uuid
+  created_at          timestamptz [not null, default: `now()`]
+  updated_at          timestamptz
+
+  indexes {
+    (campaign_id, lead_id) [unique, name: 'uq_campaign_lead']
+    campaign_id
+    lead_id
+    crm_status
+  }
+
+  note: 'Per-campaign state. Thread-tracking columns (instantly_thread_id, last_email_uuid, follow_up_step, next_follow_up_at) REMOVED June 10 — Instantly sequences handle follow-up scheduling natively; replies tracked via webhooks into reply_events.'
+}
+
+// ─────────────────────────────────────────────
+// TABLE 5 — EMAIL_DRAFTS
+// ─────────────────────────────────────────────
+Table email_drafts {
+  id                  uuid        [primary key, default: `gen_random_uuid()`]
+  lead_id             uuid        [not null, ref: > leads.id]
+  campaign_id         uuid        [not null, ref: > campaigns.id]
+  subject             text        [note: 'AI-generated (LLM via OpenRouter) — "Use AI" button in campaign UI']
+  body                text        [note: 'Personalization text → {{personalization}} in the Instantly template']
+  status              varchar     [not null, default: 'generating', note: 'generating | draft | approved | rejected | sent | failed']
+  reviewed_by         uuid        [note: 'NULL if human_in_loop = false']
+  approved_at         timestamptz
+  rejection_reason    text
+  created_at          timestamptz [not null, default: `now()`]
+  updated_at          timestamptz
+
+  indexes {
+    lead_id
+    campaign_id
+    status
+  }
+}
+
+// ─────────────────────────────────────────────
+// TABLE 6 — REPLY_EVENTS (append-only webhook log)
+// ─────────────────────────────────────────────
+Table reply_events {
+  id                  uuid        [primary key, default: `gen_random_uuid()`]
+  event_uid           text        [not null, unique, note: 'hash(received_at + lead_email + event_type) — idempotency guard against Instantly webhook retries']
+  campaign_lead_id    uuid        [not null, ref: > campaign_leads.id]
+  campaign_id         uuid        [not null, ref: > campaigns.id]
+  event_type          text        [not null, note: 'reply_received | email_sent | email_opened | email_link_clicked | auto_reply_received | email_bounced | lead_unsubscribed | campaign_completed | account_error | lead_neutral | lead_interested | lead_not_interested | lead_meeting_booked | lead_meeting_completed | lead_closed | lead_out_of_office | lead_wrong_person']
+  reply_body          text
+  intent_classified   text        [note: 'LLM: hot | cold | neutral | ooo | wrong_person']
+  instantly_lead_id   text
+  received_at         timestamptz [not null]
+  created_at          timestamptz [not null, default: `now()`]
+
+  indexes {
+    event_uid [unique]
+    campaign_lead_id
+    campaign_id
+    event_type
+  }
+
+  note: 'On lead_unsubscribed / strong negative replies at org level → set organizations.unsubscribed = true (blocks all leads of that org). On email_bounced → crm_status = bounced.'
+}

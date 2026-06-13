@@ -1,0 +1,78 @@
+import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/auth/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ok, fail } from "@/lib/api-response";
+import { CreateOrgSchema, OrgListQuerySchema } from "@/lib/validators/organizations";
+
+function normalizeDomain(raw: string): string {
+  return raw
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+export async function GET(req: NextRequest) {
+  try { await requireAuth(req); } catch (r) { return r as Response; }
+
+  const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
+  const parsed = OrgListQuerySchema.safeParse(sp);
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
+
+  const { search, industry, has_scraped, unsubscribed, page, limit } = parsed.data;
+  const db = createAdminClient();
+
+  let q = db.from("organizations").select("*", { count: "exact" });
+
+  if (search) q = q.or(`name.ilike.%${search}%,domain.ilike.%${search}%`);
+  if (industry) q = q.eq("industry", industry);
+  if (has_scraped !== undefined) q = q.eq("has_scraped", has_scraped === "true");
+  if (unsubscribed !== undefined) q = q.eq("unsubscribed", unsubscribed === "true");
+
+  q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
+
+  const { data, error, count } = await q;
+  if (error) return fail(500, "INTERNAL", error.message);
+
+  return ok({ organizations: data, total: count, page, limit });
+}
+
+export async function POST(req: NextRequest) {
+  let user: { id: string };
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+
+  const body = await req.json().catch(() => null);
+  const parsed = CreateOrgSchema.safeParse(body);
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+
+  const { name, domain, ...rest } = parsed.data;
+  const db = createAdminClient();
+
+  const normalizedDomain = domain ? normalizeDomain(domain) : null;
+
+  // Dedup: try domain first, then name
+  if (normalizedDomain) {
+    const { data: existing } = await db
+      .from("organizations")
+      .select("id")
+      .eq("domain", normalizedDomain)
+      .maybeSingle();
+    if (existing) return fail(409, "DUPLICATE", "Organization with this domain already exists", { id: existing.id });
+  } else {
+    const { data: existing } = await db
+      .from("organizations")
+      .select("id")
+      .ilike("name", name)
+      .maybeSingle();
+    if (existing) return fail(409, "DUPLICATE", "Organization with this name already exists", { id: existing.id });
+  }
+
+  const { data, error } = await db
+    .from("organizations")
+    .insert({ name, domain: normalizedDomain, ...rest, created_at: new Date().toISOString() })
+    .select()
+    .single();
+
+  if (error) return fail(500, "INTERNAL", error.message);
+  return ok(data);
+}
