@@ -10,7 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
 import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
-import { fetchLead, patchLead } from "@/lib/api-client";
+import { fetchLead, patchLead, rescrapeOrg } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -258,11 +258,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
     setRetrying(true);
     try {
       const tok = await getToken();
-      await fetch("/api/enrich/retry", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ org_id: display.orgId }),
-      });
+      await rescrapeOrg(tok, display.orgId);
       setTimeout(async () => {
         if (display.orgId) await fetchEnrichStatus(display.orgId);
         if (lead) await fetchFresh(lead);
@@ -493,7 +489,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     <EnrichStageBadge stage={currentStage} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {(currentStage === "failed" || currentStage === "queued") && attempts < 3 && (
+                    {(currentStage === "failed" || currentStage === "queued" || currentStage === null) && attempts < 3 && (
                       <Button
                         size="sm" variant="outline"
                         className="h-6 px-2 text-[11px] gap-1"
@@ -501,7 +497,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         disabled={retrying}
                       >
                         <RotateCcw className={cn("size-3", retrying && "animate-spin")} />
-                        {currentStage === "queued" ? "Trigger" : "Retry"}
+                        {currentStage === "failed" ? "Retry" : "Enrich"}
                       </Button>
                     )}
                     <button
@@ -561,10 +557,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </p>
                   )}
                   {enrichData?.logs && enrichData.logs.length > 0 && (
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-                        Enrichment Log
-                      </p>
+                    <Section icon={Clock} label="Enrichment Log">
                       <div>
                         {enrichData.logs.map((log, i) => (
                           <TimelineItem
@@ -574,7 +567,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                           />
                         ))}
                       </div>
-                    </div>
+                    </Section>
                   )}
                 </div>
               </div>

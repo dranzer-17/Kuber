@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 
 export async function POST(
   req: NextRequest,
@@ -33,7 +34,7 @@ export async function POST(
   }).eq("id", id);
 
   if (process.env.INTERNAL_SECRET) {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const baseUrl = internalAppBaseUrl(req);
     fetch(`${baseUrl}/api/enrich/generate-drafts`, {
       method: "POST",
       headers: {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { complete, buildDraftSystem, type DraftOutput } from "@/lib/services/llm";
+import { complete, type DraftOutput } from "@/lib/services/llm";
+import { getSystemPrompt } from "@/lib/services/settings";
 import { KUBER_CONTEXT } from "@/lib/constants";
 
 const DraftSchema = z.object({ subject: z.string(), body: z.string() });
@@ -43,7 +44,7 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
-function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?: string): string {
+function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?: string, aiPromptContext?: string): string {
   const org = unwrapOrg(lead.organizations);
   const lines = [
     `Campaign: "${campaignName}"`,
@@ -59,6 +60,7 @@ function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
     `Kuber context: ${KUBER_CONTEXT}`,
   ];
+  if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
   if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
   return lines.join("\n");
 }
@@ -72,28 +74,40 @@ export async function generateOneDraft(
   campaignName: string,
   userId?: string,
   customInstruction?: string,
+  aiPromptContext?: string,
+  existingDraftId?: string,
 ): Promise<{ ok: true; draftId: string; status: string } | { ok: false; reason: string }> {
   const lead = unwrapLead(target.leads);
   if (!lead) return { ok: false, reason: "Lead not found" };
   if (!lead.email) return { ok: false, reason: "Lead has no email" };
 
-  const { data: draft, error: dErr } = await db
-    .from("email_drafts")
-    .insert({
-      lead_id: lead.id,
-      campaign_id: campaignId,
-      status: "generating",
-      created_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
+  let draftId = existingDraftId;
 
-  if (dErr) return { ok: false, reason: dErr.message };
+  if (!draftId) {
+    const { data: draft, error: dErr } = await db
+      .from("email_drafts")
+      .insert({
+        lead_id: lead.id,
+        campaign_id: campaignId,
+        status: "generating",
+        created_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+
+    if (dErr || !draft) return { ok: false, reason: dErr?.message ?? "Failed to create draft" };
+    draftId = draft.id;
+  }
+
+  if (!draftId) return { ok: false, reason: "No draft row created" };
+
+  const activeDraftId = draftId;
 
   try {
+    const systemPrompt = await getSystemPrompt(db);
     const { json } = await complete<DraftOutput>({
-      system: buildDraftSystem(),
-      user: buildUserPrompt(lead, campaignName, customInstruction),
+      system: systemPrompt,
+      user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext),
     });
 
     const validated = DraftSchema.safeParse(json);
@@ -108,23 +122,23 @@ export async function generateOneDraft(
       status: finalStatus,
       ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: userId ?? null } : {}),
       updated_at: now,
-    }).eq("id", draft.id);
+    }).eq("id", activeDraftId);
 
     await db.from("campaign_leads").update({
-      draft_id: draft.id,
+      draft_id: activeDraftId,
       crm_status: finalStatus === "approved" ? "approved" : "draft",
       updated_at: now,
     }).eq("id", target.id);
 
-    return { ok: true, draftId: draft.id, status: finalStatus };
+    return { ok: true, draftId: activeDraftId, status: finalStatus };
   } catch (err) {
     const now = new Date().toISOString();
     await db.from("email_drafts").update({
       status: "failed",
       updated_at: now,
-    }).eq("id", draft.id);
+    }).eq("id", activeDraftId);
     await db.from("campaign_leads").update({
-      draft_id: draft.id,
+      draft_id: activeDraftId,
       crm_status: "draft",
       updated_at: now,
     }).eq("id", target.id);

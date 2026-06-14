@@ -19,7 +19,9 @@ async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
   name: string,
   domain: string | undefined,
-  userId: string
+  userId: string,
+  industry?: string,
+  country?: string,
 ) {
   const normalizedDomain = domain ? normalizeDomain(domain) : null;
 
@@ -29,7 +31,16 @@ async function upsertOrg(
       .select("id")
       .eq("domain", normalizedDomain)
       .maybeSingle();
-    if (existing) return existing.id as string;
+    if (existing) {
+      if (industry || country) {
+        await db.from("organizations").update({
+          ...(industry ? { industry } : {}),
+          ...(country ? { country } : {}),
+          updated_at: new Date().toISOString(),
+        }).eq("id", existing.id);
+      }
+      return existing.id as string;
+    }
   }
 
   const { data: byName } = await db
@@ -38,13 +49,25 @@ async function upsertOrg(
     .ilike("name", name)
     .is("apollo_org_id", null)
     .maybeSingle();
-  if (byName) return byName.id as string;
+  if (byName) {
+    if (industry || country || normalizedDomain) {
+      await db.from("organizations").update({
+        ...(normalizedDomain ? { domain: normalizedDomain } : {}),
+        ...(industry ? { industry } : {}),
+        ...(country ? { country } : {}),
+        updated_at: new Date().toISOString(),
+      }).eq("id", byName.id);
+    }
+    return byName.id as string;
+  }
 
   const { data: created, error } = await db
     .from("organizations")
     .insert({
       name,
       domain: normalizedDomain,
+      ...(industry ? { industry } : {}),
+      ...(country ? { country } : {}),
       enrichment_stage: normalizedDomain ? "queued" : null,
       enrichment_status: normalizedDomain ? "SCRAPE_QUEUED" : null,
       enrichment_attempts: 0,
@@ -71,8 +94,8 @@ export async function GET(req: NextRequest) {
   let q = db
     .from("leads")
     .select(
-      `*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to),
-       campaign_leads(crm_status, created_at, campaigns(id, name))`,
+      `*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to, last_error),
+       campaign_leads(crm_status, interest_status, created_at, campaigns(id, name))`,
       { count: "exact" }
     );
 
@@ -89,11 +112,12 @@ export async function GET(req: NextRequest) {
 
   // Derive latest crm_status from campaign_leads (most recent campaign)
   const leads = (data ?? []).map((l) => {
-    const cls = (l.campaign_leads ?? []) as { crm_status: string; created_at: string; campaigns: { id: string; name: string } | null }[];
+    const cls = (l.campaign_leads ?? []) as { crm_status: string; interest_status: number | null; created_at: string; campaigns: { id: string; name: string } | null }[];
     const sorted = [...cls].sort((a, b) => b.created_at.localeCompare(a.created_at));
     return {
       ...l,
       crm_status: sorted[0]?.crm_status ?? "new",
+      interest_status: sorted[0]?.interest_status ?? null,
       campaign_list: cls
         .filter((cl) => cl.campaigns)
         .map((cl) => ({ id: cl.campaigns!.id, name: cl.campaigns!.name, crm_status: cl.crm_status })),
@@ -111,7 +135,7 @@ export async function POST(req: NextRequest) {
   const parsed = CreateLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { organization_name, organization_domain, email, ...leadFields } = parsed.data;
+  const { organization_name, organization_domain, organization_industry, organization_country, email, ...leadFields } = parsed.data;
   const db = createAdminClient();
 
   // Check email uniqueness
@@ -124,7 +148,7 @@ export async function POST(req: NextRequest) {
 
   let organizationId: string;
   try {
-    organizationId = await upsertOrg(db, organization_name, organization_domain, user.id);
+    organizationId = await upsertOrg(db, organization_name, organization_domain, user.id, organization_industry, organization_country);
   } catch (e) {
     return fail(500, "INTERNAL", (e as Error).message);
   }

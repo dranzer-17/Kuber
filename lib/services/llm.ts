@@ -28,14 +28,20 @@ async function parseJsonResponse(text: string): Promise<object> {
   }
 }
 
+function openRouterHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+    "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    "X-Title": "Kuber Polyplast",
+  };
+}
+
 async function callOpenRouter(opts: CompletionOpts): Promise<object> {
   const model = process.env.LLM_PRIMARY_MODEL ?? "anthropic/claude-sonnet-4-5";
   const res = await fetchWithRetry("llm", OPENROUTER_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-    },
+    headers: openRouterHeaders(),
     body: JSON.stringify({
       model,
       messages: [
@@ -90,27 +96,35 @@ async function callOpenAI(opts: CompletionOpts): Promise<object> {
 const NON_RETRYABLE_STATUSES = new Set([401, 402, 403]);
 
 export async function complete<T = object>(opts: CompletionOpts): Promise<LlmResult<T>> {
-  const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
-  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasOpenRouter = !!process.env.OPENROUTER_API_KEY?.trim();
+  const hasOpenAI = !!process.env.OPENAI_API_KEY?.trim();
+  let openRouterError: Error | null = null;
 
   if (hasOpenRouter) {
     try {
       const json = (await callOpenRouter(opts)) as T;
       return { json, tier: 1 };
     } catch (err) {
+      openRouterError = err instanceof Error ? err : new Error(String(err));
       const status = (err as { status?: number }).status;
-      if (!status || NON_RETRYABLE_STATUSES.has(status)) {
-        // fall through to tier 2
-      } else {
-        throw err;
+      // Retryable HTTP errors (429, 5xx) should surface immediately.
+      if (status && !NON_RETRYABLE_STATUSES.has(status)) {
+        throw openRouterError;
       }
+      // 401/402/403 or non-HTTP errors (e.g. JSON parse): try OpenAI fallback if configured.
     }
   }
 
   if (hasOpenAI) {
-    const json = (await callOpenAI(opts)) as T;
-    return { json, tier: 2 };
+    try {
+      const json = (await callOpenAI(opts)) as T;
+      return { json, tier: 2 };
+    } catch (err) {
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
+
+  if (openRouterError) throw openRouterError;
 
   throw new Error("No LLM provider configured — set OPENROUTER_API_KEY or OPENAI_API_KEY");
 }

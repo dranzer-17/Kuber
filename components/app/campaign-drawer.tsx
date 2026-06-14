@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
-  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save,
+  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown,
 } from "lucide-react";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,9 @@ import {
   editDraft,
   regenerateDraft,
   sendApprovedLeads,
+  fetchDraftHistory,
+  restoreDraftVersion,
+  reopenDraft,
 } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import type { Campaign } from "@/components/app/create-campaign-modal";
@@ -118,6 +122,10 @@ export function CampaignDetail({
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
   const [leadsSort, setLeadsSort] = useState<CampaignLeadsSort>("az");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
+  const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -165,7 +173,23 @@ export function CampaignDetail({
     }
     setRegenOpen(false);
     setRegenQuery("");
+    setHistoryOpen(false);
+    setPreviewVersionId(null);
+    setError("");
   }, [selected?.id, selected?.email_drafts?.subject, selected?.email_drafts?.body]);
+
+  useEffect(() => {
+    if (!selected?.email_drafts?.id) { setVersions([]); return; }
+    async function loadHistory() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { versions: v } = await fetchDraftHistory(session.access_token, selected!.email_drafts!.id);
+        setVersions(v);
+      } catch { setVersions([]); }
+    }
+    void loadHistory();
+  }, [selected?.email_drafts?.id]);
 
   const activeDays = Object.entries(campaign.sendDays ?? {})
     .filter(([, v]) => v)
@@ -177,7 +201,7 @@ export function CampaignDetail({
   ).length;
   const isGenerating = progress ? (progress.generating + progress.pending) > 0 : false;
   const progressPct = progress && progress.total > 0
-    ? Math.round(((progress.total - progress.pending - progress.generating) / progress.total) * 100)
+    ? Math.round(((progress.draft + progress.approved + progress.sent + progress.failed) / progress.total) * 100)
     : 0;
 
   function getDisplayStatus(cl: CampaignLead): string {
@@ -222,6 +246,46 @@ export function CampaignDetail({
       setSaving(false);
     }
   }
+
+  async function handleReopen() {
+    if (!selected?.email_drafts?.id) return;
+    setCertifying(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await reopenDraft(session.access_token, selected.email_drafts.id);
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCertifying(false);
+    }
+  }
+
+  async function handleRestoreVersion(versionId: string) {
+    setRestoring(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await restoreDraftVersion(session.access_token, versionId);
+      setPreviewVersionId(null);
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  function loadVersionPreview(v: { id: string; subject: string | null; body: string | null }) {
+    setPreviewVersionId(v.id);
+    setEditSubject(v.subject ?? "");
+    setEditBody(v.body ?? "");
+  }
+
+  const isPreviewingHistory = previewVersionId !== null && previewVersionId !== selected?.email_drafts?.id;
 
   async function handleCertifyOne(draftId: string) {
     setCertifying(true);
@@ -645,12 +709,59 @@ export function CampaignDetail({
                   </div>
                 ) : selected.email_drafts ? (
                   <div className="space-y-4 rounded-xl border border-border bg-card p-6">
+                    {versions.length > 1 && (
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryOpen((o) => !o)}
+                          className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <History className="size-3.5" />
+                          Version history
+                          <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
+                        </button>
+                        {historyOpen && (
+                          <div className="flex flex-wrap gap-2">
+                            {versions.map((v) => (
+                              <button
+                                key={v.id}
+                                type="button"
+                                onClick={() => loadVersionPreview(v)}
+                                className={cn(
+                                  "text-xs rounded-lg border px-2.5 py-1.5 transition-colors",
+                                  (previewVersionId === v.id || (!previewVersionId && v.id === selected.email_drafts?.id))
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
+                                )}
+                              >
+                                v{v.version} · {format(new Date(v.created_at), "MMM d")}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {isPreviewingHistory && (
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-amber-400">Viewing historical version (read-only)</p>
+                            <Button size="sm" variant="outline" disabled={restoring} onClick={() => handleRestoreVersion(previewVersionId!)}>
+                              {restoring ? <Loader2 className="size-3 animate-spin" /> : "Restore this version"}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => {
+                              setPreviewVersionId(null);
+                              setEditSubject(selected.email_drafts?.subject ?? "");
+                              setEditBody(selected.email_drafts?.body ?? "");
+                            }}>
+                              Back to current
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
                       <Input
                         value={editSubject}
                         onChange={(e) => setEditSubject(e.target.value)}
-                        disabled={selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
+                        disabled={isPreviewingHistory || selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
                         className="font-medium text-base"
                       />
                     </div>
@@ -659,14 +770,14 @@ export function CampaignDetail({
                       <Textarea
                         value={editBody}
                         onChange={(e) => setEditBody(e.target.value)}
-                        disabled={selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
+                        disabled={isPreviewingHistory || selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
                         rows={14}
                         className="text-sm leading-relaxed resize-none"
                       />
                     </div>
 
                     <div className="flex flex-wrap gap-2 pt-2">
-                      {selected.email_drafts.status === "draft" && (
+                      {selected.email_drafts.status === "draft" && !isPreviewingHistory && (
                         <>
                           <Button variant="outline" className="gap-1.5" disabled={saving} onClick={handleSaveEdit}>
                             {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
@@ -678,12 +789,17 @@ export function CampaignDetail({
                           </Button>
                         </>
                       )}
-                      {selected.email_drafts.status === "approved" && (
-                        <p className="text-sm text-green-400 flex items-center gap-1.5">
-                          <CheckCircle2 className="size-4" /> Certified — ready to send
-                        </p>
+                      {selected.email_drafts.status === "approved" && !isPreviewingHistory && (
+                        <>
+                          <p className="text-sm text-green-400 flex items-center gap-1.5">
+                            <CheckCircle2 className="size-4" /> Certified — ready to send
+                          </p>
+                          <Button variant="outline" className="gap-1.5" disabled={certifying} onClick={handleReopen}>
+                            <RotateCcw className="size-3.5" /> Reopen for editing
+                          </Button>
+                        </>
                       )}
-                      {["draft", "failed", "rejected"].includes(selected.email_drafts.status) && (
+                      {["draft", "failed", "rejected"].includes(selected.email_drafts.status) && !isPreviewingHistory && (
                         <Button variant="outline" className="gap-1.5" onClick={() => setRegenOpen((o) => !o)}>
                           <RotateCcw className="size-3.5" /> Regenerate
                         </Button>

@@ -1,7 +1,7 @@
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  PIPELINE_STAGES,
+  KANBAN_STAGES,
   STEP_DESCRIPTIONS,
   STATUS_ORDER,
   type LeadScore,
@@ -9,14 +9,14 @@ import {
 } from "@/lib/leads";
 
 const STATUS_STYLES: Record<LeadStatus, string> = {
+  "Input Required": "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
   New: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
   Enriching: "bg-amber-500/15 text-amber-400 border-amber-500/25",
   Enriched: "bg-blue-500/15 text-blue-400 border-blue-500/25",
   "Draft Ready": "bg-violet-500/15 text-violet-400 border-violet-500/25",
-  "In Review": "bg-orange-500/15 text-orange-400 border-orange-500/25",
   Approved: "bg-cyan-500/15 text-cyan-400 border-cyan-500/25",
-  Sent: "bg-teal-500/15 text-teal-400 border-teal-500/25",
-  Replied: "bg-green-500/15 text-green-400 border-green-500/25",
+  Won: "bg-green-500/15 text-green-400 border-green-500/25",
+  Closed: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
 };
 
 export function StatusBadge({ status }: { status: LeadStatus }) {
@@ -54,13 +54,14 @@ export function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "md"
 }
 
 export function PipelineStepper({ currentStatus }: { currentStatus: LeadStatus }) {
-  const current = STATUS_ORDER[currentStatus];
+  const stepperStatus = currentStatus === "Input Required" ? "New" : currentStatus;
+  const current = STATUS_ORDER[stepperStatus];
   return (
     <div>
-      {PIPELINE_STAGES.map((stage, i) => {
+      {KANBAN_STAGES.map((stage, i) => {
         const done = i <= current;
         const active = i === current;
-        const last = i === PIPELINE_STAGES.length - 1;
+        const last = i === KANBAN_STAGES.length - 1;
         return (
           <div key={stage} className="flex gap-3">
             <div className="flex flex-col items-center">
@@ -79,16 +80,11 @@ export function PipelineStepper({ currentStatus }: { currentStatus: LeadStatus }
             <div className={cn("pb-4", last && "pb-0")}>
               <p className={cn(
                 "text-xs font-semibold",
-                done && "text-muted-foreground",
-                active && "text-foreground",
-                !done && !active && "text-muted-foreground/30",
-              )}>{stage}</p>
-              <p className={cn(
-                "text-xs mt-0.5",
-                done && "text-muted-foreground/40",
-                active && "text-muted-foreground",
-                !done && !active && "text-muted-foreground/20",
-              )}>{STEP_DESCRIPTIONS[stage]}</p>
+                active ? "text-foreground" : done ? "text-muted-foreground" : "text-muted-foreground/40",
+              )}>
+                {stage}
+              </p>
+              <p className="text-[11px] text-muted-foreground/60 mt-0.5">{STEP_DESCRIPTIONS[stage]}</p>
             </div>
           </div>
         );

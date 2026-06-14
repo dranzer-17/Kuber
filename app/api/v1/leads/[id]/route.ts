@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: lead, error } = await db
     .from("leads")
-    .select("*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to)")
+    .select("*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to, last_error)")
     .eq("id", id)
     .maybeSingle();
 
@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: cls } = await db
     .from("campaign_leads")
-    .select("crm_status, campaign_id, created_at, campaigns(id, name)")
+    .select("crm_status, interest_status, campaign_id, created_at, campaigns(id, name)")
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
 
@@ -31,8 +31,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   }).filter(Boolean) as { id: string; name: string; crm_status: string }[];
 
   const latestCrm = cls?.[0]?.crm_status ?? "new";
+  const interestStatus = cls?.[0]?.interest_status ?? null;
 
-  return ok({ ...lead, crm_status: latestCrm, campaign_list: campaignList });
+  return ok({ ...lead, crm_status: latestCrm, interest_status: interestStatus, campaign_list: campaignList });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

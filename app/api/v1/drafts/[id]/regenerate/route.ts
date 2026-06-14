@@ -23,19 +23,19 @@ export async function POST(
 
   const { data: oldDraft } = await db
     .from("email_drafts")
-    .select("id, status, lead_id, campaign_id")
+    .select("id, status, lead_id, campaign_id, version")
     .eq("id", id)
     .maybeSingle();
 
   if (!oldDraft) return fail(404, "NOT_FOUND", "Draft not found");
 
-  if (!["draft", "failed", "rejected"].includes(oldDraft.status)) {
+  if (!["draft", "failed", "rejected", "approved"].includes(oldDraft.status)) {
     return fail(409, "CONFLICT", `Cannot regenerate a draft with status '${oldDraft.status}'`);
   }
 
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, name, human_in_loop")
+    .select("id, name, human_in_loop, ai_prompt_context")
     .eq("id", oldDraft.campaign_id)
     .maybeSingle();
 
@@ -56,16 +56,32 @@ export async function POST(
 
   if (!cl) return fail(404, "NOT_FOUND", "Campaign lead not found");
 
-  await db.from("campaign_leads").update({
-    draft_id: null,
-    updated_at: new Date().toISOString(),
-  }).eq("id", cl.id);
-
   await db.from("email_drafts").update({
     status: "rejected",
     rejection_reason: "superseded by regeneration",
     updated_at: new Date().toISOString(),
   }).eq("id", id);
+
+  const nextVersion = (oldDraft.version ?? 1) + 1;
+  const { data: newDraftRow, error: insertErr } = await db
+    .from("email_drafts")
+    .insert({
+      lead_id: oldDraft.lead_id,
+      campaign_id: oldDraft.campaign_id,
+      status: "generating",
+      version: nextVersion,
+      parent_draft_id: oldDraft.id,
+      created_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !newDraftRow) return fail(500, "INTERNAL", insertErr?.message ?? "Failed to create draft row");
+
+  await db.from("campaign_leads").update({
+    draft_id: newDraftRow.id,
+    updated_at: new Date().toISOString(),
+  }).eq("id", cl.id);
 
   const result = await generateOneDraft(
     db,
@@ -75,13 +91,15 @@ export async function POST(
     campaign.name,
     user.id,
     parsed.data.custom_instruction,
+    campaign.ai_prompt_context ?? undefined,
+    newDraftRow.id,
   );
 
   if (!result.ok) return fail(500, "GENERATION_FAILED", result.reason);
 
   const { data: newDraft } = await db
     .from("email_drafts")
-    .select("id, subject, body, status")
+    .select("id, subject, body, status, version")
     .eq("id", result.draftId)
     .single();
 

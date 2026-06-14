@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Building2, Globe2, X, Loader2, Pencil, Save,
-  AlertCircle, MapPin, Factory,
+  AlertCircle, MapPin, Factory, Users, Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fetchOrg, patchOrg } from "@/lib/api-client";
+import { fetchOrg, patchOrg, fetchLeadsByOrg } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ interface OrgData {
   industry: string | null;
   city: string | null;
   country: string | null;
+  leads?: Array<{ id: string; first_name: string | null; last_name: string | null; title: string | null; email: string | null }>;
 }
 
 type OrgForm = {
@@ -50,12 +51,20 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 }
 
 function Section({
-  icon: Icon, label, children,
-}: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
+  icon: Icon, label, children, action,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-        <Icon className="size-3" /> {label}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <Icon className="size-3" /> {label}
+        </div>
+        {action}
       </div>
       <div className="space-y-2.5">{children}</div>
     </div>
@@ -64,9 +73,10 @@ function Section({
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export function OrgDrawer({ orgId, onClose }: {
+export function OrgDrawer({ orgId, onClose, onAddLead }: {
   orgId: string | null;
   onClose: () => void;
+  onAddLead?: (org: { id: string; name: string; industry: string; domain: string; country: string; leads: Array<{ id: string; firstName: string; lastName: string; email: string; jobTitle: string }> }) => void;
 }) {
   const [org,     setOrg    ] = useState<OrgData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -88,7 +98,17 @@ export function OrgDrawer({ orgId, onClose }: {
     try {
       const tok = await getToken();
       const data = await fetchOrg(tok, id) as unknown as OrgData;
-      setOrg(data);
+      const linkedLeads = await fetchLeadsByOrg(tok, id);
+      setOrg({
+        ...data,
+        leads: linkedLeads.map((l) => ({
+          id: l.id,
+          first_name: l.firstName,
+          last_name: l.lastName,
+          title: l.jobTitle,
+          email: l.email,
+        })),
+      });
       setForm({
         name:        data.name        ?? "",
         domain:      data.domain      ?? "",
@@ -303,6 +323,50 @@ export function OrgDrawer({ orgId, onClose }: {
                       <p className="text-sm text-muted-foreground leading-relaxed">{org.sells_to}</p>
                     </Section>
                   )}
+
+                  <Section
+                    icon={Users}
+                    label="People"
+                    action={onAddLead && org ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-[10px] gap-1"
+                        onClick={() => onAddLead({
+                          id: org.id,
+                          name: org.name ?? "",
+                          industry: org.industry ?? "",
+                          domain: org.domain ?? "",
+                          country: org.country ?? "",
+                          leads: (org.leads ?? []).map((l) => ({
+                            id: l.id,
+                            firstName: l.first_name ?? "",
+                            lastName: l.last_name ?? "",
+                            email: l.email ?? "",
+                            jobTitle: l.title ?? "",
+                          })),
+                        })}
+                      >
+                        <Plus className="size-3" /> Add lead
+                      </Button>
+                    ) : undefined}
+                  >
+                    {(org.leads ?? []).length === 0 ? (
+                      <p className="text-sm text-muted-foreground italic">No leads linked to this org.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {(org.leads ?? []).map((lead) => (
+                          <div key={lead.id} className="rounded-lg border border-border bg-card px-3 py-2">
+                            <p className="text-sm font-medium">
+                              {[lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unnamed"}
+                            </p>
+                            {lead.title && <p className="text-xs text-muted-foreground">{lead.title}</p>}
+                            {lead.email && <p className="text-xs text-blue-400">{lead.email}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Section>
                 </>
               )}
             </>

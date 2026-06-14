@@ -11,9 +11,10 @@ export const CreateLeadSchema = z.object({
   city: z.string().optional(),
   state: z.string().optional(),
   country: z.string().optional(),
-  // org
   organization_name: z.string().min(1),
   organization_domain: z.string().optional(),
+  organization_industry: z.string().optional(),
+  organization_country: z.string().optional(),
 });
 
 export const PatchLeadSchema = z.object({

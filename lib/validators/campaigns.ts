@@ -10,6 +10,8 @@ export const CreateCampaignSchema = z.object({
   send_days: z.record(z.string(), z.boolean()).optional(),
   schedule_timezone: z.string().optional(),
   daily_limit: z.number().int().min(1).max(500).default(30),
+  ai_prompt_context: z.string().optional(),
+  sender_name: z.string().optional(),
   follow_up_pattern: z
     .array(z.object({ step: z.number().int(), delay: z.number().int().min(0) }))
     .optional(),

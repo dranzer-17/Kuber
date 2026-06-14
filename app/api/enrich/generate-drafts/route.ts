@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 import {
   fetchDraftTargets,
   generateOneDraft,
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, name, human_in_loop, status")
+    .select("id, name, human_in_loop, status, ai_prompt_context")
     .eq("id", campaignId)
     .maybeSingle();
 
@@ -59,6 +60,9 @@ export async function POST(req: NextRequest) {
       campaignId,
       campaign.human_in_loop,
       campaign.name,
+      undefined,
+      undefined,
+      campaign.ai_prompt_context ?? undefined,
     );
     if (result.ok) succeeded++;
     else failed++;
@@ -67,7 +71,7 @@ export async function POST(req: NextRequest) {
   const remaining = await countPendingDrafts(db, campaignId);
 
   if (remaining > 0) {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const baseUrl = internalAppBaseUrl(req);
     fetch(`${baseUrl}/api/enrich/generate-drafts`, {
       method: "POST",
       headers: {

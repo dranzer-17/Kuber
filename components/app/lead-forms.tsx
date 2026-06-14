@@ -11,12 +11,12 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { ALLOWED_KEYWORDS, LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES } from "@/lib/constants";
-import { apolloSearch, importExcelDirect, createLead } from "@/lib/api-client";
+import { apolloSearch, importExcelDirect, createLead, patchLead, patchOrg } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 
 // ─── TagInput — combobox with pill selection ──────────────────────────────────
 
-function TagInput({
+export function TagInput({
   label,
   pills,
   suggestions,
@@ -579,37 +579,99 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
 
 // ─── Manual ───────────────────────────────────────────────────────────────────
 
-export function ManualForm({ onImport }: { onImport: (n: number) => void }) {
-  const [firstName, setFirstName] = useState("");
-  const [lastName,  setLastName ] = useState("");
-  const [email,     setEmail    ] = useState("");
-  const [company,   setCompany  ] = useState("");
-  const [domain,    setDomain   ] = useState("");
-  const [jobTitle,  setJobTitle ] = useState("");
-  const [country,   setCountry  ] = useState("");
-  const [saving,    setSaving   ] = useState(false);
-  const [saved,     setSaved    ] = useState(false);
-  const [error,     setError    ] = useState("");
+type OrgFields = { name: string; industry: string; domain: string; country: string };
+type LeadEntry = { firstName: string; lastName: string; email: string; jobTitle: string; id?: string };
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
+const BLANK_LEAD = (): LeadEntry => ({ firstName: "", lastName: "", email: "", jobTitle: "" });
+
+export interface ManualFormProps {
+  onImport: (n: number) => void;
+  prefillOrg?: { name: string; industry: string; domain: string; country: string; id?: string };
+  prefillLeads?: Array<{ firstName: string; lastName: string; email: string; jobTitle: string; id?: string }>;
+  editMode?: boolean;
+}
+
+export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = false }: ManualFormProps) {
+  const [org, setOrg] = useState<OrgFields>({
+    name: prefillOrg?.name ?? "",
+    industry: prefillOrg?.industry ?? "",
+    domain: prefillOrg?.domain ?? "",
+    country: prefillOrg?.country ?? "",
+  });
+  const [leads, setLeads] = useState<LeadEntry[]>(
+    prefillLeads?.length ? prefillLeads.map((l) => ({ ...l })) : [BLANK_LEAD()],
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  function addLead() {
+    setLeads((prev) => [...prev, BLANK_LEAD()]);
+  }
+
+  function removeLead(index: number) {
+    if (leads.length <= 1) return;
+    setLeads((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateLead(index: number, field: keyof LeadEntry, value: string) {
+    setLeads((prev) => prev.map((l, i) => i === index ? { ...l, [field]: value } : l));
+  }
+
+  async function handleSaveAll() {
+    if (!org.name.trim()) { setError("Organization name is required."); return; }
+    if (!org.domain.trim()) { setError("Company website / domain is required."); return; }
+    for (const l of leads) {
+      if (!l.firstName.trim()) { setError("Each lead needs a first name."); return; }
+      if (!l.email.trim()) { setError("Each lead needs an email."); return; }
+    }
+
     setSaving(true);
     setError("");
     try {
       const token = await getToken();
-      await createLead(token, {
-        email,
-        first_name: firstName,
-        last_name: lastName || undefined,
-        organization_name: company || "Unknown",
-        organization_domain: domain || undefined,
-        title: jobTitle || undefined,
-        country: country || undefined,
-      });
-      onImport(1);
+      let savedCount = 0;
+
+      if (editMode && prefillOrg?.id) {
+        await patchOrg(token, prefillOrg.id, {
+          name: org.name,
+          domain: org.domain,
+          industry: org.industry || undefined,
+          country: org.country || undefined,
+        });
+      }
+
+      for (const entry of leads) {
+        if (editMode && entry.id) {
+          await patchLead(token, entry.id, {
+            first_name: entry.firstName,
+            last_name: entry.lastName || undefined,
+            email: entry.email,
+            title: entry.jobTitle || undefined,
+            country: org.country || undefined,
+          });
+        } else {
+          await createLead(token, {
+            email: entry.email,
+            first_name: entry.firstName,
+            last_name: entry.lastName || undefined,
+            organization_name: org.name,
+            organization_domain: org.domain,
+            organization_industry: org.industry || undefined,
+            organization_country: org.country || undefined,
+            title: entry.jobTitle || undefined,
+            country: org.country || undefined,
+          });
+        }
+        savedCount++;
+      }
+
+      onImport(savedCount);
       setSaved(true);
-      setFirstName(""); setLastName(""); setEmail(""); setCompany("");
-      setDomain(""); setJobTitle(""); setCountry("");
+      if (!editMode) {
+        setOrg({ name: "", industry: "", domain: "", country: "" });
+        setLeads([BLANK_LEAD()]);
+      }
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
       setError((e as Error).message);
@@ -619,60 +681,78 @@ export function ManualForm({ onImport }: { onImport: (n: number) => void }) {
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-4">
-      <p className="text-sm text-muted-foreground">Add a single lead manually.</p>
+    <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        {editMode ? "Edit organization and linked leads." : "Add leads under one organization."}
+      </p>
 
-      {/* Name */}
-      <div className="grid sm:grid-cols-2 gap-4">
+      {/* Org section */}
+      <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-4">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Organization</p>
         <div className="space-y-1.5">
-          <Label>First name <span className="text-destructive">*</span></Label>
-          <Input required value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Raj" />
+          <Label>Organization name <span className="text-destructive">*</span></Label>
+          <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
         </div>
         <div className="space-y-1.5">
-          <Label>Last name</Label>
-          <Input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Sharma" />
-        </div>
-      </div>
-
-      {/* Email */}
-      <div className="space-y-1.5">
-        <Label>Email <span className="text-destructive">*</span></Label>
-        <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="raj@company.com" />
-      </div>
-
-      {/* Company + Domain */}
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>Company name <span className="text-destructive">*</span></Label>
-          <Input required value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Plastics Ltd." />
+          <Label>Industry</Label>
+          <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
         </div>
         <div className="space-y-1.5">
-          <Label>Company website <span className="text-destructive">*</span></Label>
-          <Input
-            required
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            placeholder="acmeplastics.com"
-          />
+          <Label>Company website / domain <span className="text-destructive">*</span></Label>
+          <Input value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
           <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
-        </div>
-      </div>
-
-      {/* Job title + Country */}
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>Job title</Label>
-          <Input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="VP Procurement" />
         </div>
         <div className="space-y-1.5">
           <Label>Country</Label>
-          <Input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="India" />
+          <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
         </div>
       </div>
 
+      {/* Leads section */}
+      <div className="space-y-3">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">People</p>
+        {leads.map((lead, index) => (
+          <div key={index} className="rounded-xl border border-border bg-card p-4 space-y-3 relative">
+            {leads.length > 1 && (
+              <button
+                type="button"
+                onClick={() => removeLead(index)}
+                className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Remove lead"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>First name <span className="text-destructive">*</span></Label>
+                <Input value={lead.firstName} onChange={(e) => updateLead(index, "firstName", e.target.value)} placeholder="Raj" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Last name</Label>
+                <Input value={lead.lastName} onChange={(e) => updateLead(index, "lastName", e.target.value)} placeholder="Sharma" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email <span className="text-destructive">*</span></Label>
+              <Input type="email" value={lead.email} onChange={(e) => updateLead(index, "email", e.target.value)} placeholder="raj@company.com" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Job title</Label>
+              <Input value={lead.jobTitle} onChange={(e) => updateLead(index, "jobTitle", e.target.value)} placeholder="VP Procurement" />
+            </div>
+          </div>
+        ))}
+        <Button type="button" variant="outline" className="gap-1.5 w-full" onClick={addLead}>
+          <Plus className="size-3.5" /> Add lead
+        </Button>
+      </div>
+
       {error && <p className="text-xs text-destructive">{error}</p>}
-      <Button type="submit" disabled={saving}>{saving ? "Saving..." : "Save lead"}</Button>
-      {saved && <p className="text-sm text-green-400">Lead saved successfully.</p>}
-    </form>
+      <Button type="button" disabled={saving} onClick={handleSaveAll}>
+        {saving ? "Saving..." : editMode ? "Save changes" : "Save all"}
+      </Button>
+      {saved && <p className="text-sm text-green-400">Saved successfully.</p>}
+    </div>
   );
 }

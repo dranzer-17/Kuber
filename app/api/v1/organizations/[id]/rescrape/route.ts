@@ -9,15 +9,52 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params;
   const db = createAdminClient();
 
-  const { data, error } = await db
+  const { data: org, error } = await db
     .from("organizations")
-    .update({ has_scraped: false, updated_at: new Date().toISOString() })
+    .select("id, enrichment_stage, enrichment_attempts")
     .eq("id", id)
-    .select("id")
     .maybeSingle();
 
   if (error) return fail(500, "INTERNAL", error.message);
-  if (!data) return fail(404, "NOT_FOUND", "Organization not found");
+  if (!org) return fail(404, "NOT_FOUND", "Organization not found");
+
+  if (org.enrichment_stage === "scraping") {
+    return fail(409, "IN_PROGRESS", "Enrichment is already running for this organization");
+  }
+  if ((org.enrichment_attempts ?? 0) >= 3) {
+    return fail(409, "MAX_ATTEMPTS", "This organization has reached the maximum retry limit (3 attempts)");
+  }
+
+  if (org.enrichment_stage !== "queued") {
+    await db.from("organizations").update({
+      has_scraped: false,
+      enrichment_stage: "queued",
+      enrichment_status: "SCRAPE_QUEUED",
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    }).eq("id", id);
+
+    await db.from("enrichment_logs").insert({
+      org_id: id,
+      source: "system",
+      event: "SCRAPE_QUEUED",
+      payload: { triggered_by: "rescrape", previous_stage: org.enrichment_stage },
+      created_at: new Date().toISOString(),
+    });
+  } else {
+    await db.from("organizations").update({
+      has_scraped: false,
+      updated_at: new Date().toISOString(),
+    }).eq("id", id);
+  }
+
+  if (process.env.INTERNAL_SECRET) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+      method: "POST",
+      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
+    }).catch(() => {});
+  }
 
   return ok({ id, queued_for_rescrape: true });
 }

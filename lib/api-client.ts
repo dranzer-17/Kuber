@@ -39,10 +39,11 @@ const CRM_STATUS_MAP: Record<string, LeadStatus> = {
   enriched:   "Enriched",
   draft:      "Draft Ready",
   draft_ready: "Draft Ready",
-  in_review:  "In Review",
   approved:   "Approved",
-  sent:       "Sent",
-  replied:    "Replied",
+  sent:       "Approved",
+  replied:    "Closed",
+  won:        "Won",
+  closed:     "Closed",
   skipped:    "New",
   failed:     "New",
 };
@@ -66,6 +67,7 @@ export interface DbLead {
   created_at: string;
   is_likely_to_engage: boolean | null;
   crm_status: string;
+  interest_status?: number | null;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
   organizations: {
@@ -79,10 +81,10 @@ export interface DbLead {
     competitors: string[] | null;
     news_summary: string | null;
     intent_signals: string[] | null;
-    // new enrichment fields
     enrichment_stage: string | null;
     company_description: string | null;
     sells_to: string | null;
+    last_error: string | null;
   } | null;
 }
 
@@ -101,39 +103,56 @@ export interface DbCampaign {
   window_to: string | null;
   schedule_timezone: string | null;
   send_days: Record<string, boolean> | null;
+  ai_prompt_context: string | null;
+  sender_name: string | null;
 }
 
 export function mapDbLead(l: DbLead): Lead {
   const score: LeadScore = l.is_likely_to_engage === true ? "Hot" : l.is_likely_to_engage === false ? "Cold" : "—";
   const org = l.organizations;
+  const enrichmentStage = (org?.enrichment_stage as EnrichmentStage) ?? null;
+  const domain = org?.domain ?? "";
+
+  let status: LeadStatus = (() => {
+    if (l.crm_status && l.crm_status !== "new") {
+      if (l.crm_status === "replied") {
+        const interest = l.interest_status ?? 0;
+        return interest >= 1 ? "Won" : "Closed";
+      }
+      return CRM_STATUS_MAP[l.crm_status] ?? "New";
+    }
+    const stage = org?.enrichment_stage;
+    if (stage === "queued" || stage === "scraping") return "Enriching";
+    if (stage === "done") return "Enriched";
+    return "New";
+  })();
+
+  const email = l.email ?? "";
+  if (!email || (!domain && enrichmentStage !== "done")) {
+    status = "Input Required";
+  }
+
   return {
     id: l.id,
     firstName: l.first_name ?? "",
     lastName: l.last_name ?? "",
-    email: l.email ?? "",
+    email,
     company: org?.name ?? "",
-    domain: org?.domain ?? "",
+    domain,
     jobTitle: l.title ?? l.headline ?? "",
     phone: l.phone ?? "",
     country: l.country ?? "",
-    status: (() => {
-      // If lead has a campaign status beyond "new", honour it
-      if (l.crm_status && l.crm_status !== "new") return CRM_STATUS_MAP[l.crm_status] ?? "New";
-      // Otherwise derive from org enrichment stage
-      const stage = org?.enrichment_stage;
-      if (stage === "queued" || stage === "scraping") return "Enriching" as const;
-      if (stage === "done") return "Enriched" as const;
-      return "New" as const;
-    })(),
+    status,
     score,
     source: SOURCE_MAP[l.lead_source] ?? "Manual",
     campaign: l.campaign_name ?? (l.campaign_list?.[0]?.name ?? ""),
     campaigns: l.campaign_list ?? [],
-    createdAt: l.created_at.slice(0, 10),
+    createdAt: l.created_at,
     orgId: org?.id ?? null,
-    enrichmentStage: (org?.enrichment_stage as EnrichmentStage) ?? null,
+    enrichmentStage,
     companyDescription: org?.company_description ?? org?.description ?? null,
     sellsTo: org?.sells_to ?? null,
+    lastError: org?.last_error ?? null,
     hasScraped: org?.has_scraped ?? false,
     primaryProducts: org?.primary_products ?? [],
     competitors: org?.competitors ?? [],
@@ -161,17 +180,25 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     windowTo: c.window_to ?? "18:00",
     timezone: c.schedule_timezone ?? "Asia/Kolkata",
     sendDays: c.send_days ?? {},
+    aiPromptContext: c.ai_prompt_context ?? undefined,
+    senderName: c.sender_name ?? undefined,
   };
 }
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
-export async function fetchLeads(token: string, params?: { limit?: number; page?: number }): Promise<{ leads: Lead[]; total: number }> {
+export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string }): Promise<{ leads: Lead[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.page) qs.set("page", String(params.page));
+  if (params?.organization_id) qs.set("organization_id", params.organization_id);
   const data = await apiFetch<{ leads: DbLead[]; total: number }>(`/api/v1/leads?${qs}`, {}, token);
   return { leads: data.leads.map(mapDbLead), total: data.total };
+}
+
+export async function fetchLeadsByOrg(token: string, orgId: string): Promise<Lead[]> {
+  const { leads } = await fetchLeads(token, { organization_id: orgId, limit: 200 });
+  return leads;
 }
 
 export async function fetchLead(token: string, id: string): Promise<Lead> {
@@ -199,9 +226,15 @@ export async function patchOrg(token: string, id: string, body: {
   return apiFetch(`/api/v1/organizations/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }
 
+export async function rescrapeOrg(token: string, orgId: string): Promise<{ id: string; queued_for_rescrape: boolean }> {
+  return apiFetch(`/api/v1/organizations/${orgId}/rescrape`, { method: "POST" }, token);
+}
+
 export async function createLead(token: string, body: {
   email: string; first_name?: string; last_name?: string;
-  organization_name: string; organization_domain?: string; title?: string; country?: string;
+  organization_name: string; organization_domain?: string;
+  organization_industry?: string; organization_country?: string;
+  title?: string; country?: string;
 }): Promise<Lead> {
   const data = await apiFetch<DbLead>("/api/v1/leads", { method: "POST", body: JSON.stringify(body) }, token);
   return mapDbLead(data);
@@ -258,11 +291,31 @@ export async function editDraft(token: string, draftId: string, subject: string,
 }
 
 export async function regenerateDraft(token: string, draftId: string, customInstruction?: string): Promise<{
-  draft: { id: string; subject: string | null; body: string | null; status: string };
+  draft: { id: string; subject: string | null; body: string | null; status: string; version?: number };
 }> {
   return apiFetch(`/api/v1/drafts/${draftId}/regenerate`, {
     method: "POST",
     body: JSON.stringify({ custom_instruction: customInstruction }),
+  }, token);
+}
+
+export async function reopenDraft(token: string, draftId: string): Promise<{ id: string; status: string }> {
+  return apiFetch(`/api/v1/drafts/${draftId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "reopen" }),
+  }, token);
+}
+
+export async function fetchDraftHistory(token: string, draftId: string): Promise<{
+  versions: Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>;
+}> {
+  return apiFetch(`/api/v1/drafts/${draftId}/history`, {}, token);
+}
+
+export async function restoreDraftVersion(token: string, draftId: string): Promise<{ id: string; status: string }> {
+  return apiFetch(`/api/v1/drafts/${draftId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "restore" }),
   }, token);
 }
 
@@ -273,6 +326,14 @@ export async function sendApprovedLeads(token: string, campaignId: string, leadI
     method: "POST",
     body: JSON.stringify(leadIds?.length ? { lead_ids: leadIds } : {}),
   }, token);
+}
+
+export async function fetchSettings(token: string): Promise<Record<string, string>> {
+  return apiFetch("/api/v1/settings", {}, token);
+}
+
+export async function patchSettings(token: string, body: Record<string, string>): Promise<Record<string, string>> {
+  return apiFetch("/api/v1/settings", { method: "PATCH", body: JSON.stringify(body) }, token);
 }
 
 // ─── Campaigns ────────────────────────────────────────────────────────────────
@@ -286,6 +347,8 @@ export async function createCampaign(token: string, body: {
   name: string; human_in_loop: boolean;
   daily_limit?: number; window_from?: string; window_to?: string;
   schedule_timezone?: string; send_days?: Record<string, boolean>;
+  send_mode?: "now" | "scheduled"; schedule_start_at?: string;
+  ai_prompt_context?: string; sender_name?: string;
 }): Promise<DbCampaign> {
   return apiFetch<DbCampaign>("/api/v1/campaigns", { method: "POST", body: JSON.stringify(body) }, token);
 }

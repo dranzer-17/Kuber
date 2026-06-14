@@ -1,18 +1,23 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronRight, Loader2, Clock, Calendar, Gauge, Globe, Minus, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronRight, Loader2, Clock, Calendar as CalendarIcon, Globe, Calendar } from "lucide-react";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads";
-import { isCampaignEligible, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
-import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign } from "@/lib/api-client";
+import { isCampaignEligible, CAMPAIGN_ACTION_HELP, getMostCommonCountry } from "@/lib/leads";
+import { COUNTRY_TO_TIMEZONE } from "@/lib/constants";
+import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchSettings } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 
 export type Campaign = {
@@ -30,6 +35,8 @@ export type Campaign = {
   windowTo?: string;
   timezone?: string;
   sendDays?: Record<string, boolean>;
+  aiPromptContext?: string;
+  senderName?: string;
 };
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
@@ -96,10 +103,15 @@ export function CreateCampaignModal({
 }) {
   const [name, setName] = useState("");
   const [humanInLoop, setHumanInLoop] = useState(true);
-  const [dailyLimit, setDailyLimit] = useState(30);
+  const [dailyLimit] = useState(30);
   const [windowFrom, setWindowFrom] = useState("08:00");
   const [windowTo, setWindowTo] = useState("18:00");
   const [timezone, setTimezone] = useState("Asia/Kolkata");
+  const [timezoneOverride, setTimezoneOverride] = useState(false);
+  const [primaryCountry, setPrimaryCountry] = useState<string | null>(null);
+  const [scheduleDate, setScheduleDate] = useState<Date | undefined>();
+  const [senderName, setSenderName] = useState("");
+  const [aiPromptContext, setAiPromptContext] = useState("");
   const [sendDays, setSendDays] = useState<Record<string, boolean>>({
     monday: true, tuesday: true, wednesday: true, thursday: true,
     friday: true, saturday: false, sunday: false,
@@ -107,13 +119,30 @@ export function CreateCampaignModal({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
-  function updateDailyLimit(nextValue: number) {
-    setDailyLimit(Math.max(1, Math.min(500, nextValue)));
-  }
+  useEffect(() => {
+    if (!open) return;
+    const country = getMostCommonCountry(leads);
+    const autoTz = country ? (COUNTRY_TO_TIMEZONE[country] ?? "UTC") : "Asia/Kolkata";
+    setPrimaryCountry(country);
+    setTimezone(autoTz);
+    setTimezoneOverride(false);
+
+    async function loadSettings() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token ?? "";
+        const s = await fetchSettings(token);
+        setSenderName(s.default_sender_name ?? "");
+      } catch { /* use empty default */ }
+    }
+    void loadSettings();
+  }, [open, leads]);
 
   function reset() {
-    setName(""); setHumanInLoop(true); setDailyLimit(30);
+    setName(""); setHumanInLoop(true);
     setWindowFrom("08:00"); setWindowTo("18:00"); setTimezone("Asia/Kolkata");
+    setTimezoneOverride(false); setPrimaryCountry(null);
+    setScheduleDate(undefined); setSenderName(""); setAiPromptContext("");
     setSendDays({ monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false });
     setCreating(false); setError("");
   }
@@ -140,6 +169,17 @@ export function CreateCampaignModal({
         window_to: windowTo,
         schedule_timezone: timezone,
         send_days: sendDays,
+        ai_prompt_context: aiPromptContext || undefined,
+        sender_name: senderName || undefined,
+        ...(scheduleDate ? {
+          send_mode: "scheduled" as const,
+          schedule_start_at: new Date(
+            scheduleDate.getFullYear(),
+            scheduleDate.getMonth(),
+            scheduleDate.getDate(),
+            9, 0, 0,
+          ).toISOString(),
+        } : { send_mode: "now" as const }),
       });
 
       await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
@@ -170,11 +210,21 @@ export function CreateCampaignModal({
             <Label className="text-sm font-medium">
               Campaign name <span className="text-destructive">*</span>
             </Label>
-            <Input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Q3 Plastics Outreach"
+            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Plastics Outreach" />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Sender name</Label>
+            <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Additional context for AI</Label>
+            <Textarea
+              value={aiPromptContext}
+              onChange={(e) => setAiPromptContext(e.target.value)}
+              placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle. Avoid mentioning pricing."
+              rows={3}
             />
           </div>
 
@@ -194,48 +244,6 @@ export function CreateCampaignModal({
           <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden divide-y divide-border">
             <div className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="flex items-center gap-2.5">
-                <Gauge className="size-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-sm font-medium leading-none">Daily send limit</p>
-                  <p className="text-xs text-muted-foreground">Max emails sent per day</p>
-                </div>
-              </div>
-              <div className="flex items-center overflow-hidden rounded-md border border-input bg-background">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => updateDailyLimit(dailyLimit - 1)}
-                  disabled={dailyLimit <= 1}
-                  className="h-10 w-10 rounded-none border-r border-input"
-                  aria-label="Decrease daily send limit"
-                >
-                  <Minus className="size-4" />
-                </Button>
-                <Input
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={dailyLimit}
-                  onChange={(e) => updateDailyLimit(Number(e.target.value) || 1)}
-                  className="h-10 w-20 border-0 text-center shadow-none focus-visible:ring-0"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => updateDailyLimit(dailyLimit + 1)}
-                  disabled={dailyLimit >= 500}
-                  className="h-10 w-10 rounded-none border-l border-input"
-                  aria-label="Increase daily send limit"
-                >
-                  <Plus className="size-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
-              <div className="flex items-center gap-2.5">
                 <Clock className="size-4 text-muted-foreground shrink-0" />
                 <div>
                   <p className="text-sm font-medium leading-none">Sending window</p>
@@ -249,26 +257,55 @@ export function CreateCampaignModal({
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="flex flex-col gap-2 px-5 py-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2.5">
+                  <Globe className="size-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium leading-none">Timezone</p>
+                    <p className="text-xs text-muted-foreground">
+                      Auto-detected: {timezone}{primaryCountry ? ` (${primaryCountry})` : ""}
+                    </p>
+                  </div>
+                </div>
+                {!timezoneOverride ? (
+                  <button type="button" className="text-xs text-primary hover:underline" onClick={() => setTimezoneOverride(true)}>
+                    Override
+                  </button>
+                ) : (
+                  <Select value={timezone} onValueChange={setTimezone}>
+                    <SelectTrigger className="h-9 w-45 bg-transparent">
+                      <SelectValue placeholder="Select timezone" />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="min-w-45">
+                      {TIMEZONES.map((tz) => (
+                        <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2.5">
-                <Globe className="size-4 text-muted-foreground shrink-0" />
+                <Calendar className="size-4 text-muted-foreground shrink-0" />
                 <div>
-                  <p className="text-sm font-medium leading-none">Timezone</p>
-                  <p className="text-xs text-muted-foreground">Campaign sending timezone</p>
+                  <p className="text-sm font-medium leading-none">Send date</p>
+                  <p className="text-xs text-muted-foreground">Optional — leave empty to send when ready</p>
                 </div>
               </div>
-              <Select value={timezone} onValueChange={setTimezone}>
-                <SelectTrigger className="h-9 w-45 bg-transparent">
-                  <SelectValue placeholder="Select timezone" />
-                </SelectTrigger>
-                <SelectContent align="end" className="min-w-45">
-                  {TIMEZONES.map((tz) => (
-                    <SelectItem key={tz} value={tz}>
-                      {tz}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <CalendarIcon className="size-3.5" />
+                    {scheduleDate ? format(scheduleDate, "PPP") : "Pick send date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <CalendarPicker mode="single" selected={scheduleDate} onSelect={setScheduleDate} />
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -300,11 +337,7 @@ export function CreateCampaignModal({
         </div>
 
         <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
-          <Button
-            disabled={!name.trim() || creating || leads.length === 0}
-            onClick={handleCreate}
-            className="gap-1.5"
-          >
+          <Button disabled={!name.trim() || creating || leads.length === 0} onClick={handleCreate} className="gap-1.5">
             {creating ? (
               <><Loader2 className="size-3.5 animate-spin" /> Creating…</>
             ) : (

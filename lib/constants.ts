@@ -76,6 +76,16 @@ export const COUNTRY_TIMEZONE: Record<string, string> = {
   Mexico: "America/Mexico_City",
 };
 
+export const COUNTRY_TO_TIMEZONE: Record<string, string> = {
+  ...COUNTRY_TIMEZONE,
+  UAE: "Asia/Dubai",
+  "United States": "America/New_York",
+  USA: "America/New_York",
+  "United Kingdom": "Europe/London",
+  Germany: "Europe/Berlin",
+  Singapore: "Asia/Singapore",
+};
+
 export const KUBER_CONTEXT = `Kuber Polyplast is an Indian masterbatch and specialty compounds manufacturer with 30 years of experience. They are ISO 9001:2015 certified and export to 50+ countries worldwide. Their product range includes colour masterbatches, white masterbatches, black masterbatches, additive masterbatches, and specialty compounds for the plastics processing industry.`;
 
 export const DEFAULT_FOLLOW_UP_PATTERN = [

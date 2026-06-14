@@ -112,7 +112,7 @@ export function DashboardView({ leads, campaigns, onNavigate }: DashboardViewPro
   const STAGE_DONUT_COLORS = [
     "#1e40af","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#93c5fd","#bfdbfe",
   ];
-  const STAGE_NAMES = ["New","Enriching","Enriched","Draft Ready","In Review","Sent","Replied"] as const;
+  const STAGE_NAMES = ["New","Enriching","Enriched","Draft Ready","Approved","Won","Closed"] as const;
   const stageDonutData = STAGE_NAMES
     .map((name, i) => ({
       name,

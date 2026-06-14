@@ -17,6 +17,8 @@ export const PatchDraftSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("approve") }),
   z.object({ action: z.literal("reject"), rejection_reason: z.string().min(1) }),
   z.object({ action: z.literal("edit"), subject: z.string().min(1), body: z.string().min(1) }),
+  z.object({ action: z.literal("reopen") }),
+  z.object({ action: z.literal("restore") }),
 ]);
 
 export const BulkApproveSchema = z.object({

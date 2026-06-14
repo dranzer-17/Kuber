@@ -1,6 +1,7 @@
 export type LeadStatus =
+  | "Input Required"
   | "New" | "Enriching" | "Enriched" | "Draft Ready"
-  | "In Review" | "Approved" | "Sent" | "Replied";
+  | "Approved" | "Won" | "Closed";
 
 export type LeadScore = "Hot" | "Cold" | "—";
 
@@ -24,12 +25,11 @@ export type Lead = {
   campaign: string;
   campaigns: { id: string; name: string; crm_status: string }[];
   createdAt: string;
-  // new enrichment fields
   orgId: string | null;
   enrichmentStage: EnrichmentStage | null;
   companyDescription: string | null;
   sellsTo: string | null;
-  // legacy org intelligence fields
+  lastError: string | null;
   hasScraped: boolean;
   primaryProducts: string[];
   competitors: string[];
@@ -38,24 +38,41 @@ export type Lead = {
 };
 
 export const PIPELINE_STAGES: LeadStatus[] = [
-  "New", "Enriching", "Enriched", "Draft Ready", "In Review", "Approved", "Sent", "Replied",
+  "Input Required", "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
+];
+
+/** Kanban columns — Input Required is badge-only, not a column. */
+export const KANBAN_STAGES: LeadStatus[] = [
+  "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
 ];
 
 export const STEP_DESCRIPTIONS: Record<LeadStatus, string> = {
+  "Input Required": "Missing email or company domain — add details before enrichment",
   New: "Lead created, awaiting enrichment",
   Enriching: "Firecrawl + Apollo running",
   Enriched: "Company profile ready",
   "Draft Ready": "AI email draft generated",
-  "In Review": "Awaiting human approval",
   Approved: "Draft approved, queued to send",
-  Sent: "Email delivered",
-  Replied: "Lead responded",
+  Won: "Positive reply or deal won",
+  Closed: "No longer pursuing this lead",
 };
 
 export const STATUS_ORDER: Record<LeadStatus, number> = {
+  "Input Required": 0,
   New: 0, Enriching: 1, Enriched: 2, "Draft Ready": 3,
-  "In Review": 4, Approved: 5, Sent: 6, Replied: 7,
+  Approved: 4, Won: 5, Closed: 6,
 };
+
+export function kanbanColumnFor(lead: Lead): LeadStatus {
+  if (lead.status === "Input Required") return "New";
+  if (KANBAN_STAGES.includes(lead.status)) return lead.status;
+  return "New";
+}
+
+export function isRecentlyAdded(lead: Lead): boolean {
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  return lead.source === "Apollo" && new Date(lead.createdAt).getTime() > cutoff;
+}
 
 export function isCampaignEligible(lead: Lead): boolean {
   return !!lead.email && !!lead.domain && lead.enrichmentStage === "done";
@@ -96,7 +113,6 @@ export const CAMPAIGN_ACTION_HELP = {
   statusColumn: "Lead pipeline status in your CRM based on enrichment and campaign progress.",
 };
 
-/** Short sidebar badge labels (no truncation). */
 export const DRAFT_BADGE_SHORT: Record<string, string> = {
   generating: "Generating",
   draft: "Draft",
@@ -120,4 +136,19 @@ export function sortLeads(leads: Lead[], sort: LeadsSort): Lead[] {
   if (sort === "oldest") return copy.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   if (sort === "az") return copy.sort((a, b) => leadFullName(a).localeCompare(leadFullName(b)));
   return copy.sort((a, b) => leadFullName(b).localeCompare(leadFullName(a)));
+}
+
+export function getMostCommonCountry(leads: Pick<Lead, "country">[]): string | null {
+  const counts: Record<string, number> = {};
+  for (const l of leads) {
+    const c = l.country?.trim();
+    if (!c) continue;
+    counts[c] = (counts[c] ?? 0) + 1;
+  }
+  let best: string | null = null;
+  let max = 0;
+  for (const [country, n] of Object.entries(counts)) {
+    if (n > max) { max = n; best = country; }
+  }
+  return best;
 }

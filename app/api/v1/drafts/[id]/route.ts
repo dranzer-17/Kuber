@@ -42,10 +42,47 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (parsed.data.action === "edit") {
-    if (draft.status === "approved") return fail(409, "CONFLICT", "Cannot edit an approved draft — reject it first");
+    if (draft.status === "approved") return fail(409, "CONFLICT", "Cannot edit an approved draft — reopen it first");
 
     await db.from("email_drafts").update({ subject: parsed.data.subject, body: parsed.data.body, status: "draft", updated_at: now }).eq("id", id);
     return ok({ id, status: "draft" });
+  }
+
+  if (parsed.data.action === "reopen") {
+    if (draft.status !== "approved") return fail(409, "CONFLICT", `Cannot reopen a draft with status '${draft.status}'`);
+
+    await db.from("email_drafts").update({
+      status: "draft",
+      approved_at: null,
+      reviewed_by: null,
+      updated_at: now,
+    }).eq("id", id);
+    await db.from("campaign_leads").update({ crm_status: "draft", updated_at: now }).eq("draft_id", id);
+    return ok({ id, status: "draft" });
+  }
+
+  if (parsed.data.action === "restore") {
+    const { data: target } = await db
+      .from("email_drafts")
+      .select("id, lead_id, campaign_id, status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (!target || target.lead_id !== draft.lead_id || target.campaign_id !== draft.campaign_id) {
+      return fail(404, "NOT_FOUND", "Version not found in this draft chain");
+    }
+
+    if (target.status === "rejected") {
+      await db.from("email_drafts").update({ status: "draft", updated_at: now }).eq("id", id);
+    }
+
+    await db.from("campaign_leads").update({
+      draft_id: id,
+      crm_status: target.status === "approved" ? "approved" : "draft",
+      updated_at: now,
+    }).eq("campaign_id", draft.campaign_id).eq("lead_id", draft.lead_id);
+
+    return ok({ id, status: target.status === "approved" ? "approved" : "draft" });
   }
 
   return fail(400, "VALIDATION_ERROR", "Unknown action");

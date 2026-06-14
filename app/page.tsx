@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isAdminUser, isValidAdminSession } from "@/lib/auth/admin";
-import { type Lead, type LeadStatus, type LeadScore, type LeadSource, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, PIPELINE_STAGES, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
+import { type Lead, type LeadStatus, type LeadScore, type LeadSource, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, PIPELINE_STAGES, CAMPAIGN_ACTION_HELP, isRecentlyAdded } from "@/lib/leads";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
@@ -14,6 +14,7 @@ import { LeadDrawer } from "@/components/app/lead-drawer";
 import { OrgDrawer } from "@/components/app/org-drawer";
 import { AddLeadsDrawer } from "@/components/app/add-leads-drawer";
 import { CampaignDetail } from "@/components/app/campaign-drawer";
+import { SettingsView } from "@/components/app/settings-view";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,11 +36,11 @@ import {
 import {
   LayoutDashboard, Users, Megaphone, LogOut, Plus,
   Eye, EyeOff, List, Kanban, RefreshCw, Columns3, Check, Search,
-  Building2, SlidersHorizontal, X,
+  Building2, SlidersHorizontal, X, Settings,
 } from "lucide-react";
-import { fetchLeads, fetchCampaigns } from "@/lib/api-client";
+import { fetchLeads, fetchCampaigns, rescrapeOrg } from "@/lib/api-client";
 
-type View = "dashboard" | "lead-generation" | "leads" | "campaigns";
+type View = "dashboard" | "lead-generation" | "leads" | "campaigns" | "settings";
 type LeadsViewMode = "list" | "kanban";
 type LeadsEntityMode = "individual" | "orgs";
 
@@ -198,14 +199,14 @@ function EnrichDot({ stage }: { stage: EnrichmentStage | null }) {
 // ── Status dot (leads list — matches Kanban column colours) ───────────────────
 
 const STATUS_DOT: Record<LeadStatus, string> = {
+  "Input Required": "bg-yellow-400",
   New:          "bg-zinc-400",
   Enriching:    "bg-amber-400",
   Enriched:     "bg-blue-400",
   "Draft Ready":"bg-violet-400",
-  "In Review":  "bg-orange-400",
   Approved:     "bg-cyan-400",
-  Sent:         "bg-teal-400",
-  Replied:      "bg-green-400",
+  Won:          "bg-green-400",
+  Closed:       "bg-zinc-400",
 };
 
 function StatusDot({ status }: { status: LeadStatus }) {
@@ -385,7 +386,7 @@ function DateRangePicker({
                 mode="single"
                 selected={from}
                 onSelect={onFromChange}
-                disabled={(d) => (to ? d > to : false)}
+                disabled={(d: Date) => (to ? d > to : false)}
               />
             </PopoverContent>
           </Popover>
@@ -412,7 +413,7 @@ function DateRangePicker({
                 mode="single"
                 selected={to}
                 onSelect={onToChange}
-                disabled={(d) => (from ? d < from : false)}
+                disabled={(d: Date) => (from ? d < from : false)}
               />
             </PopoverContent>
           </Popover>
@@ -535,6 +536,12 @@ export default function Home() {
   const [filters,            setFilters           ] = useState<FilterState>(EMPTY_FILTERS);
   const [showFilters,        setShowFilters       ] = useState(false);
   const [selectedOrgId,      setSelectedOrgId     ] = useState<string | null>(null);
+  const [manualPrefill,      setManualPrefill     ] = useState<{
+    prefillOrg?: { id?: string; name: string; industry: string; domain: string; country: string };
+    prefillLeads?: Array<{ firstName: string; lastName: string; email: string; jobTitle: string; id?: string }>;
+    editMode?: boolean;
+  } | null>(null);
+  const [enrichingIds,       setEnrichingIds      ] = useState<Set<string>>(new Set());
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -607,6 +614,23 @@ export default function Home() {
     if (session) void loadLeads(session.access_token);
   }
 
+  async function handleEnrichLead(lead: Lead, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!lead.orgId || !session) return;
+    setEnrichingIds((prev) => new Set(prev).add(lead.id));
+    try {
+      await rescrapeOrg(session.access_token, lead.orgId);
+      setTimeout(() => { if (session) void loadLeads(session.access_token); }, 800);
+    } catch { /* non-fatal */ }
+    finally {
+      setEnrichingIds((prev) => { const next = new Set(prev); next.delete(lead.id); return next; });
+    }
+  }
+
+  function showEnrichButton(lead: Lead): boolean {
+    return lead.enrichmentStage !== "done" && (lead.enrichmentStage === "queued" || lead.enrichmentStage === "failed" || lead.enrichmentStage === null);
+  }
+
   const filteredLeads = sortLeads(
     leads.filter((l) => {
       if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
@@ -631,6 +655,7 @@ export default function Home() {
     { key: "dashboard",  label: "Dashboard",  icon: LayoutDashboard, badge: null         },
     { key: "leads",      label: "Leads",      icon: Users,           badge: leads.length },
     { key: "campaigns",  label: "Campaigns",  icon: Megaphone,       badge: null         },
+    { key: "settings",   label: "Settings",   icon: Settings,        badge: null         },
   ];
 
   // ── Loading / auth gates ──────────────────────────────────────────────────
@@ -1112,6 +1137,7 @@ export default function Home() {
                           {visibleCols.country   && <TableHead className="text-xs font-semibold text-muted-foreground">Country</TableHead>}
                           {visibleCols.campaign  && <TableHead className="text-xs font-semibold text-muted-foreground">Campaign</TableHead>}
                           {visibleCols.added     && <TableHead className="text-xs font-semibold text-muted-foreground">Added</TableHead>}
+                          <TableHead className="w-10" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1156,6 +1182,11 @@ export default function Home() {
                                   <div className="flex items-center gap-2.5">
                                     <Avatar name={`${lead.firstName} ${lead.lastName}`} size="sm" />
                                     <p className="text-sm font-semibold">{lead.firstName} {lead.lastName}</p>
+                                    {isRecentlyAdded(lead) && (
+                                      <span className="bg-blue-500/15 text-blue-400 text-[10px] px-1.5 py-0.5 rounded border border-blue-500/25 font-semibold shrink-0">
+                                        New
+                                      </span>
+                                    )}
                                   </div>
                                 </TableCell>
                                 {visibleCols.organization && <TableCell><span className="text-sm">{lead.company || "—"}</span></TableCell>}
@@ -1182,7 +1213,20 @@ export default function Home() {
                                     )}
                                   </TableCell>
                                 )}
-                                {visibleCols.added     && <TableCell><span className="text-xs text-muted-foreground">{lead.createdAt}</span></TableCell>}
+                                {visibleCols.added     && <TableCell><span className="text-xs text-muted-foreground">{lead.createdAt.slice(0, 10)}</span></TableCell>}
+                                <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
+                                  {showEnrichButton(lead) && lead.orgId && (
+                                    <button
+                                      type="button"
+                                      title={lead.enrichmentStage === "failed" ? "Retry enrichment" : "Enrich"}
+                                      onClick={(e) => handleEnrichLead(lead, e)}
+                                      disabled={enrichingIds.has(lead.id)}
+                                      className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary disabled:opacity-50"
+                                    >
+                                      <RefreshCw className={cn("size-3.5", enrichingIds.has(lead.id) && "animate-spin")} />
+                                    </button>
+                                  )}
+                                </TableCell>
                               </TableRow>
                             );
                           })
@@ -1223,8 +1267,15 @@ export default function Home() {
                     className="w-full rounded-xl border border-border bg-card shadow-sm p-5 flex items-center gap-5 text-left transition-colors hover:bg-secondary/30"
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold">{c.name}</p>
-                      <p className="text-xs text-muted-foreground">{c.status} · {c.humanInLoop ? "Human review ON" : "Auto-send"}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold">{c.name}</p>
+                        {c.status === "Draft" && (
+                          <span className="bg-zinc-500/15 text-zinc-400 border-zinc-500/25 border rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0">
+                            Draft
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{c.humanInLoop ? "Human review ON" : "Auto-send"}</p>
                     </div>
                     <div className="flex items-center gap-6">
                       {[["Leads", c.leads], ["Sent", c.sent], ["Replied", c.replied]].map(([k, v]) => (
@@ -1241,6 +1292,8 @@ export default function Home() {
           </div>
           )
         )}
+
+        {view === "settings" && <SettingsView />}
       </main>
     </div>
 
@@ -1269,8 +1322,12 @@ export default function Home() {
 
     <AddLeadsDrawer
       open={showAddLeads}
-      onClose={() => setShowAddLeads(false)}
+      onClose={() => { setShowAddLeads(false); setManualPrefill(null); }}
       onImport={handleImport}
+      defaultTab={manualPrefill ? "manual" : "apollo"}
+      prefillOrg={manualPrefill?.prefillOrg}
+      prefillLeads={manualPrefill?.prefillLeads}
+      editMode={manualPrefill?.editMode}
     />
 
     <LeadDrawer
@@ -1286,6 +1343,14 @@ export default function Home() {
     <OrgDrawer
       orgId={selectedOrgId}
       onClose={() => setSelectedOrgId(null)}
+      onAddLead={(org) => {
+        setManualPrefill({
+          prefillOrg: { id: org.id, name: org.name, industry: org.industry, domain: org.domain, country: org.country },
+          prefillLeads: org.leads,
+          editMode: true,
+        });
+        setShowAddLeads(true);
+      }}
     />
 </>
   );

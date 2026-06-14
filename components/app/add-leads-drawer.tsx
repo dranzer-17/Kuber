@@ -3,16 +3,24 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ApolloForm, ExcelForm, ManualForm } from "@/components/app/lead-forms";
+import { ApolloForm, ExcelForm, ManualForm, type ManualFormProps } from "@/components/app/lead-forms";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface AddLeadsDrawerProps {
   open: boolean;
   onClose: () => void;
   onImport: (count: number) => void;
+  defaultTab?: "apollo" | "excel" | "manual";
+  prefillOrg?: ManualFormProps["prefillOrg"];
+  prefillLeads?: ManualFormProps["prefillLeads"];
+  editMode?: boolean;
 }
 
-export function AddLeadsDrawer({ open, onClose, onImport }: AddLeadsDrawerProps) {
+export function AddLeadsDrawer({
+  open, onClose, onImport,
+  defaultTab = "apollo",
+  prefillOrg, prefillLeads, editMode,
+}: AddLeadsDrawerProps) {
   useEffect(() => {
     function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", handler);
@@ -24,9 +32,10 @@ export function AddLeadsDrawer({ open, onClose, onImport }: AddLeadsDrawerProps)
     onClose();
   }
 
+  const initialTab = prefillOrg ? "manual" : defaultTab;
+
   return (
     <>
-      {/* Backdrop */}
       <div
         className={cn(
           "fixed inset-0 z-40 bg-black/50 transition-opacity duration-200",
@@ -35,17 +44,17 @@ export function AddLeadsDrawer({ open, onClose, onImport }: AddLeadsDrawerProps)
         onClick={onClose}
       />
 
-      {/* Drawer */}
       <div className={cn(
         "fixed top-0 right-0 z-50 h-full w-[560px] max-w-[95vw] bg-card border-l border-border shadow-2xl",
         "flex flex-col transition-transform duration-300 ease-in-out",
         open ? "translate-x-0" : "translate-x-full",
       )}>
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-border shrink-0">
           <div>
-            <h2 className="text-base font-bold">Add Leads</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Source leads via Apollo, Excel, or manual entry.</p>
+            <h2 className="text-base font-bold">{editMode ? "Edit leads" : "Add Leads"}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {editMode ? "Update organization and linked people." : "Source leads via Apollo, Excel, or manual entry."}
+            </p>
           </div>
           <button
             type="button"
@@ -56,9 +65,8 @@ export function AddLeadsDrawer({ open, onClose, onImport }: AddLeadsDrawerProps)
           </button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          <Tabs defaultValue="apollo" className="w-full">
+          <Tabs defaultValue={initialTab} key={initialTab + (prefillOrg?.id ?? "")} className="w-full">
             <TabsList className="grid w-full grid-cols-3 mb-6">
               <TabsTrigger value="apollo">Apollo Search</TabsTrigger>
               <TabsTrigger value="excel">Excel / CSV</TabsTrigger>
@@ -72,7 +80,12 @@ export function AddLeadsDrawer({ open, onClose, onImport }: AddLeadsDrawerProps)
                 <ExcelForm onImport={handleImport} />
               </TabsContent>
               <TabsContent value="manual" className="mt-0">
-                <ManualForm onImport={handleImport} />
+                <ManualForm
+                  onImport={handleImport}
+                  prefillOrg={prefillOrg ? { ...prefillOrg, id: prefillOrg.id } : undefined}
+                  prefillLeads={prefillLeads}
+                  editMode={editMode}
+                />
               </TabsContent>
             </div>
           </Tabs>
