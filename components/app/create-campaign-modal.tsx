@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, Loader2, Clock, Calendar, Gauge, Globe } from "lucide-react";
+import { ChevronRight, Loader2, Clock, Calendar, Gauge, Globe, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InfoTip } from "@/components/ui/info-tip";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads";
 import { isCampaignEligible, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
@@ -57,6 +59,33 @@ const TIMEZONES = [
   "UTC",
 ];
 
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hours = Math.floor(index / 2);
+  const minutes = index % 2 === 0 ? "00" : "30";
+  const value = `${String(hours).padStart(2, "0")}:${minutes}`;
+  const period = hours >= 12 ? "PM" : "AM";
+  const displayHour = hours % 12 || 12;
+  const label = `${String(displayHour).padStart(2, "0")}:${minutes} ${period}`;
+  return { value, label };
+});
+
+function TimeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-9 w-32 bg-transparent tabular-nums">
+        <SelectValue placeholder="Select time" />
+      </SelectTrigger>
+      <SelectContent align="center" className="min-w-32">
+        {TIME_OPTIONS.map((time) => (
+          <SelectItem key={time.value} value={time.value}>
+            {time.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export function CreateCampaignModal({
   open, onClose, onCreated, leads,
 }: {
@@ -77,6 +106,10 @@ export function CreateCampaignModal({
   });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  function updateDailyLimit(nextValue: number) {
+    setDailyLimit(Math.max(1, Math.min(500, nextValue)));
+  }
 
   function reset() {
     setName(""); setHumanInLoop(true); setDailyLimit(30);
@@ -124,15 +157,15 @@ export function CreateCampaignModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="max-w-2xl p-0 gap-0 rounded-xl overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
-          <p className="text-xs text-muted-foreground mb-0.5">
+      <DialogContent className="max-w-3xl overflow-hidden border-border bg-background p-0 shadow-2xl">
+        <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
+          <p className="text-xs text-muted-foreground mb-1">
             New Campaign · {leads.length} lead{leads.length !== 1 ? "s" : ""} ready for outreach
           </p>
-          <DialogTitle className="text-lg">Configure campaign</DialogTitle>
+          <DialogTitle className="text-xl">Configure campaign</DialogTitle>
         </DialogHeader>
 
-        <div className="px-6 py-5 space-y-5 overflow-y-auto max-h-[65vh]">
+        <div className="max-h-[68vh] space-y-6 overflow-y-auto px-6 py-5">
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">
               Campaign name <span className="text-destructive">*</span>
@@ -145,87 +178,108 @@ export function CreateCampaignModal({
             />
           </div>
 
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5">
-              <div className="flex items-start gap-1.5">
+          <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-4 px-5 py-4">
+              <div className="flex items-start gap-2">
                 <div>
-                  <p className="text-sm font-medium">Human in the loop</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Certify each draft before it can be sent to Instantly.</p>
+                  <p className="text-sm font-medium leading-none">Human in the loop</p>
+                  <p className="text-xs text-muted-foreground mt-1">Certify each draft before it can be sent to Instantly.</p>
                 </div>
                 <InfoTip text={CAMPAIGN_ACTION_HELP.humanInLoop} className="mt-0.5" />
               </div>
-              <button type="button" onClick={() => setHumanInLoop(!humanInLoop)}
-                className={cn(
-                  "relative w-11 h-6 rounded-full border-2 transition-all shrink-0",
-                  humanInLoop ? "bg-primary border-primary" : "bg-secondary border-border",
-                )}
-              >
-                <span className={cn(
-                  "absolute top-0.5 size-4 rounded-full transition-all",
-                  humanInLoop ? "left-5 bg-primary-foreground" : "left-0.5 bg-muted-foreground",
-                )} />
-              </button>
+              <Switch checked={humanInLoop} onCheckedChange={setHumanInLoop} />
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border">
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+          <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden divide-y divide-border">
+            <div className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="flex items-center gap-2.5">
                 <Gauge className="size-4 text-muted-foreground shrink-0" />
                 <div>
-                  <p className="text-sm font-medium">Daily send limit</p>
+                  <p className="text-sm font-medium leading-none">Daily send limit</p>
                   <p className="text-xs text-muted-foreground">Max emails sent per day</p>
                 </div>
               </div>
-              <Input
-                type="number" min={1} max={500}
-                value={dailyLimit}
-                onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                className="w-20 text-right"
-              />
+              <div className="flex items-center overflow-hidden rounded-md border border-input bg-background">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => updateDailyLimit(dailyLimit - 1)}
+                  disabled={dailyLimit <= 1}
+                  className="h-10 w-10 rounded-none border-r border-input"
+                  aria-label="Decrease daily send limit"
+                >
+                  <Minus className="size-4" />
+                </Button>
+                <Input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={dailyLimit}
+                  onChange={(e) => updateDailyLimit(Number(e.target.value) || 1)}
+                  className="h-10 w-20 border-0 text-center shadow-none focus-visible:ring-0"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => updateDailyLimit(dailyLimit + 1)}
+                  disabled={dailyLimit >= 500}
+                  className="h-10 w-10 rounded-none border-l border-input"
+                  aria-label="Increase daily send limit"
+                >
+                  <Plus className="size-4" />
+                </Button>
+              </div>
             </div>
 
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+            <div className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="flex items-center gap-2.5">
                 <Clock className="size-4 text-muted-foreground shrink-0" />
                 <div>
-                  <p className="text-sm font-medium">Sending window</p>
+                  <p className="text-sm font-medium leading-none">Sending window</p>
                   <p className="text-xs text-muted-foreground">Local time of recipient</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Input type="time" value={windowFrom} onChange={(e) => setWindowFrom(e.target.value)} className="w-28" />
+                <TimeSelect value={windowFrom} onChange={setWindowFrom} />
                 <span className="text-xs text-muted-foreground">to</span>
-                <Input type="time" value={windowTo} onChange={(e) => setWindowTo(e.target.value)} className="w-28" />
+                <TimeSelect value={windowTo} onChange={setWindowTo} />
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+            <div className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="flex items-center gap-2.5">
                 <Globe className="size-4 text-muted-foreground shrink-0" />
                 <div>
-                  <p className="text-sm font-medium">Timezone</p>
+                  <p className="text-sm font-medium leading-none">Timezone</p>
                   <p className="text-xs text-muted-foreground">Campaign sending timezone</p>
                 </div>
               </div>
-              <select
-                value={timezone}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTimezone(e.target.value)}
-                className="text-sm rounded-md border border-border bg-background px-2 py-1.5"
-              >
-                {TIMEZONES.map((tz) => <option key={tz} value={tz} className="bg-background">{tz}</option>)}
-              </select>
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger className="h-9 w-45 bg-transparent">
+                  <SelectValue placeholder="Select timezone" />
+                </SelectTrigger>
+                <SelectContent align="end" className="min-w-45">
+                  {TIMEZONES.map((tz) => (
+                    <SelectItem key={tz} value={tz}>
+                      {tz}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="flex items-center justify-between gap-4 px-4 py-3.5">
+            <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2.5">
                 <Calendar className="size-4 text-muted-foreground shrink-0" />
                 <div>
-                  <p className="text-sm font-medium">Send days</p>
+                  <p className="text-sm font-medium leading-none">Send days</p>
                   <p className="text-xs text-muted-foreground">Days emails will be sent</p>
                 </div>
               </div>
-              <div className="flex gap-1">
+              <div className="flex flex-wrap gap-2 sm:justify-end">
                 {DAYS.map((day) => (
                   <DayPill
                     key={day}
@@ -245,7 +299,7 @@ export function CreateCampaignModal({
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
 
-        <div className="border-t border-border px-6 py-4 flex justify-end">
+        <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
           <Button
             disabled={!name.trim() || creating || leads.length === 0}
             onClick={handleCreate}

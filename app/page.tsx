@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isAdminUser, isValidAdminSession } from "@/lib/auth/admin";
-import { type Lead, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, ENRICHMENT_DOT_HELP, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
+import { type Lead, type LeadStatus, type LeadScore, type LeadSource, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, PIPELINE_STAGES, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
@@ -11,25 +11,72 @@ import { KanbanBoard } from "@/components/app/kanban-board";
 import { CreateCampaignModal, type Campaign } from "@/components/app/create-campaign-modal";
 import { DashboardView } from "@/components/app/dashboard";
 import { LeadDrawer } from "@/components/app/lead-drawer";
+import { OrgDrawer } from "@/components/app/org-drawer";
 import { AddLeadsDrawer } from "@/components/app/add-leads-drawer";
 import { CampaignDetail } from "@/components/app/campaign-drawer";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
+import { CalendarIcon } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
   LayoutDashboard, Users, Megaphone, LogOut, Plus,
   Eye, EyeOff, List, Kanban, RefreshCw, Columns3, Check, Search,
-  Building2,
+  Building2, SlidersHorizontal, X,
 } from "lucide-react";
 import { fetchLeads, fetchCampaigns } from "@/lib/api-client";
 
 type View = "dashboard" | "lead-generation" | "leads" | "campaigns";
 type LeadsViewMode = "list" | "kanban";
 type LeadsEntityMode = "individual" | "orgs";
+
+type FilterState = {
+  statuses: Set<LeadStatus>;
+  scores: Set<LeadScore>;
+  sources: Set<LeadSource>;
+  createdFrom: Date | undefined;
+  createdTo: Date | undefined;
+};
+
+const EMPTY_FILTERS: FilterState = {
+  statuses: new Set(),
+  scores: new Set(),
+  sources: new Set(),
+  createdFrom: undefined,
+  createdTo: undefined,
+};
+
+function isFiltersEmpty(f: FilterState) {
+  return (
+    f.statuses.size === 0 &&
+    f.scores.size === 0 &&
+    f.sources.size === 0 &&
+    !f.createdFrom &&
+    !f.createdTo
+  );
+}
+
+function activeFilterCount(f: FilterState) {
+  return (
+    (f.statuses.size > 0 ? 1 : 0) +
+    (f.scores.size > 0 ? 1 : 0) +
+    (f.sources.size > 0 ? 1 : 0) +
+    (f.createdFrom || f.createdTo ? 1 : 0)
+  );
+}
 
 type OrgRow = {
   id: string;
@@ -131,13 +178,9 @@ function ColumnsDropdown({ visible, onChange }: {
   );
 }
 
-// ── Enrichment status dot ─────────────────────────────────────────────────────
+// ── Enrichment pipeline dot (orgs) ────────────────────────────────────────────
 
 function EnrichDot({ stage }: { stage: EnrichmentStage | null }) {
-  const help = ENRICHMENT_DOT_HELP[stage ?? "none"];
-  if (!stage) {
-    return <span className="size-2 rounded-full bg-border inline-block" title={help} />;
-  }
   const styles: Record<EnrichmentStage, string> = {
     queued:   "bg-muted-foreground/40",
     scraping: "bg-yellow-400 animate-pulse",
@@ -146,9 +189,322 @@ function EnrichDot({ stage }: { stage: EnrichmentStage | null }) {
   };
   return (
     <span
-      className={cn("size-2 rounded-full inline-block", styles[stage])}
-      title={help}
+      className={cn("size-2 rounded-full inline-block", stage ? styles[stage] : "bg-border")}
+      title={stage ?? "not queued"}
     />
+  );
+}
+
+// ── Status dot (leads list — matches Kanban column colours) ───────────────────
+
+const STATUS_DOT: Record<LeadStatus, string> = {
+  New:          "bg-zinc-400",
+  Enriching:    "bg-amber-400",
+  Enriched:     "bg-blue-400",
+  "Draft Ready":"bg-violet-400",
+  "In Review":  "bg-orange-400",
+  Approved:     "bg-cyan-400",
+  Sent:         "bg-teal-400",
+  Replied:      "bg-green-400",
+};
+
+function StatusDot({ status }: { status: LeadStatus }) {
+  return (
+    <span
+      className={cn("size-2 rounded-full inline-block", STATUS_DOT[status])}
+      title={status}
+    />
+  );
+}
+
+// ── Filters modal ─────────────────────────────────────────────────────────────
+
+const ALL_SCORES: LeadScore[]  = ["Hot", "Cold", "—"];
+const ALL_SOURCES: LeadSource[] = ["Apollo", "Excel", "Manual"];
+const SCORE_DOT: Record<LeadScore, string> = {
+  Hot: "bg-orange-400", Cold: "bg-blue-400", "—": "bg-muted-foreground/40",
+};
+
+type DropdownOption<T extends string> = {
+  value: T;
+  label: string;
+  dot?: string;
+};
+
+function MultiSelectDropdown<T extends string>({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: DropdownOption<T>[];
+  selected: Set<T>;
+  onChange: (next: Set<T>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function toggle(val: T) {
+    const next = new Set(selected);
+    if (next.has(val)) next.delete(val); else next.add(val);
+    onChange(next);
+  }
+
+  const filtered = options.filter((o) =>
+    o.label.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div ref={ref} className="relative">
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">{label}</p>
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full min-h-9 flex items-center flex-wrap gap-1.5 px-3 py-1.5 rounded-md border border-input bg-transparent text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {selected.size === 0 ? (
+          <span className="text-muted-foreground text-xs">Select {label.toLowerCase()}…</span>
+        ) : (
+          options
+            .filter((o) => selected.has(o.value))
+            .map((o) => (
+              <span
+                key={o.value}
+                className="inline-flex items-center gap-1 bg-secondary border border-border rounded px-1.5 py-0.5 text-xs font-medium"
+              >
+                {o.dot && <span className={cn("size-1.5 rounded-full shrink-0", o.dot)} />}
+                {o.label}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); toggle(o.value); }}
+                  onKeyDown={(e) => e.key === "Enter" && toggle(o.value)}
+                  className="ml-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <X className="size-2.5" />
+                </span>
+              </span>
+            ))
+        )}
+        <span className="ml-auto text-muted-foreground shrink-0">
+          <svg viewBox="0 0 24 24" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </button>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border border-border bg-card shadow-xl overflow-hidden">
+          <div className="px-2 py-1.5 border-b border-border">
+            <div className="flex items-center gap-2 px-1">
+              <Search className="size-3.5 text-muted-foreground shrink-0" />
+              <input
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search or type to add…"
+                className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+          </div>
+          <div className="max-h-48 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-muted-foreground">No results</p>
+            ) : (
+              filtered.map((o) => {
+                const active = selected.has(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => toggle(o.value)}
+                    className={cn(
+                      "w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-secondary",
+                      active && "bg-secondary/60"
+                    )}
+                  >
+                    {o.dot && <span className={cn("size-2 rounded-full shrink-0", o.dot)} />}
+                    <span className="flex-1 text-left">{o.label}</span>
+                    {active && <Check className="size-3.5 text-foreground shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DateRangePicker({
+  from,
+  to,
+  onFromChange,
+  onToChange,
+}: {
+  from: Date | undefined;
+  to: Date | undefined;
+  onFromChange: (d: Date | undefined) => void;
+  onToChange: (d: Date | undefined) => void;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Created Date</p>
+      <div className="grid grid-cols-2 gap-2">
+        {/* From */}
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">From</p>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "w-full justify-start text-left font-normal h-9 px-3 text-xs bg-transparent",
+                  !from && "text-muted-foreground"
+                )}
+              >
+                <CalendarIcon className="size-3.5 mr-2 shrink-0" />
+                {from ? format(from, "MMM d, yyyy") : "Pick a date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={from}
+                onSelect={onFromChange}
+                disabled={(d) => (to ? d > to : false)}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        {/* To */}
+        <div>
+          <p className="text-[10px] text-muted-foreground mb-1">To</p>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn(
+                  "w-full justify-start text-left font-normal h-9 px-3 text-xs bg-transparent",
+                  !to && "text-muted-foreground"
+                )}
+              >
+                <CalendarIcon className="size-3.5 mr-2 shrink-0" />
+                {to ? format(to, "MMM d, yyyy") : "Pick a date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={to}
+                onSelect={onToChange}
+                disabled={(d) => (from ? d < from : false)}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FiltersModal({
+  filters,
+  onChange,
+  onClose,
+}: {
+  filters: FilterState;
+  onChange: (f: FilterState) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<FilterState>({
+    statuses:    new Set(filters.statuses),
+    scores:      new Set(filters.scores),
+    sources:     new Set(filters.sources),
+    createdFrom: filters.createdFrom,
+    createdTo:   filters.createdTo,
+  });
+
+  const statusOptions: DropdownOption<LeadStatus>[] = PIPELINE_STAGES.map((s) => ({
+    value: s, label: s, dot: STATUS_DOT[s],
+  }));
+  const scoreOptions: DropdownOption<LeadScore>[] = ALL_SCORES.map((s) => ({
+    value: s, label: s === "—" ? "Unscored" : s, dot: SCORE_DOT[s],
+  }));
+  const sourceOptions: DropdownOption<LeadSource>[] = ALL_SOURCES.map((s) => ({
+    value: s, label: s,
+  }));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card shadow-xl flex flex-col max-h-[85vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <p className="text-sm font-semibold">Filters</p>
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="size-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto px-5 py-5 space-y-5 flex-1">
+          <MultiSelectDropdown
+            label="Status"
+            options={statusOptions}
+            selected={draft.statuses}
+            onChange={(s) => setDraft((d) => ({ ...d, statuses: s }))}
+          />
+          <MultiSelectDropdown
+            label="Score"
+            options={scoreOptions}
+            selected={draft.scores}
+            onChange={(s) => setDraft((d) => ({ ...d, scores: s }))}
+          />
+          <MultiSelectDropdown
+            label="Source"
+            options={sourceOptions}
+            selected={draft.sources}
+            onChange={(s) => setDraft((d) => ({ ...d, sources: s }))}
+          />
+          <DateRangePicker
+            from={draft.createdFrom}
+            to={draft.createdTo}
+            onFromChange={(d) => setDraft((prev) => ({ ...prev, createdFrom: d }))}
+            onToChange={(d) => setDraft((prev) => ({ ...prev, createdTo: d }))}
+          />
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-5 py-4 border-t border-border shrink-0">
+          <button
+            type="button"
+            onClick={() => setDraft({ statuses: new Set(), scores: new Set(), sources: new Set(), createdFrom: undefined, createdTo: undefined })}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear all
+          </button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button size="sm" onClick={() => { onChange(draft); onClose(); }}>Apply</Button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -176,6 +532,9 @@ export default function Home() {
   const [leadsEntityMode,    setLeadsEntityMode   ] = useState<LeadsEntityMode>("individual");
   const [selectedCampaign,   setSelectedCampaign  ] = useState<Campaign | null>(null);
   const [selectedOrg,        setSelectedOrg       ] = useState<OrgRow | null>(null);
+  const [filters,            setFilters           ] = useState<FilterState>(EMPTY_FILTERS);
+  const [showFilters,        setShowFilters       ] = useState(false);
+  const [selectedOrgId,      setSelectedOrgId     ] = useState<string | null>(null);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -248,7 +607,25 @@ export default function Home() {
     if (session) void loadLeads(session.access_token);
   }
 
-  const filteredLeads = sortLeads(leads, leadsSort);
+  const filteredLeads = sortLeads(
+    leads.filter((l) => {
+      if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
+      if (filters.scores.size   > 0 && !filters.scores.has(l.score))   return false;
+      if (filters.sources.size  > 0 && !filters.sources.has(l.source)) return false;
+      if (filters.createdFrom) {
+        const leadDate = new Date(l.createdAt);
+        leadDate.setHours(0, 0, 0, 0);
+        if (leadDate < filters.createdFrom) return false;
+      }
+      if (filters.createdTo) {
+        const to = new Date(filters.createdTo);
+        to.setHours(23, 59, 59, 999);
+        if (new Date(l.createdAt) > to) return false;
+      }
+      return true;
+    }),
+    leadsSort,
+  );
 
   const NAV: { key: View; label: string; icon: React.ComponentType<{ className?: string }>; badge: number | null }[] = [
     { key: "dashboard",  label: "Dashboard",  icon: LayoutDashboard, badge: null         },
@@ -316,6 +693,7 @@ export default function Home() {
   // ── App shell ─────────────────────────────────────────────────────────────
 
   return (
+    <>
     <div className="h-screen flex bg-background overflow-hidden">
       <aside className="w-56 shrink-0 border-r border-border flex flex-col bg-card">
         <div className="px-4 py-5 border-b border-border flex items-center gap-2.5">
@@ -510,16 +888,35 @@ export default function Home() {
                     />
                   </div>
                   <div className="ml-auto flex items-center gap-3">
-                    <select
-                      value={leadsSort}
-                      onChange={(e) => setLeadsSort(e.target.value as LeadsSort)}
-                      className="h-8 text-xs rounded-md border border-border bg-background px-2"
+                    <Select value={leadsSort} onValueChange={(value) => setLeadsSort(value as LeadsSort)}>
+                      <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border bg-background/80 px-3 text-xs shadow-sm">
+                        <SelectValue placeholder="Sort by" />
+                      </SelectTrigger>
+                      <SelectContent align="end" className="min-w-36">
+                        <SelectItem value="newest">Newest first</SelectItem>
+                        <SelectItem value="oldest">Oldest first</SelectItem>
+                        <SelectItem value="az">A – Z</SelectItem>
+                        <SelectItem value="za">Z – A</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <button
+                      type="button"
+                      onClick={() => setShowFilters(true)}
+                      className={cn(
+                        "relative flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-medium transition-colors",
+                        isFiltersEmpty(filters)
+                          ? "border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground"
+                          : "border-primary bg-primary/10 text-primary"
+                      )}
                     >
-                      <option value="newest">Newest first</option>
-                      <option value="oldest">Oldest first</option>
-                      <option value="az">A – Z</option>
-                      <option value="za">Z – A</option>
-                    </select>
+                      <SlidersHorizontal className="size-3.5" />
+                      Filters
+                      {!isFiltersEmpty(filters) && (
+                        <span className="ml-0.5 size-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">
+                          {activeFilterCount(filters)}
+                        </span>
+                      )}
+                    </button>
                     <ColumnsDropdown visible={visibleCols} onChange={setVisibleCols} />
                     <span className="text-xs text-muted-foreground tabular-nums">{displayLeads.length} leads</span>
                   </div>
@@ -753,7 +1150,7 @@ export default function Home() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-center">
-                                  <EnrichDot stage={lead.enrichmentStage} />
+                                  <StatusDot status={lead.status} />
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex items-center gap-2.5">
@@ -845,35 +1242,51 @@ export default function Home() {
           )
         )}
       </main>
-
-      <CreateCampaignModal
-        open={showCreateCampaign}
-        onClose={() => { setShowCreateCampaign(false); setCheckedIds(new Set()); }}
-        onCreated={(c) => {
-          setCampaigns((p) => [c, ...p]);
-          setView("campaigns");
-          setSelectedCampaign(c);
-          setShowCreateCampaign(false);
-          setCheckedIds(new Set());
-          if (session) void loadCampaigns(session.access_token);
-        }}
-        leads={leads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l))}
-      />
-
-      <AddLeadsDrawer
-        open={showAddLeads}
-        onClose={() => setShowAddLeads(false)}
-        onImport={handleImport}
-      />
-
-      <LeadDrawer
-        lead={selectedLead}
-        onClose={() => setSelectedLead(null)}
-        onLeadUpdated={(updated) => {
-          setLeads((prev) => prev.map((l) => l.id === updated.id ? updated : l));
-          setSelectedLead(updated);
-        }}
-      />
     </div>
+
+    {/* Overlays — outside the root flex container so they don't affect layout */}
+    {showFilters && (
+      <FiltersModal
+        filters={filters}
+        onChange={setFilters}
+        onClose={() => setShowFilters(false)}
+      />
+    )}
+
+    <CreateCampaignModal
+      open={showCreateCampaign}
+      onClose={() => { setShowCreateCampaign(false); setCheckedIds(new Set()); }}
+      onCreated={(c) => {
+        setCampaigns((p) => [c, ...p]);
+        setView("campaigns");
+        setSelectedCampaign(c);
+        setShowCreateCampaign(false);
+        setCheckedIds(new Set());
+        if (session) void loadCampaigns(session.access_token);
+      }}
+      leads={leads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l))}
+    />
+
+    <AddLeadsDrawer
+      open={showAddLeads}
+      onClose={() => setShowAddLeads(false)}
+      onImport={handleImport}
+    />
+
+    <LeadDrawer
+      lead={selectedLead}
+      onClose={() => setSelectedLead(null)}
+      onLeadUpdated={(updated) => {
+        setLeads((prev) => prev.map((l) => l.id === updated.id ? updated : l));
+        setSelectedLead(updated);
+      }}
+      onOrgClick={(id) => setSelectedOrgId(id)}
+    />
+
+    <OrgDrawer
+      orgId={selectedOrgId}
+      onClose={() => setSelectedOrgId(null)}
+    />
+</>
   );
 }

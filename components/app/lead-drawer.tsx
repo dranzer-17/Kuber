@@ -5,7 +5,7 @@ import {
   Building2, Globe2, Mail, Megaphone, Users, X,
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
   RotateCcw, Zap, Bot, Settings, Pencil, Phone, Link,
-  MapPin, Save,
+  MapPin, Save, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
@@ -144,10 +144,11 @@ type EditForm = {
   city: string; state: string; country: string;
 };
 
-export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
+export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   lead: Lead | null;
   onClose: () => void;
   onLeadUpdated?: (updated: Lead) => void;
+  onOrgClick?: (orgId: string) => void;
 }) {
   const [freshLead,   setFreshLead  ] = useState<Lead | null>(null);
   const [loadingLead, setLoadingLead] = useState(false);
@@ -235,7 +236,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
     }
   }
 
-  // Open: reset + fetch
   useEffect(() => {
     if (!lead) { setFreshLead(null); setEnrichData(null); setEditing(false); return; }
     setFreshLead(null);
@@ -247,14 +247,12 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
     if (lead.orgId) void fetchEnrichStatus(lead.orgId);
   }, [lead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ESC to close
   useEffect(() => {
     function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // Retry enrichment
   async function handleRetry() {
     if (!display?.orgId) return;
     setRetrying(true);
@@ -301,8 +299,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
               <Avatar name={`${display.firstName} ${display.lastName}`} size="md" />
               <div className="flex-1 min-w-0">
                 <h2 className="text-base font-bold truncate">{display.firstName} {display.lastName}</h2>
-                <p className="text-xs text-muted-foreground truncate">{display.company}</p>
-                <p className="text-xs text-muted-foreground truncate">{display.jobTitle}</p>
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
                   <StatusBadge status={display.status} />
                   <ScoreBadge score={display.score} />
@@ -352,8 +348,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
                       <AlertCircle className="size-3.5 shrink-0" /> {saveError}
                     </div>
                   )}
-
-                  {/* Personal */}
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
                     <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">Personal</legend>
                     <div className="grid grid-cols-2 gap-3">
@@ -375,8 +369,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
                       <Input className="h-8 text-sm" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
                     </div>
                   </fieldset>
-
-                  {/* Professional */}
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
                     <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">Professional</legend>
                     <div className="space-y-1.5">
@@ -392,8 +384,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
                       <Input className="h-8 text-sm" placeholder="linkedin.com/in/..." value={form.linkedin_url} onChange={(e) => setForm((f) => ({ ...f, linkedin_url: e.target.value }))} />
                     </div>
                   </fieldset>
-
-                  {/* Location */}
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
                     <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
                     <div className="grid grid-cols-2 gap-3">
@@ -417,18 +407,46 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
               {/* ── View mode ── */}
               {!editing && <>
 
+              {/* Organization — clickable row that opens OrgDrawer */}
+              {display.company && (
+                <button
+                  type="button"
+                  onClick={() => display.orgId && onOrgClick?.(display.orgId)}
+                  disabled={!display.orgId || !onOrgClick}
+                  className="w-full text-left rounded-xl border border-border bg-secondary/20 p-4 hover:border-muted-foreground/50 hover:bg-secondary/40 transition-colors group disabled:cursor-default disabled:hover:border-border disabled:hover:bg-secondary/20"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      <Building2 className="size-3" /> Organization
+                    </div>
+                    {display.orgId && onOrgClick && (
+                      <ChevronRight className="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    )}
+                  </div>
+                  <div className="text-sm leading-relaxed mt-1.5">
+                    <p className="font-medium">{display.company}</p>
+                    {display.domain && (
+                      <p className="text-xs text-blue-400 mt-0.5">{display.domain}</p>
+                    )}
+                  </div>
+                </button>
+              )}
+
               {/* Contact */}
               <Section icon={Mail} label="Contact">
+                {display.jobTitle && (
+                  <p><span className="text-muted-foreground">Title: </span>{display.jobTitle}</p>
+                )}
                 <p>
                   <span className="text-muted-foreground">Email: </span>
                   {display.email || <span className="text-muted-foreground/50 italic">Not yet enriched</span>}
                 </p>
-                <p>
-                  <span className="text-muted-foreground">Domain: </span>
-                  {display.domain
-                    ? <a href={`https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{display.domain}</a>
-                    : "—"}
-                </p>
+                {display.phone && (
+                  <p><span className="text-muted-foreground">Phone: </span>{display.phone}</p>
+                )}
+                {display.country && (
+                  <p><span className="text-muted-foreground">Country: </span>{display.country}</p>
+                )}
               </Section>
 
               {/* Pipeline */}
@@ -468,7 +486,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
 
               {/* ── Company Enrichment ── */}
               <div className="rounded-xl border border-border overflow-hidden">
-                {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 bg-secondary/30 border-b border-border">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Building2 className="size-3 text-muted-foreground" />
@@ -503,7 +520,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
                 </div>
 
                 <div className="p-4 space-y-4">
-                  {/* Done: show extracted fields */}
                   {currentStage === "done" && (
                     <>
                       {(enrichData?.company_description ?? display.companyDescription) && (
@@ -524,8 +540,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
                       )}
                     </>
                   )}
-
-                  {/* Failed: show error */}
                   {currentStage === "failed" && enrichData?.last_error && (
                     <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/5 rounded-lg p-3">
                       <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
@@ -535,23 +549,17 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated }: {
                   {currentStage === "failed" && attempts >= 3 && (
                     <p className="text-[11px] text-muted-foreground text-center">Maximum retry attempts reached.</p>
                   )}
-
-                  {/* Queued/scraping with no logs yet */}
                   {(currentStage === "queued" || currentStage === "scraping") && !enrichData?.logs?.length && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 justify-center">
                       <Loader2 className="size-3.5 animate-spin" />
                       {currentStage === "scraping" ? "Scraping website..." : "Waiting to start..."}
                     </div>
                   )}
-
-                  {/* No org linked */}
                   {!display.orgId && (
                     <p className="text-xs text-muted-foreground italic text-center py-2">
                       No organization linked to this lead.
                     </p>
                   )}
-
-                  {/* Timeline */}
                   {enrichData?.logs && enrichData.logs.length > 0 && (
                     <div>
                       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">

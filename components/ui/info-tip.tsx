@@ -26,14 +26,14 @@ export function InfoTip({
       className={cn("relative inline-flex items-center", className)}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
     >
       <button
         type="button"
         tabIndex={0}
         aria-label="More information"
-        className="inline-flex items-center justify-center size-4 rounded-full text-muted-foreground hover:text-foreground transition-colors"
+        className="relative z-10 inline-flex items-center justify-center size-5 rounded-full text-muted-foreground hover:text-foreground transition-colors"
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
       >
         <Info className="size-3" />

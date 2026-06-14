@@ -188,6 +188,17 @@ export async function patchLead(token: string, id: string, body: {
   return mapDbLead(data);
 }
 
+export async function fetchOrg(token: string, id: string): Promise<Record<string, unknown>> {
+  return apiFetch(`/api/v1/organizations/${id}`, {}, token);
+}
+
+export async function patchOrg(token: string, id: string, body: {
+  name?: string; domain?: string; website?: string; description?: string;
+  industry?: string; city?: string; country?: string;
+}): Promise<Record<string, unknown>> {
+  return apiFetch(`/api/v1/organizations/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
 export async function createLead(token: string, body: {
   email: string; first_name?: string; last_name?: string;
   organization_name: string; organization_domain?: string; title?: string; country?: string;
