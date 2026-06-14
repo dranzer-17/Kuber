@@ -118,8 +118,8 @@ function DraftStatusBadge({
   return (
     <span
       className={cn(
-        "text-[10px] font-semibold uppercase tracking-wide px-2 h-5 rounded-full shrink-0",
-        "inline-flex items-center justify-center gap-1 leading-none",
+        "text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0",
+        "inline-flex items-center justify-center gap-1",
         styleClass,
       )}
     >
@@ -832,8 +832,8 @@ export function CampaignDetail({
                       <p className="text-[10px] text-muted-foreground truncate">{lead?.title || lead?.email}</p>
                     </div>
                     <span className={cn(
-                      "text-[10px] font-semibold uppercase tracking-wide px-1.5 h-5 rounded-full shrink-0 whitespace-nowrap",
-                      "inline-flex items-center justify-center leading-none",
+                      "text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap",
+                      "inline-flex items-center justify-center",
                       getStatusStyle(cl),
                     )}>
                       {getSidebarBadge(cl, isGenerating)}
