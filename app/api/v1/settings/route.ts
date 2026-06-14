@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchSettingsSchema, SETTINGS_KEYS } from "@/lib/validators/settings";
+import { invalidateSettingsCache } from "@/lib/services/settings";
 
 export async function GET(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -39,6 +40,8 @@ export async function PATCH(req: NextRequest) {
     );
     if (error) return fail(500, "INTERNAL", error.message);
   }
+
+  invalidateSettingsCache();
 
   const { data } = await db.from("settings").select("key, value").in("key", [...SETTINGS_KEYS]);
   const result: Record<string, string> = {};

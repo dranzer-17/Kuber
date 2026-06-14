@@ -41,9 +41,9 @@ export const PIPELINE_STAGES: LeadStatus[] = [
   "Input Required", "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
 ];
 
-/** Kanban columns — Input Required is badge-only, not a column. */
+/** Kanban columns match full lead lifecycle including Input Required. */
 export const KANBAN_STAGES: LeadStatus[] = [
-  "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
+  "Input Required", "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
 ];
 
 export const STEP_DESCRIPTIONS: Record<LeadStatus, string> = {
@@ -64,7 +64,7 @@ export const STATUS_ORDER: Record<LeadStatus, number> = {
 };
 
 export function kanbanColumnFor(lead: Lead): LeadStatus {
-  if (lead.status === "Input Required") return "New";
+  if (lead.status === "Input Required") return "Input Required";
   if (KANBAN_STAGES.includes(lead.status)) return lead.status;
   return "New";
 }

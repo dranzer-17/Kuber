@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete, type DraftOutput } from "@/lib/services/llm";
-import { getSystemPrompt } from "@/lib/services/settings";
+import { getDraftSystemPrompt } from "@/lib/services/settings";
 import { KUBER_CONTEXT } from "@/lib/constants";
 
 const DraftSchema = z.object({ subject: z.string(), body: z.string() });
@@ -104,7 +104,7 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const systemPrompt = await getSystemPrompt(db);
+    const systemPrompt = await getDraftSystemPrompt(db);
     const { json } = await complete<DraftOutput>({
       system: systemPrompt,
       user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext),

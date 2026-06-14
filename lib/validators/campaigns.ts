@@ -41,3 +41,10 @@ export const CampaignLeadsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
+
+export const PatchCampaignLeadSchema = z.object({
+  campaign_lead_id: z.string().uuid(),
+  crm_status: z.enum([
+    "new", "enriched", "draft", "approved", "sent", "replied", "won", "closed", "failed", "skipped",
+  ]),
+});

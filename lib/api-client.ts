@@ -328,6 +328,36 @@ export async function sendApprovedLeads(token: string, campaignId: string, leadI
   }, token);
 }
 
+export async function setCampaignLeadStatus(
+  token: string,
+  campaignId: string,
+  campaignLeadId: string,
+  crmStatus: "won" | "closed" | "replied" | "new" | "enriched" | "draft" | "approved" | "sent" | "failed" | "skipped",
+): Promise<{ id: string; crm_status: string }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/leads`, {
+    method: "PATCH",
+    body: JSON.stringify({ campaign_lead_id: campaignLeadId, crm_status: crmStatus }),
+  }, token);
+}
+
+export async function fetchCampaignReport(token: string, campaignId: string): Promise<{
+  campaignId: string;
+  totals: {
+    leads: number;
+    draftsGenerated: number;
+    certified: number;
+    sent: number;
+    replied: number;
+    won: number;
+    closed: number;
+    failed: number;
+  };
+  rates: { replyRate: number; certifyRate: number };
+  stageDistribution: Array<{ stage: string; label: string; count: number }>;
+}> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/report`, {}, token);
+}
+
 export async function fetchSettings(token: string): Promise<Record<string, string>> {
   return apiFetch("/api/v1/settings", {}, token);
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeft, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown,
+  List, LayoutGrid, BarChart2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -23,7 +24,11 @@ import {
   fetchDraftHistory,
   restoreDraftVersion,
   reopenDraft,
+  fetchCampaignReport,
+  setCampaignLeadStatus,
 } from "@/lib/api-client";
+import { CampaignKanban } from "@/components/app/campaign-kanban";
+import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
 import { supabase } from "@/lib/supabase";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
@@ -43,7 +48,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 const DRAFT_STATUS_LABEL: Record<string, string> = {
   generating: "Generating",
-  draft:      "Draft Ready",
+  draft:      "Draft",
   approved:   "Certified",
   sent:       "Sent",
   failed:     "Failed",
@@ -99,6 +104,8 @@ function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
   return "—";
 }
 
+type CampaignViewTab = "list" | "kanban" | "report";
+
 export function CampaignDetail({
   campaign,
   onBack,
@@ -126,6 +133,9 @@ export function CampaignDetail({
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
   const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [viewTab, setViewTab] = useState<CampaignViewTab>("list");
+  const [report, setReport] = useState<CampaignReportData | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -152,6 +162,25 @@ export function CampaignDetail({
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [loadData]);
+
+  useEffect(() => {
+    if (viewTab !== "report") return;
+    let cancelled = false;
+    setReportLoading(true);
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || cancelled) return;
+      try {
+        const data = await fetchCampaignReport(session.access_token, campaign.id);
+        if (!cancelled) setReport(data);
+      } catch {
+        if (!cancelled) setReport(null);
+      } finally {
+        if (!cancelled) setReportLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [viewTab, campaign.id, campaignLeads.length, progress?.sent, progress?.failed]);
 
   useEffect(() => {
     if (!progress) return;
@@ -368,6 +397,18 @@ export function CampaignDetail({
     }
   }
 
+  async function handleSetOutcome(campaignLeadId: string, status: "won" | "closed") {
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await setCampaignLeadStatus(session.access_token, campaign.id, campaignLeadId, status);
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   const checkedDraftCount = campaignLeads.filter(
     (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
   ).length;
@@ -554,9 +595,45 @@ export function CampaignDetail({
         )}
       </div>
 
-      {/* Split body: leads list | draft panel */}
+      {/* View tabs: List | Kanban | Report */}
+      <div className="border-b border-border px-8 py-2 shrink-0 flex gap-1">
+        {([
+          { id: "list" as const, label: "Leads", icon: List },
+          { id: "kanban" as const, label: "Kanban", icon: LayoutGrid },
+          { id: "report" as const, label: "Report", icon: BarChart2 },
+        ]).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setViewTab(id)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+              viewTab === id
+                ? "bg-secondary text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
+            )}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {viewTab === "report" ? (
+        reportLoading ? (
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 className="size-6 text-muted-foreground animate-spin" />
+          </div>
+        ) : report ? (
+          <CampaignReportView report={report} />
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+            Could not load report.
+          </div>
+        )
+      ) : (
       <div className="flex flex-1 min-h-0">
-        {/* Leads sidebar */}
+        {viewTab === "list" ? (
         <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/50">
           <div className="px-4 py-3 border-b border-border shrink-0">
             <div className="flex items-center justify-between mb-1 gap-2">
@@ -668,6 +745,21 @@ export function CampaignDetail({
             )}
           </div>
         </div>
+        ) : (
+        <div className="flex-1 min-w-0 max-w-2xl shrink-0 border-r border-border flex flex-col bg-card/50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-border shrink-0">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Campaign journey
+            </p>
+          </div>
+          <CampaignKanban
+            leads={sortedCampaignLeads}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onSetStatus={handleSetOutcome}
+          />
+        </div>
+        )}
 
         {/* Draft review panel */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -834,6 +926,7 @@ export function CampaignDetail({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

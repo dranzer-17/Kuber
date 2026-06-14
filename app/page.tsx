@@ -209,6 +209,13 @@ const STATUS_DOT: Record<LeadStatus, string> = {
   Closed:       "bg-zinc-400",
 };
 
+const CAMPAIGN_CARD_STATUS_STYLES: Record<string, string> = {
+  Draft:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+  Live:      "bg-green-500/15 text-green-400 border-green-500/25",
+  Scheduled: "bg-blue-500/15 text-blue-400 border-blue-500/25",
+  Paused:    "bg-amber-500/15 text-amber-400 border-amber-500/25",
+};
+
 function StatusDot({ status }: { status: LeadStatus }) {
   return (
     <span
@@ -1268,12 +1275,11 @@ export default function Home() {
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="font-semibold">{c.name}</p>
-                        {c.status === "Draft" && (
-                          <span className="bg-zinc-500/15 text-zinc-400 border-zinc-500/25 border rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0">
-                            Draft
-                          </span>
-                        )}
+                        <p className="font-semibold truncate">{c.name}</p>
+                        <span className={cn(
+                          "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5 shrink-0",
+                          CAMPAIGN_CARD_STATUS_STYLES[c.status] ?? CAMPAIGN_CARD_STATUS_STYLES.Draft,
+                        )}>{c.status}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">{c.humanInLoop ? "Human review ON" : "Auto-send"}</p>
                     </div>

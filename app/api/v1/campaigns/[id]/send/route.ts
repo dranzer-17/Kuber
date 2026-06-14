@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { createInstantlyCampaign, addLeadsToInstantly, activateInstantlyCampaign } from "@/lib/services/instantly";
+import { getClientContext } from "@/lib/services/settings";
 import { z } from "zod";
 
 const Schema = z.object({
@@ -28,11 +29,14 @@ export async function POST(
   const db = createAdminClient();
   const { data: campaign } = await db
     .from("campaigns")
-    .select("name, human_in_loop, instantly_campaign_id, daily_limit, window_from, window_to, schedule_timezone, send_days")
+    .select("name, human_in_loop, instantly_campaign_id, daily_limit, window_from, window_to, schedule_timezone, send_days, sender_name, sent_count")
     .eq("id", id)
     .single();
 
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
+
+  const clientCtx = await getClientContext(db);
+  const senderName = campaign.sender_name?.trim() || clientCtx.defaultSenderName;
 
   let q = db
     .from("campaign_leads")
@@ -102,6 +106,7 @@ export async function POST(
       lastName: e.lastName,
       subject: e.subject,
       body: e.body,
+      senderName,
     })));
 
     if (!campaign.human_in_loop && !campaign.instantly_campaign_id) {
@@ -125,6 +130,7 @@ export async function POST(
     await db.from("campaigns").update({
       instantly_campaign_id: instantlyId,
       status: campaign.human_in_loop ? "draft" : "active",
+      sent_count: (campaign.sent_count ?? 0) + emails.length,
       updated_at: now,
     }).eq("id", id);
 

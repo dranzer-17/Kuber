@@ -56,6 +56,7 @@ export async function addLeadsToInstantly(campaignId: string, leads: Array<{
   lastName: string;
   subject: string;
   body: string;
+  senderName?: string;
 }>): Promise<void> {
   const res = await fetch(`${BASE}/campaign-lead`, {
     method: "POST",
@@ -69,6 +70,7 @@ export async function addLeadsToInstantly(campaignId: string, leads: Array<{
         variables: {
           customSubject: l.subject,
           customBody: l.body.replace(/\n/g, "<br>"),
+          ...(l.senderName ? { senderName: l.senderName } : {}),
         },
       })),
     }),

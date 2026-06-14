@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
-import { AddLeadsToCampaignSchema, CampaignLeadsQuerySchema } from "@/lib/validators/campaigns";
+import { AddLeadsToCampaignSchema, CampaignLeadsQuerySchema, PatchCampaignLeadSchema } from "@/lib/validators/campaigns";
 
 const TERMINAL_STATUSES = new Set(["completed", "paused"]);
 
@@ -109,4 +109,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     blocked_not_enriched: blockedNotEnriched,
     skipped_existing: skippedExisting,
   });
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try { await requireAuth(req); } catch (r) { return r as Response; }
+
+  const { id } = await params;
+  const body = await req.json().catch(() => null);
+  const parsed = PatchCampaignLeadSchema.safeParse(body);
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+
+  const db = createAdminClient();
+
+  const { data: campaign } = await db.from("campaigns").select("id").eq("id", id).maybeSingle();
+  if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
+
+  const { data: row } = await db
+    .from("campaign_leads")
+    .select("id")
+    .eq("id", parsed.data.campaign_lead_id)
+    .eq("campaign_id", id)
+    .maybeSingle();
+
+  if (!row) return fail(404, "NOT_FOUND", "Campaign lead not found");
+
+  const now = new Date().toISOString();
+  const { error } = await db
+    .from("campaign_leads")
+    .update({ crm_status: parsed.data.crm_status, updated_at: now })
+    .eq("id", parsed.data.campaign_lead_id);
+
+  if (error) return fail(500, "INTERNAL", error.message);
+
+  return ok({ id: parsed.data.campaign_lead_id, crm_status: parsed.data.crm_status });
 }

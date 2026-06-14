@@ -3,6 +3,13 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 
+type DraftRow = { status: string } | { status: string }[] | null;
+
+function unwrapDraft(raw: DraftRow): { status: string } | null {
+  if (!raw) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -20,14 +27,9 @@ export async function GET(
 
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
 
-  const { count: total } = await db
+  const { data: rows } = await db
     .from("campaign_leads")
-    .select("id", { count: "exact", head: true })
-    .eq("campaign_id", id);
-
-  const { data: drafts } = await db
-    .from("email_drafts")
-    .select("status")
+    .select("id, email_drafts(status)")
     .eq("campaign_id", id);
 
   const statusCounts: Record<string, number> = {
@@ -38,26 +40,25 @@ export async function GET(
     failed: 0,
     rejected: 0,
   };
+  let pending = 0;
 
-  for (const d of drafts ?? []) {
-    const s = d.status as string;
-    if (s in statusCounts) statusCounts[s]++;
+  for (const row of rows ?? []) {
+    const draft = unwrapDraft(row.email_drafts as DraftRow);
+    if (!draft) {
+      pending++;
+      continue;
+    }
+    const s = draft.status;
+    if (s in statusCounts) statusCounts[s as keyof typeof statusCounts]++;
   }
 
-  const { count: pending } = await db
-    .from("campaign_leads")
-    .select("id", { count: "exact", head: true })
-    .eq("campaign_id", id)
-    .is("draft_id", null)
-    .in("crm_status", ["new", "enriched", "draft"]);
-
   return ok({
-    total: total ?? 0,
+    total: rows?.length ?? 0,
     generating: statusCounts.generating,
     draft: statusCounts.draft,
     approved: statusCounts.approved,
     sent: statusCounts.sent,
     failed: statusCounts.failed,
-    pending: pending ?? 0,
+    pending,
   });
 }
