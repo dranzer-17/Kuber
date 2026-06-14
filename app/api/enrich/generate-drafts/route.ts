@@ -1,0 +1,92 @@
+import { NextRequest } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  fetchDraftTargets,
+  generateOneDraft,
+  countPendingDrafts,
+} from "@/lib/services/generate-drafts";
+
+export const maxDuration = 55;
+
+export async function POST(req: NextRequest) {
+  if (req.headers.get("x-internal-secret") !== process.env.INTERNAL_SECRET) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => ({})) as { campaign_id?: string };
+  const campaignId = body.campaign_id;
+  if (!campaignId) {
+    return Response.json({ error: "campaign_id required" }, { status: 400 });
+  }
+
+  const db = createAdminClient();
+
+  const { data: campaign } = await db
+    .from("campaigns")
+    .select("id, name, human_in_loop, status")
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  if (!campaign) {
+    return Response.json({ error: "Campaign not found" }, { status: 404 });
+  }
+
+  const targets = await fetchDraftTargets(db, campaignId, 10);
+
+  if (targets.length === 0) {
+    const pending = await countPendingDrafts(db, campaignId);
+    if (pending === 0) {
+      await db.from("campaigns").update({
+        status: "draft",
+        updated_at: new Date().toISOString(),
+      }).eq("id", campaignId);
+    }
+    return Response.json({ processed: 0, succeeded: 0, failed: 0, status: "no_more_pending" });
+  }
+
+  await db.from("campaigns").update({
+    status: "processing",
+    updated_at: new Date().toISOString(),
+  }).eq("id", campaignId);
+
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const target of targets) {
+    const result = await generateOneDraft(
+      db,
+      target,
+      campaignId,
+      campaign.human_in_loop,
+      campaign.name,
+    );
+    if (result.ok) succeeded++;
+    else failed++;
+  }
+
+  const remaining = await countPendingDrafts(db, campaignId);
+
+  if (remaining > 0) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    fetch(`${baseUrl}/api/enrich/generate-drafts`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": process.env.INTERNAL_SECRET!,
+      },
+      body: JSON.stringify({ campaign_id: campaignId }),
+    }).catch(() => {});
+  } else {
+    await db.from("campaigns").update({
+      status: "draft",
+      updated_at: new Date().toISOString(),
+    }).eq("id", campaignId);
+  }
+
+  return Response.json({
+    processed: targets.length,
+    succeeded,
+    failed,
+    remaining,
+  });
+}

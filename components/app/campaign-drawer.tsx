@@ -1,15 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
-  X, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
-  Globe, Calendar, ExternalLink, Loader2, CheckCircle2,
+  ArrowLeft, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
+  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
-import { fetchCampaignLeads } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  fetchCampaignLeads,
+  fetchDraftProgress,
+  approveDraft,
+  bulkApproveDrafts,
+  editDraft,
+  regenerateDraft,
+  sendApprovedLeads,
+} from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import type { Campaign } from "@/components/app/create-campaign-modal";
+import { InfoTip } from "@/components/ui/info-tip";
+import {
+  DRAFT_BADGE_SHORT,
+  CAMPAIGN_STATUS_HELP,
+  CAMPAIGN_ACTION_HELP,
+  type CampaignLeadsSort,
+} from "@/lib/leads";
 
 const STATUS_STYLES: Record<string, string> = {
   Draft:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
@@ -18,232 +37,703 @@ const STATUS_STYLES: Record<string, string> = {
   Scheduled: "bg-blue-500/15 text-blue-400 border-blue-500/25",
 };
 
-const CRM_STYLES: Record<string, string> = {
-  new:        "bg-zinc-500/10 text-zinc-400",
+const DRAFT_STATUS_LABEL: Record<string, string> = {
+  generating: "Generating",
+  draft:      "Draft Ready",
+  approved:   "Certified",
+  sent:       "Sent",
+  failed:     "Failed",
+  rejected:   "Rejected",
+};
+
+const DRAFT_STATUS_STYLE: Record<string, string> = {
+  generating: "bg-amber-500/10 text-amber-400",
+  draft:      "bg-blue-500/10 text-blue-400",
+  approved:   "bg-green-500/10 text-green-400",
   sent:       "bg-teal-500/10 text-teal-400",
-  replied:    "bg-green-500/10 text-green-400",
-  bounced:    "bg-red-500/10 text-red-400",
-  unsubscribed: "bg-orange-500/10 text-orange-400",
+  failed:     "bg-red-500/10 text-red-400",
+  rejected:   "bg-zinc-500/10 text-zinc-400",
 };
 
 type CampaignLead = {
   id: string;
+  lead_id: string;
   crm_status: string;
   created_at: string;
   leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
-  email_drafts: { subject: string | null; status: string } | null;
+  email_drafts: { id: string; subject: string | null; body: string | null; status: string } | null;
 };
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">{label}</p>
-      {children}
-    </div>
-  );
-}
+type DraftProgress = {
+  total: number; generating: number; draft: number; approved: number;
+  sent: number; failed: number; pending: number;
+};
 
 const DAY_SHORT: Record<string, string> = {
   monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu",
   friday: "Fri", saturday: "Sat", sunday: "Sun",
 };
 
-export function CampaignDrawer({
+function sortCampaignLeads(leads: CampaignLead[], sort: CampaignLeadsSort): CampaignLead[] {
+  const copy = [...leads];
+  if (sort === "newest") {
+    return copy.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  return copy.sort((a, b) => {
+    const aName = [a.leads?.first_name, a.leads?.last_name].filter(Boolean).join(" ");
+    const bName = [b.leads?.first_name, b.leads?.last_name].filter(Boolean).join(" ");
+    return aName.localeCompare(bName);
+  });
+}
+
+function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
+  const ds = cl.email_drafts?.status;
+  if (ds && DRAFT_BADGE_SHORT[ds]) return DRAFT_BADGE_SHORT[ds];
+  if (cl.crm_status === "new" || cl.crm_status === "enriched") {
+    return isGenerating ? "Pending" : "Pending";
+  }
+  return "—";
+}
+
+export function CampaignDetail({
   campaign,
-  onClose,
-  onLeadClick,
+  onBack,
 }: {
-  campaign: Campaign | null;
-  onClose: () => void;
-  onLeadClick?: (leadId: string) => void;
+  campaign: Campaign;
+  onBack: () => void;
 }) {
   const [campaignLeads, setCampaignLeads] = useState<CampaignLead[]>([]);
+  const [progress, setProgress] = useState<DraftProgress | null>(null);
   const [loading, setLoading] = useState(false);
-  const [expandedDraft, setExpandedDraft] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [editSubject, setEditSubject] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [regenOpen, setRegenOpen] = useState(false);
+  const [regenQuery, setRegenQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [certifying, setCertifying] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [configOpen, setConfigOpen] = useState(false);
+  const [leadsSort, setLeadsSort] = useState<CampaignLeadsSort>("az");
+
+  const loadData = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const token = session.access_token;
+    const [leadsRes, prog] = await Promise.all([
+      fetchCampaignLeads(token, campaign.id),
+      fetchDraftProgress(token, campaign.id),
+    ]);
+    const leads = leadsRes.campaign_leads as CampaignLead[];
+    setCampaignLeads(leads);
+    setProgress(prog);
+    return leads;
+  }, [campaign.id]);
 
   useEffect(() => {
-    if (!campaign) { setCampaignLeads([]); return; }
     setLoading(true);
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) return;
-      fetchCampaignLeads(session.access_token, campaign.id)
-        .then((res) => setCampaignLeads(res.campaign_leads as CampaignLead[]))
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    });
-  }, [campaign?.id]);
+    loadData()
+      .then((leads) => {
+        if (leads && leads.length === 1) {
+          setSelectedId(leads[0].id);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [loadData]);
 
-  if (!campaign) return null;
+  useEffect(() => {
+    if (!progress) return;
+    const isGenerating = (progress.generating + progress.pending) > 0;
+    if (!isGenerating) return;
+    const interval = setInterval(() => { void loadData(); }, 3000);
+    return () => clearInterval(interval);
+  }, [progress, loadData]);
+
+  const selected = campaignLeads.find((cl) => cl.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (selected?.email_drafts) {
+      setEditSubject(selected.email_drafts.subject ?? "");
+      setEditBody(selected.email_drafts.body ?? "");
+    } else {
+      setEditSubject("");
+      setEditBody("");
+    }
+    setRegenOpen(false);
+    setRegenQuery("");
+  }, [selected?.id, selected?.email_drafts?.subject, selected?.email_drafts?.body]);
 
   const activeDays = Object.entries(campaign.sendDays ?? {})
     .filter(([, v]) => v)
     .map(([k]) => DAY_SHORT[k] ?? k);
 
+  const draftReadyLeads = campaignLeads.filter((cl) => cl.email_drafts?.status === "draft");
+  const certifiedCount = campaignLeads.filter((cl) =>
+    cl.email_drafts?.status === "approved" || cl.crm_status === "approved"
+  ).length;
+  const isGenerating = progress ? (progress.generating + progress.pending) > 0 : false;
+  const progressPct = progress && progress.total > 0
+    ? Math.round(((progress.total - progress.pending - progress.generating) / progress.total) * 100)
+    : 0;
+
+  function getDisplayStatus(cl: CampaignLead): string {
+    if (cl.email_drafts?.status) return DRAFT_STATUS_LABEL[cl.email_drafts.status] ?? cl.crm_status;
+    if (cl.crm_status === "new" || cl.crm_status === "enriched") return isGenerating ? "Pending" : "No draft";
+    return cl.crm_status;
+  }
+
+  function getStatusStyle(cl: CampaignLead): string {
+    const ds = cl.email_drafts?.status;
+    if (ds && DRAFT_STATUS_STYLE[ds]) return DRAFT_STATUS_STYLE[ds];
+    return "bg-secondary text-muted-foreground";
+  }
+
+  function toggleCheck(clId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(clId)) next.delete(clId); else next.add(clId);
+      return next;
+    });
+  }
+
+  function toggleAllDraftReady() {
+    const ids = draftReadyLeads.map((cl) => cl.id);
+    const allChecked = ids.every((id) => checkedIds.has(id));
+    setCheckedIds(allChecked ? new Set() : new Set(ids));
+  }
+
+  async function handleSaveEdit() {
+    if (!selected?.email_drafts?.id) return;
+    setSaving(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await editDraft(session.access_token, selected.email_drafts.id, editSubject, editBody);
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCertifyOne(draftId: string) {
+    setCertifying(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await approveDraft(session.access_token, draftId);
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCertifying(false);
+    }
+  }
+
+  async function handleBulkCertify(draftIds?: string[]) {
+    const ids = draftIds ?? campaignLeads
+      .filter((cl) => cl.email_drafts?.status === "draft")
+      .map((cl) => cl.email_drafts!.id);
+    if (ids.length === 0) return;
+    setCertifying(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await bulkApproveDrafts(session.access_token, ids);
+      setCheckedIds(new Set());
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCertifying(false);
+    }
+  }
+
+  async function handleCertifyAll() {
+    await handleBulkCertify();
+  }
+
+  async function handleRegenerate() {
+    if (!selected?.email_drafts?.id) return;
+    setRegenerating(true);
+    setRegenOpen(false);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { draft } = await regenerateDraft(session.access_token, selected.email_drafts.id, regenQuery || undefined);
+      setEditSubject(draft.subject ?? "");
+      setEditBody(draft.body ?? "");
+      setRegenQuery("");
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  async function handleSend() {
+    setSending(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const certifiedLeadIds = campaignLeads
+        .filter((cl) => cl.crm_status === "approved" || cl.email_drafts?.status === "approved")
+        .map((cl) => cl.lead_id);
+      if (certifiedLeadIds.length === 0) {
+        setError("No certified leads to send.");
+        return;
+      }
+      await sendApprovedLeads(session.access_token, campaign.id, certifiedLeadIds);
+      await loadData();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const checkedDraftCount = campaignLeads.filter(
+    (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
+  ).length;
+
+  const sortedCampaignLeads = sortCampaignLeads(campaignLeads, leadsSort);
+
+  const selectedLead = selected?.leads;
+  const selectedName = selectedLead
+    ? [selectedLead.first_name, selectedLead.last_name].filter(Boolean).join(" ") || "Unknown"
+    : "";
+
   return (
-    <div className="fixed inset-0 z-40 flex justify-end pointer-events-none">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/40 pointer-events-auto"
-        onClick={onClose}
-      />
-
-      {/* Drawer */}
-      <div className="relative w-[480px] h-full bg-card border-l border-border shadow-2xl flex flex-col pointer-events-auto overflow-hidden">
-
-        {/* Header */}
-        <div className="flex items-start justify-between px-6 py-5 border-b border-border shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="size-9 rounded-xl bg-secondary border border-border flex items-center justify-center shrink-0">
-              <Megaphone className="size-4 text-muted-foreground" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="font-bold text-base truncate">{campaign.name}</h2>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className={cn(
-                  "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5",
-                  STATUS_STYLES[campaign.status] ?? STATUS_STYLES.Draft,
-                )}>{campaign.status}</span>
-                {campaign.humanInLoop && (
-                  <span className="text-[10px] text-muted-foreground">Human review ON</span>
-                )}
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="border-b border-border px-8 py-5 shrink-0 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              <ArrowLeft className="size-4" /> All campaigns
+            </button>
+            <div className="h-5 w-px bg-border shrink-0" />
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="size-9 rounded-xl bg-secondary border border-border flex items-center justify-center shrink-0">
+                <Megaphone className="size-4 text-muted-foreground" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold truncate">{campaign.name}</h1>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className={cn(
+                    "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5",
+                    STATUS_STYLES[campaign.status] ?? STATUS_STYLES.Draft,
+                  )}>{campaign.status}</span>
+                  {campaign.humanInLoop && (
+                    <span className="text-[10px] text-muted-foreground">Human review ON</span>
+                  )}
+                  {isGenerating && (
+                    <span className="text-[10px] text-amber-400 flex items-center gap-1">
+                      <Loader2 className="size-2.5 animate-spin" /> Generating drafts…
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-colors shrink-0 mt-0.5"
-          >
-            <X className="size-4" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {draftReadyLeads.length > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  className="gap-1.5 shrink-0"
+                  disabled={certifying}
+                  onClick={handleCertifyAll}
+                >
+                  {certifying ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Check className="size-3.5" />
+                  )}
+                  Certify all draft-ready ({draftReadyLeads.length})
+                </Button>
+                <InfoTip text={CAMPAIGN_ACTION_HELP.certifyAll} side="bottom" />
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1">
+              <Button
+                className="gap-1.5 shrink-0"
+                disabled={sending || certifiedCount === 0}
+                onClick={handleSend}
+              >
+                {sending ? (
+                  <><Loader2 className="size-3.5 animate-spin" /> Sending…</>
+                ) : (
+                  <><Send className="size-3.5" /> Send certified ({certifiedCount})</>
+                )}
+              </Button>
+              <InfoTip text={CAMPAIGN_ACTION_HELP.sendCertified} side="bottom" />
+            </span>
+          </div>
         </div>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        {progress && isGenerating && (
+          <div className="space-y-1.5 max-w-xl">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Draft generation</span>
+              <span>{progressPct}% · {progress.generating + progress.pending} remaining</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+              <div className="h-full bg-primary transition-all duration-500" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+        )}
 
-          {/* Stats */}
-          <div className="grid grid-cols-3 gap-3">
+        <div className="flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-6">
             {[
-              { icon: Users,         label: "Leads",   value: campaign.leads   },
-              { icon: Send,          label: "Sent",    value: campaign.sent    },
+              { icon: Users, label: "Leads", value: campaign.leads },
+              { icon: Send, label: "Sent", value: campaign.sent },
               { icon: MessageSquare, label: "Replied", value: campaign.replied },
             ].map(({ icon: Icon, label, value }) => (
-              <div key={label} className="rounded-xl border border-border bg-secondary/30 p-3 text-center">
-                <Icon className="size-3.5 text-muted-foreground mx-auto mb-1" />
-                <p className="text-xl font-bold tabular-nums">{value}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+              <div key={label} className="flex items-center gap-2">
+                <Icon className="size-3.5 text-muted-foreground" />
+                <span className="text-sm font-bold tabular-nums">{value}</span>
+                <span className="text-xs text-muted-foreground">{label}</span>
               </div>
             ))}
           </div>
 
-          {/* Config */}
-          <Section label="Configuration">
-            <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Gauge className="size-3.5" /> Daily limit
-                </div>
-                <span className="text-sm font-medium">{campaign.dailyLimit ?? 30} emails/day</span>
-              </div>
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Clock className="size-3.5" /> Sending window
-                </div>
-                <span className="text-sm font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
-              </div>
-              <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Globe className="size-3.5" /> Timezone
-                </div>
-                <span className="text-sm font-medium">{campaign.timezone ?? "—"}</span>
-              </div>
-              {activeDays.length > 0 && (
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Calendar className="size-3.5" /> Send days
-                  </div>
-                  <span className="text-sm font-medium">{activeDays.join(", ")}</span>
-                </div>
+          {progress && (
+            <div className="flex flex-wrap gap-2 text-[10px] items-center">
+              {progress.draft > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">
+                  {progress.draft} draft ready
+                  <InfoTip text={CAMPAIGN_STATUS_HELP.draft} />
+                </span>
+              )}
+              {progress.approved > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">
+                  {progress.approved} certified
+                  <InfoTip text={CAMPAIGN_STATUS_HELP.approved} />
+                </span>
+              )}
+              {progress.sent > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400">
+                  {progress.sent} sent
+                  <InfoTip text={CAMPAIGN_STATUS_HELP.sent} />
+                </span>
+              )}
+              {progress.failed > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">
+                  {progress.failed} failed
+                  <InfoTip text={CAMPAIGN_STATUS_HELP.failed} />
+                </span>
               )}
             </div>
-          </Section>
-
-          {/* Instantly link */}
-          {campaign.instantlyId && (
-            <Section label="Instantly">
-              <a
-                href={`https://app.instantly.ai/app/campaign/${campaign.instantlyId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-sm text-primary hover:underline"
-              >
-                <ExternalLink className="size-3.5" />
-                View in Instantly
-              </a>
-            </Section>
           )}
 
-          {/* Leads list */}
-          <Section label={`Leads (${campaign.leads})`}>
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="size-4 text-muted-foreground animate-spin" />
-              </div>
-            ) : campaignLeads.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-4 text-center">No leads in this campaign yet.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {campaignLeads.map((cl) => {
-                  const lead = cl.leads;
-                  const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
-                  return (
-                    <div
-                      key={cl.id}
-                      className="rounded-xl border border-border bg-card overflow-hidden"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExpandedDraft((prev) => prev === cl.id ? null : cl.id);
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-secondary/40 transition-colors text-left"
-                      >
-                        <Avatar name={name} size="sm" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{name}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{lead?.title || lead?.email}</p>
-                        </div>
-                        <span className={cn(
-                          "text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0",
-                          CRM_STYLES[cl.crm_status] ?? "bg-secondary text-muted-foreground",
-                        )}>
-                          {cl.crm_status}
-                        </span>
-                        {cl.email_drafts?.status === "sent" && (
-                          <CheckCircle2 className="size-3.5 text-green-400 shrink-0" />
-                        )}
-                      </button>
+          <button
+            type="button"
+            onClick={() => setConfigOpen((o) => !o)}
+            className="text-xs text-muted-foreground hover:text-foreground ml-auto"
+          >
+            {configOpen ? "Hide config" : "Show config"}
+          </button>
+        </div>
 
-                      {expandedDraft === cl.id && cl.email_drafts?.subject && (
-                        <div className="px-4 pb-3 pt-1 border-t border-border bg-secondary/20">
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Subject</p>
-                          <p className="text-xs font-medium mb-2">{cl.email_drafts.subject}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+        {configOpen && (
+          <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden text-sm max-w-lg">
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
+              <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
+              <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
+              <span className="font-medium">{campaign.timezone ?? "—"}</span>
+            </div>
+            {activeDays.length > 0 && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
+                <span className="font-medium">{activeDays.join(", ")}</span>
               </div>
             )}
-          </Section>
+            {campaign.instantlyId && (
+              <div className="px-4 py-2.5">
+                <a
+                  href={`https://app.instantly.ai/app/campaign/${campaign.instantlyId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm text-primary hover:underline"
+                >
+                  <ExternalLink className="size-3.5" /> View in Instantly
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
+      {/* Split body: leads list | draft panel */}
+      <div className="flex flex-1 min-h-0">
+        {/* Leads sidebar */}
+        <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/50">
+          <div className="px-4 py-3 border-b border-border shrink-0">
+            <div className="flex items-center justify-between mb-1 gap-2">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground inline-flex items-center gap-1">
+                Leads ({campaign.leads})
+                <InfoTip text="Select leads to certify individually, or use Certify all in the header." />
+              </p>
+              <div className="flex rounded-md border border-border p-0.5 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setLeadsSort("az")}
+                  className={cn("px-2 py-0.5 rounded", leadsSort === "az" ? "bg-secondary text-foreground" : "text-muted-foreground")}
+                >
+                  A–Z
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeadsSort("newest")}
+                  className={cn("px-2 py-0.5 rounded", leadsSort === "newest" ? "bg-secondary text-foreground" : "text-muted-foreground")}
+                >
+                  Newest
+                </button>
+              </div>
+            </div>
+            {draftReadyLeads.length > 0 && (
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={toggleAllDraftReady}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  {draftReadyLeads.every((cl) => checkedIds.has(cl.id)) ? "Deselect all" : "Select all draft-ready"}
+                </button>
+                {checkedDraftCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px] gap-1 px-2"
+                    disabled={certifying}
+                    onClick={() => handleBulkCertify(
+                      campaignLeads
+                        .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
+                        .map((cl) => cl.email_drafts!.id),
+                    )}
+                  >
+                    {certifying ? <Loader2 className="size-2.5 animate-spin" /> : <Check className="size-2.5" />}
+                    Certify selected ({checkedDraftCount})
+                    <InfoTip text={CAMPAIGN_ACTION_HELP.certifySelected} />
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="size-4 text-muted-foreground animate-spin" />
+              </div>
+            ) : sortedCampaignLeads.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-8 text-center px-2">No leads yet.</p>
+            ) : (
+              sortedCampaignLeads.map((cl) => {
+                const lead = cl.leads;
+                const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
+                const isSelected = selectedId === cl.id;
+                const canCheck = cl.email_drafts?.status === "draft";
+                return (
+                  <button
+                    key={cl.id}
+                    type="button"
+                    onClick={() => setSelectedId(cl.id)}
+                    className={cn(
+                      "w-full flex items-center gap-2 px-2.5 py-2.5 rounded-lg text-left transition-colors",
+                      isSelected
+                        ? "bg-primary/10 border border-primary/30"
+                        : "hover:bg-secondary/60 border border-transparent",
+                    )}
+                  >
+                    {canCheck ? (
+                      <span
+                        role="checkbox"
+                        aria-checked={checkedIds.has(cl.id)}
+                        onClick={(e) => toggleCheck(cl.id, e)}
+                        className={cn(
+                          "size-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                          checkedIds.has(cl.id) ? "bg-primary border-primary" : "border-border hover:border-muted-foreground",
+                        )}
+                      >
+                        {checkedIds.has(cl.id) && <Check className="size-2.5 text-primary-foreground" />}
+                      </span>
+                    ) : (
+                      <span className="size-4 shrink-0" />
+                    )}
+                    <Avatar name={name} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{name}</p>
+                      <p className="text-[10px] text-muted-foreground truncate">{lead?.title || lead?.email}</p>
+                    </div>
+                    <span className={cn(
+                      "text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap",
+                      getStatusStyle(cl),
+                    )}>
+                      {getSidebarBadge(cl, isGenerating)}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-border px-6 py-3 shrink-0">
-          <p className="text-[11px] text-muted-foreground">Created {campaign.createdAt}</p>
+        {/* Draft review panel */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {!selected ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+              <p className="text-sm text-muted-foreground">Select a lead to review and certify their draft.</p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="max-w-2xl mx-auto space-y-6">
+                {/* Lead header */}
+                <div className="flex items-center gap-3">
+                  <Avatar name={selectedName} size="md" />
+                  <div>
+                    <h2 className="text-lg font-bold">{selectedName}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedLead?.title || selectedLead?.email}
+                      {selectedLead?.country ? ` · ${selectedLead.country}` : ""}
+                    </p>
+                  </div>
+                  <span className={cn(
+                    "text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded inline-flex items-center gap-1",
+                    getStatusStyle(selected),
+                  )}>
+                    {getDisplayStatus(selected)}
+                    {selected.email_drafts?.status && (
+                      <InfoTip text={CAMPAIGN_STATUS_HELP[selected.email_drafts.status] ?? CAMPAIGN_STATUS_HELP.none} />
+                    )}
+                  </span>
+                  {selected.email_drafts?.status === "sent" && (
+                    <CheckCircle2 className="size-5 text-green-400" />
+                  )}
+                </div>
+
+                {selected.email_drafts?.status === "generating" || regenerating ? (
+                  <div className="flex flex-col items-center py-20 gap-3 rounded-xl border border-border bg-card">
+                    <Loader2 className="size-6 text-muted-foreground animate-spin" />
+                    <p className="text-sm text-muted-foreground">Generating personalised email…</p>
+                  </div>
+                ) : selected.email_drafts ? (
+                  <div className="space-y-4 rounded-xl border border-border bg-card p-6">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
+                      <Input
+                        value={editSubject}
+                        onChange={(e) => setEditSubject(e.target.value)}
+                        disabled={selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
+                        className="font-medium text-base"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Body</Label>
+                      <Textarea
+                        value={editBody}
+                        onChange={(e) => setEditBody(e.target.value)}
+                        disabled={selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
+                        rows={14}
+                        className="text-sm leading-relaxed resize-none"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {selected.email_drafts.status === "draft" && (
+                        <>
+                          <Button variant="outline" className="gap-1.5" disabled={saving} onClick={handleSaveEdit}>
+                            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                            Save edits
+                          </Button>
+                          <Button className="gap-1.5" disabled={certifying} onClick={() => handleCertifyOne(selected.email_drafts!.id)}>
+                            {certifying ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                            Certify draft
+                          </Button>
+                        </>
+                      )}
+                      {selected.email_drafts.status === "approved" && (
+                        <p className="text-sm text-green-400 flex items-center gap-1.5">
+                          <CheckCircle2 className="size-4" /> Certified — ready to send
+                        </p>
+                      )}
+                      {["draft", "failed", "rejected"].includes(selected.email_drafts.status) && (
+                        <Button variant="outline" className="gap-1.5" onClick={() => setRegenOpen((o) => !o)}>
+                          <RotateCcw className="size-3.5" /> Regenerate
+                        </Button>
+                      )}
+                    </div>
+
+                    {regenOpen && (
+                      <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
+                        <Input
+                          value={regenQuery}
+                          onChange={(e) => setRegenQuery(e.target.value)}
+                          placeholder="Optional instruction, e.g. Make it shorter…"
+                          onKeyDown={(e) => e.key === "Enter" && handleRegenerate()}
+                        />
+                        <Button size="sm" onClick={handleRegenerate} disabled={regenerating} className="gap-1.5">
+                          <RotateCcw className="size-3.5" /> Regenerate
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border bg-card p-12 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      {isGenerating ? "Draft is being generated…" : "No draft available for this lead."}
+                    </p>
+                  </div>
+                )}
+
+                {error && <p className="text-sm text-destructive">{error}</p>}
+              </div>
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** @deprecated Use CampaignDetail inline in page — kept for backwards compat */
+export function CampaignDrawer({
+  campaign,
+  onClose,
+}: {
+  campaign: Campaign | null;
+  onClose: () => void;
+}) {
+  if (!campaign) return null;
+  return (
+    <div className="fixed inset-0 z-40 bg-background">
+      <CampaignDetail campaign={campaign} onBack={onClose} />
     </div>
   );
 }

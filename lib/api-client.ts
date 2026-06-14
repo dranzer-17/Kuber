@@ -37,11 +37,14 @@ const CRM_STATUS_MAP: Record<string, LeadStatus> = {
   new:        "New",
   enriching:  "Enriching",
   enriched:   "Enriched",
+  draft:      "Draft Ready",
   draft_ready: "Draft Ready",
   in_review:  "In Review",
   approved:   "Approved",
   sent:       "Sent",
   replied:    "Replied",
+  skipped:    "New",
+  failed:     "New",
 };
 
 const SOURCE_MAP: Record<string, LeadSource> = {
@@ -141,7 +144,7 @@ export function mapDbLead(l: DbLead): Lead {
 
 export function mapDbCampaign(c: DbCampaign): Campaign {
   const statusMap: Record<string, Campaign["status"]> = {
-    draft: "Draft", active: "Live", paused: "Paused", completed: "Live", archived: "Paused",
+    draft: "Draft", processing: "Draft", active: "Live", paused: "Paused", completed: "Live", archived: "Paused",
   };
   return {
     id: c.id,
@@ -210,28 +213,55 @@ export async function apolloSearch(token: string, body: {
   return apiFetch("/api/v1/leads/apollo-search", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
-// ─── Email generation ─────────────────────────────────────────────────────────
+// ─── Drafts & campaign send ───────────────────────────────────────────────────
 
-export async function generateEmails(token: string, body: {
-  lead_ids: string[];
-  campaign_name: string;
-  custom_instruction?: string;
-  single_lead_id?: string;
-}): Promise<{ emails: { lead_id: string; subject: string; body: string }[] }> {
-  return apiFetch("/api/v1/campaigns/generate-emails", { method: "POST", body: JSON.stringify(body) }, token);
+export async function triggerDraftGeneration(token: string, campaignId: string): Promise<{ queued: boolean; lead_count: number }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/generate-drafts`, { method: "POST" }, token);
 }
 
-export async function sendCampaign(token: string, campaignId: string, body: {
-  emails: { lead_id: string; email: string; first_name: string; last_name: string; subject: string; body: string }[];
-  config: {
-    daily_limit: number;
-    window_from: string;
-    window_to: string;
-    timezone: string;
-    send_days?: Record<string, boolean>;
-  };
-}): Promise<{ instantly_campaign_id: string; activated: boolean }> {
-  return apiFetch(`/api/v1/campaigns/${campaignId}/send`, { method: "POST", body: JSON.stringify(body) }, token);
+export async function fetchDraftProgress(token: string, campaignId: string): Promise<{
+  total: number; generating: number; draft: number; approved: number; sent: number; failed: number; pending: number;
+}> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/draft-progress`, {}, token);
+}
+
+export async function approveDraft(token: string, draftId: string): Promise<{ id: string; status: string }> {
+  return apiFetch(`/api/v1/drafts/${draftId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "approve" }),
+  }, token);
+}
+
+export async function bulkApproveDrafts(token: string, draftIds: string[]): Promise<{ approved: number; skipped: number }> {
+  return apiFetch("/api/v1/drafts/bulk-approve", {
+    method: "POST",
+    body: JSON.stringify({ draft_ids: draftIds }),
+  }, token);
+}
+
+export async function editDraft(token: string, draftId: string, subject: string, body: string): Promise<{ id: string; status: string }> {
+  return apiFetch(`/api/v1/drafts/${draftId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action: "edit", subject, body }),
+  }, token);
+}
+
+export async function regenerateDraft(token: string, draftId: string, customInstruction?: string): Promise<{
+  draft: { id: string; subject: string | null; body: string | null; status: string };
+}> {
+  return apiFetch(`/api/v1/drafts/${draftId}/regenerate`, {
+    method: "POST",
+    body: JSON.stringify({ custom_instruction: customInstruction }),
+  }, token);
+}
+
+export async function sendApprovedLeads(token: string, campaignId: string, leadIds?: string[]): Promise<{
+  instantly_campaign_id: string; sent_count: number; activated: boolean;
+}> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/send`, {
+    method: "POST",
+    body: JSON.stringify(leadIds?.length ? { lead_ids: leadIds } : {}),
+  }, token);
 }
 
 // ─── Campaigns ────────────────────────────────────────────────────────────────
@@ -251,9 +281,9 @@ export async function createCampaign(token: string, body: {
 
 export async function fetchCampaignLeads(token: string, campaignId: string): Promise<{
   campaign_leads: {
-    id: string; crm_status: string; created_at: string;
+    id: string; lead_id: string; crm_status: string; created_at: string;
     leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
-    email_drafts: { subject: string | null; body: string | null; status: string } | null;
+    email_drafts: { id: string; subject: string | null; body: string | null; status: string } | null;
   }[];
   total: number;
 }> {

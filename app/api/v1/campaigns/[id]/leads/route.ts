@@ -20,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   let q = db
     .from("campaign_leads")
     .select(
-      "*, leads(first_name, last_name, email, email_status, title, country, email_domain_catchall, organization_id), email_drafts(subject, body, status)",
+      "*, leads(first_name, last_name, email, email_status, title, country, email_domain_catchall, organization_id), email_drafts(id, subject, body, status)",
       { count: "exact" }
     )
     .eq("campaign_id", id);
@@ -55,13 +55,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const added: string[] = [];
   const notFound: string[] = [];
   const blockedUnsubscribed: string[] = [];
+  const blockedNotEnriched: string[] = [];
   const skippedExisting: string[] = [];
 
   for (const leadId of parsed.data.lead_ids) {
-    // Check lead exists and org not unsubscribed
     const { data: lead } = await db
       .from("leads")
-      .select("id, organization_id, organizations(unsubscribed)")
+      .select("id, email, organization_id, organizations(domain, enrichment_stage, unsubscribed)")
       .eq("id", leadId)
       .maybeSingle();
 
@@ -70,10 +70,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const org = Array.isArray(lead.organizations) ? lead.organizations[0] : lead.organizations;
     if (org?.unsubscribed) { blockedUnsubscribed.push(leadId); continue; }
 
+    const isEligible =
+      !!lead.email &&
+      !!org?.domain &&
+      org.enrichment_stage === "done";
+
+    if (!isEligible) { blockedNotEnriched.push(leadId); continue; }
+
+    const crmStatus = "enriched";
+
     const { error } = await db.from("campaign_leads").insert({
       campaign_id: id,
       lead_id: leadId,
-      crm_status: "new",
+      crm_status: crmStatus,
       created_by: user.id,
       created_at: new Date().toISOString(),
     });
@@ -93,5 +102,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await db.from("campaigns").update({ total_leads: count ?? 0 }).eq("id", id);
   }
 
-  return ok({ added, not_found: notFound, blocked_unsubscribed: blockedUnsubscribed, skipped_existing: skippedExisting });
+  return ok({
+    added,
+    not_found: notFound,
+    blocked_unsubscribed: blockedUnsubscribed,
+    blocked_not_enriched: blockedNotEnriched,
+    skipped_existing: skippedExisting,
+  });
 }

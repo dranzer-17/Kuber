@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isAdminUser, isValidAdminSession } from "@/lib/auth/admin";
-import { type Lead, type EnrichmentStage } from "@/lib/leads";
+import { type Lead, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, ENRICHMENT_DOT_HELP, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
@@ -12,7 +12,8 @@ import { CreateCampaignModal, type Campaign } from "@/components/app/create-camp
 import { DashboardView } from "@/components/app/dashboard";
 import { LeadDrawer } from "@/components/app/lead-drawer";
 import { AddLeadsDrawer } from "@/components/app/add-leads-drawer";
-import { CampaignDrawer } from "@/components/app/campaign-drawer";
+import { CampaignDetail } from "@/components/app/campaign-drawer";
+import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -133,23 +134,20 @@ function ColumnsDropdown({ visible, onChange }: {
 // ── Enrichment status dot ─────────────────────────────────────────────────────
 
 function EnrichDot({ stage }: { stage: EnrichmentStage | null }) {
-  if (!stage) return <span className="size-2 rounded-full bg-border inline-block" title="Not queued" />;
+  const help = ENRICHMENT_DOT_HELP[stage ?? "none"];
+  if (!stage) {
+    return <span className="size-2 rounded-full bg-border inline-block" title={help} />;
+  }
   const styles: Record<EnrichmentStage, string> = {
     queued:   "bg-muted-foreground/40",
     scraping: "bg-yellow-400 animate-pulse",
     done:     "bg-green-500",
     failed:   "bg-red-500",
   };
-  const labels: Record<EnrichmentStage, string> = {
-    queued:   "Queued for enrichment",
-    scraping: "Enriching...",
-    done:     "Enriched",
-    failed:   "Enrichment failed",
-  };
   return (
     <span
       className={cn("size-2 rounded-full inline-block", styles[stage])}
-      title={labels[stage]}
+      title={help}
     />
   );
 }
@@ -174,6 +172,7 @@ export default function Home() {
   const [visibleCols,        setVisibleCols       ] = useState<ColVisibility>(DEFAULT_VISIBILITY);
   const [checkedIds,         setCheckedIds        ] = useState<Set<string>>(new Set());
   const [searchQuery,        setSearchQuery       ] = useState("");
+  const [leadsSort,          setLeadsSort         ] = useState<LeadsSort>("newest");
   const [leadsEntityMode,    setLeadsEntityMode   ] = useState<LeadsEntityMode>("individual");
   const [selectedCampaign,   setSelectedCampaign  ] = useState<Campaign | null>(null);
   const [selectedOrg,        setSelectedOrg       ] = useState<OrgRow | null>(null);
@@ -249,7 +248,7 @@ export default function Home() {
     if (session) void loadLeads(session.access_token);
   }
 
-  const filteredLeads = leads;
+  const filteredLeads = sortLeads(leads, leadsSort);
 
   const NAV: { key: View; label: string; icon: React.ComponentType<{ className?: string }>; badge: number | null }[] = [
     { key: "dashboard",  label: "Dashboard",  icon: LayoutDashboard, badge: null         },
@@ -350,7 +349,12 @@ export default function Home() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">
+      <main className={cn(
+        "flex-1",
+        view === "campaigns" && selectedCampaign
+          ? "flex flex-col min-h-0 overflow-hidden"
+          : "overflow-y-auto",
+      )}>
 
         {/* ── Dashboard ── */}
         {view === "dashboard" && (
@@ -361,31 +365,40 @@ export default function Home() {
         {view === "leads" && (() => {
           const q = searchQuery.trim().toLowerCase();
           const displayLeads = q
-            ? filteredLeads.filter((l) =>
-                `${l.firstName} ${l.lastName} ${l.email} ${l.company} ${l.jobTitle}`.toLowerCase().includes(q)
+            ? sortLeads(
+                filteredLeads.filter((l) =>
+                  `${l.firstName} ${l.lastName} ${l.email} ${l.company} ${l.jobTitle}`.toLowerCase().includes(q)
+                ),
+                leadsSort,
               )
             : filteredLeads;
-          const allChecked = displayLeads.length > 0 && displayLeads.every((l) => checkedIds.has(l.id));
+          const eligibleInView = displayLeads.filter(isCampaignEligible);
+          const allEligibleChecked = eligibleInView.length > 0 && eligibleInView.every((l) => checkedIds.has(l.id));
           const someChecked = displayLeads.some((l) => checkedIds.has(l.id));
           const checkedCount = displayLeads.filter((l) => checkedIds.has(l.id)).length;
+          const eligibleCheckedCount = displayLeads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l)).length;
+          const ineligibleCheckedCount = checkedCount - eligibleCheckedCount;
+          const canCreateCampaign = eligibleCheckedCount > 0 && ineligibleCheckedCount === 0;
 
           function toggleAll() {
-            if (allChecked) {
+            if (allEligibleChecked) {
               setCheckedIds((prev) => {
                 const next = new Set(prev);
-                displayLeads.forEach((l) => next.delete(l.id));
+                eligibleInView.forEach((l) => next.delete(l.id));
                 return next;
               });
             } else {
               setCheckedIds((prev) => {
                 const next = new Set(prev);
-                displayLeads.forEach((l) => next.add(l.id));
+                eligibleInView.forEach((l) => next.add(l.id));
                 return next;
               });
             }
           }
           function toggleOne(id: string, e: React.MouseEvent) {
             e.stopPropagation();
+            const lead = displayLeads.find((l) => l.id === id);
+            if (!lead || !isCampaignEligible(lead)) return;
             setCheckedIds((prev) => {
               const next = new Set(prev);
               if (next.has(id)) next.delete(id); else next.add(id);
@@ -399,13 +412,20 @@ export default function Home() {
               <div className="flex items-center justify-between px-8 py-4 border-b border-border shrink-0">
                 {/* Left: entity toggle or selection state */}
                 {someChecked ? (
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold">{checkedCount} selected</span>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-sm font-semibold">
+                      {checkedCount} selected
+                      {ineligibleCheckedCount > 0 && (
+                        <span className="text-muted-foreground font-normal"> · {ineligibleCheckedCount} not ready for outreach</span>
+                      )}
+                    </span>
                     <Button
                       size="sm" className="gap-1.5"
+                      disabled={!canCreateCampaign}
+                      title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
                       onClick={() => { setShowCreateCampaign(true); }}
                     >
-                      <Megaphone className="size-3.5" /> Create campaign
+                      <Megaphone className="size-3.5" /> Create campaign ({eligibleCheckedCount})
                     </Button>
                     <button
                       type="button"
@@ -490,6 +510,16 @@ export default function Home() {
                     />
                   </div>
                   <div className="ml-auto flex items-center gap-3">
+                    <select
+                      value={leadsSort}
+                      onChange={(e) => setLeadsSort(e.target.value as LeadsSort)}
+                      className="h-8 text-xs rounded-md border border-border bg-background px-2"
+                    >
+                      <option value="newest">Newest first</option>
+                      <option value="oldest">Oldest first</option>
+                      <option value="az">A – Z</option>
+                      <option value="za">Z – A</option>
+                    </select>
                     <ColumnsDropdown visible={visibleCols} onChange={setVisibleCols} />
                     <span className="text-xs text-muted-foreground tabular-nums">{displayLeads.length} leads</span>
                   </div>
@@ -656,19 +686,29 @@ export default function Home() {
                               onClick={toggleAll}
                               className={cn(
                                 "flex size-4 cursor-pointer rounded border items-center justify-center transition-colors",
-                                allChecked ? "bg-primary border-primary" : someChecked ? "bg-primary/40 border-primary/60" : "border-border hover:border-muted-foreground",
+                                allEligibleChecked ? "bg-primary border-primary" : someChecked ? "bg-primary/40 border-primary/60" : "border-border hover:border-muted-foreground",
                               )}
                             >
-                              {(allChecked || someChecked) && <Check className="size-2.5 text-primary-foreground" />}
+                              {(allEligibleChecked || someChecked) && <Check className="size-2.5 text-primary-foreground" />}
                             </span>
                           </TableHead>
-                          <TableHead className="w-8" title="Enrichment" />
+                          <TableHead className="w-12">
+                            <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-muted-foreground">
+                              <InfoTip text={CAMPAIGN_ACTION_HELP.enrichmentColumn} />
+                            </span>
+                          </TableHead>
                           <TableHead className="text-xs font-semibold text-muted-foreground">Lead</TableHead>
                           {visibleCols.organization && <TableHead className="text-xs font-semibold text-muted-foreground">Organization</TableHead>}
                           {visibleCols.email     && <TableHead className="text-xs font-semibold text-muted-foreground">Email</TableHead>}
                           {visibleCols.phone     && <TableHead className="text-xs font-semibold text-muted-foreground">Phone</TableHead>}
                           {visibleCols.job_title && <TableHead className="text-xs font-semibold text-muted-foreground">Job Title</TableHead>}
-                          {visibleCols.status    && <TableHead className="text-xs font-semibold text-muted-foreground">Status</TableHead>}
+                          {visibleCols.status    && (
+                            <TableHead className="text-xs font-semibold text-muted-foreground">
+                              <span className="inline-flex items-center gap-0.5">
+                                Status <InfoTip text={CAMPAIGN_ACTION_HELP.statusColumn} />
+                              </span>
+                            </TableHead>
+                          )}
                           {visibleCols.score     && <TableHead className="text-xs font-semibold text-muted-foreground">Score</TableHead>}
                           {visibleCols.source    && <TableHead className="text-xs font-semibold text-muted-foreground">Source</TableHead>}
                           {visibleCols.domain    && <TableHead className="text-xs font-semibold text-muted-foreground">Domain</TableHead>}
@@ -687,6 +727,8 @@ export default function Home() {
                         ) : (
                           displayLeads.map((lead) => {
                             const isChecked = checkedIds.has(lead.id);
+                            const eligible = isCampaignEligible(lead);
+                            const ineligibleReason = campaignIneligibleReason(lead);
                             return (
                               <TableRow
                                 key={lead.id}
@@ -694,14 +736,20 @@ export default function Home() {
                                 className={cn(
                                   "cursor-pointer border-border transition-colors hover:bg-secondary/40",
                                   isChecked && "bg-secondary/30",
+                                  !eligible && "opacity-60",
                                 )}
                               >
                                 <TableCell className="pl-4" onClick={(e) => toggleOne(lead.id, e)}>
-                                  <span className={cn(
-                                    "flex size-4 cursor-pointer rounded border items-center justify-center transition-colors",
-                                    isChecked ? "bg-primary border-primary" : "border-border hover:border-muted-foreground",
-                                  )}>
-                                    {isChecked && <Check className="size-2.5 text-primary-foreground" />}
+                                  <span
+                                    title={ineligibleReason ?? undefined}
+                                    className={cn(
+                                      "flex size-4 rounded border items-center justify-center transition-colors",
+                                      !eligible && "cursor-not-allowed opacity-40",
+                                      eligible && "cursor-pointer",
+                                      isChecked && eligible ? "bg-primary border-primary" : eligible ? "border-border hover:border-muted-foreground" : "border-border",
+                                    )}
+                                  >
+                                    {isChecked && eligible && <Check className="size-2.5 text-primary-foreground" />}
                                   </span>
                                 </TableCell>
                                 <TableCell className="text-center">
@@ -753,6 +801,12 @@ export default function Home() {
 
         {/* ── Campaigns ── */}
         {view === "campaigns" && (
+          selectedCampaign ? (
+            <CampaignDetail
+              campaign={selectedCampaign}
+              onBack={() => setSelectedCampaign(null)}
+            />
+          ) : (
           <div className="max-w-5xl mx-auto p-8 space-y-6">
             <div>
               <p className="text-sm text-muted-foreground mb-1">Outreach</p>
@@ -769,10 +823,7 @@ export default function Home() {
                     key={c.id}
                     type="button"
                     onClick={() => setSelectedCampaign(c)}
-                    className={cn(
-                      "w-full rounded-xl border border-border bg-card shadow-sm p-5 flex items-center gap-5 text-left transition-colors hover:bg-secondary/30",
-                      selectedCampaign?.id === c.id && "border-primary/40 bg-secondary/20",
-                    )}
+                    className="w-full rounded-xl border border-border bg-card shadow-sm p-5 flex items-center gap-5 text-left transition-colors hover:bg-secondary/30"
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold">{c.name}</p>
@@ -791,6 +842,7 @@ export default function Home() {
               </div>
             )}
           </div>
+          )
         )}
       </main>
 
@@ -799,20 +851,19 @@ export default function Home() {
         onClose={() => { setShowCreateCampaign(false); setCheckedIds(new Set()); }}
         onCreated={(c) => {
           setCampaigns((p) => [c, ...p]);
+          setView("campaigns");
+          setSelectedCampaign(c);
+          setShowCreateCampaign(false);
+          setCheckedIds(new Set());
           if (session) void loadCampaigns(session.access_token);
         }}
-        leads={leads.filter((l) => checkedIds.has(l.id))}
+        leads={leads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l))}
       />
 
       <AddLeadsDrawer
         open={showAddLeads}
         onClose={() => setShowAddLeads(false)}
         onImport={handleImport}
-      />
-
-      <CampaignDrawer
-        campaign={selectedCampaign}
-        onClose={() => setSelectedCampaign(null)}
       />
 
       <LeadDrawer

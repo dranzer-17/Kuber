@@ -56,3 +56,68 @@ export const STATUS_ORDER: Record<LeadStatus, number> = {
   New: 0, Enriching: 1, Enriched: 2, "Draft Ready": 3,
   "In Review": 4, Approved: 5, Sent: 6, Replied: 7,
 };
+
+export function isCampaignEligible(lead: Lead): boolean {
+  return !!lead.email && !!lead.domain && lead.enrichmentStage === "done";
+}
+
+export function campaignIneligibleReason(lead: Lead): string | null {
+  if (!lead.email) return "No email address";
+  if (!lead.domain) return "No company domain — enrichment incomplete";
+  if (lead.enrichmentStage === "failed") return "Company enrichment failed";
+  if (lead.enrichmentStage !== "done") return "Company enrichment not finished yet";
+  return null;
+}
+
+export const ENRICHMENT_DOT_HELP: Record<EnrichmentStage | "none", string> = {
+  queued: "Company queued for website scrape. Not ready for campaigns yet.",
+  scraping: "Firecrawl is scraping the company website. Wait until enrichment completes.",
+  done: "Company profile ready — safe to add to campaigns.",
+  failed: "Enrichment failed (often no domain). Cannot add to campaigns.",
+  none: "Not enriched yet. Cannot add to campaigns until company data is ready.",
+};
+
+export const CAMPAIGN_STATUS_HELP: Record<string, string> = {
+  draft: "AI draft generated. Review, edit, then certify.",
+  approved: "You certified this draft. Ready to send to Instantly.",
+  sent: "Pushed to Instantly for delivery.",
+  generating: "AI is writing the email in the background.",
+  failed: "Draft generation failed. Click Regenerate to try again.",
+  pending: "Waiting for draft generation to start or finish.",
+  none: "No draft available for this lead yet.",
+};
+
+export const CAMPAIGN_ACTION_HELP = {
+  certifyAll: "Approves all draft-ready emails at once without selecting each one.",
+  certifySelected: "Approves only the leads you checked in the sidebar.",
+  sendCertified: "Sends only certified leads to Instantly. Uncertified drafts are not sent.",
+  humanInLoop: "When ON, every draft must be certified by you before it can be sent.",
+  enrichmentColumn: "Green = enriched and campaign-ready. Red = failed. Yellow = in progress.",
+  statusColumn: "Lead pipeline status in your CRM based on enrichment and campaign progress.",
+};
+
+/** Short sidebar badge labels (no truncation). */
+export const DRAFT_BADGE_SHORT: Record<string, string> = {
+  generating: "Generating",
+  draft: "Draft",
+  approved: "Certified",
+  sent: "Sent",
+  failed: "Failed",
+  rejected: "Rejected",
+  pending: "Pending",
+};
+
+export function leadFullName(lead: Pick<Lead, "firstName" | "lastName">): string {
+  return [lead.firstName, lead.lastName].filter(Boolean).join(" ").trim();
+}
+
+export type LeadsSort = "newest" | "oldest" | "az" | "za";
+export type CampaignLeadsSort = "az" | "newest";
+
+export function sortLeads(leads: Lead[], sort: LeadsSort): Lead[] {
+  const copy = [...leads];
+  if (sort === "newest") return copy.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (sort === "oldest") return copy.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (sort === "az") return copy.sort((a, b) => leadFullName(a).localeCompare(leadFullName(b)));
+  return copy.sort((a, b) => leadFullName(b).localeCompare(leadFullName(a)));
+}

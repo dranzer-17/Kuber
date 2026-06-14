@@ -18,3 +18,11 @@ export const PatchDraftSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reject"), rejection_reason: z.string().min(1) }),
   z.object({ action: z.literal("edit"), subject: z.string().min(1), body: z.string().min(1) }),
 ]);
+
+export const BulkApproveSchema = z.object({
+  draft_ids: z.array(z.string().uuid()).min(1).max(200),
+});
+
+export const RegenerateDraftSchema = z.object({
+  custom_instruction: z.string().optional(),
+});

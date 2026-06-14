@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   // Target: enriched leads with no draft (or failed draft)
   let q = db
     .from("campaign_leads")
-    .select("id, lead_id, draft_id, leads(id, first_name, last_name, title, seniority, country, organization_id, organizations(name, description, primary_products, keywords))")
+    .select("id, lead_id, draft_id, leads(id, first_name, last_name, title, seniority, country, organization_id, organizations(name, description, company_description, sells_to, primary_products, keywords))")
     .eq("campaign_id", campaign_id)
     .or("crm_status.eq.enriched,crm_status.eq.draft")
     .is("draft_id", null)
@@ -90,7 +90,8 @@ export async function POST(req: NextRequest) {
       country: lead.country,
       company: {
         name: org?.name,
-        description: org?.description,
+        description: org?.company_description ?? org?.description,
+        sells_to: org?.sells_to,
         primary_products: org?.primary_products,
         keywords: org?.keywords,
       },
