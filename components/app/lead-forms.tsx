@@ -320,13 +320,12 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 // ─── Excel / CSV with column mapping ─────────────────────────────────────────
 
 const PLATFORM_FIELDS = [
-  { key: "email",               label: "Email",                    required: true,  recommended: false, note: "Blocks progress if unmapped" },
-  { key: "first_name",          label: "First Name",               required: true,  recommended: false, note: "" },
-  { key: "last_name",           label: "Last Name",                required: false, recommended: false, note: "" },
-  { key: "organization_name",   label: "Company Name",             required: false, recommended: false, note: "" },
-  { key: "organization_domain", label: "Company Website / Domain", required: false, recommended: true,  note: "Used by Firecrawl for enrichment" },
-  { key: "title",               label: "Job Title",                required: false, recommended: false, note: "" },
-  { key: "country",             label: "Country",                  required: false, recommended: false, note: "" },
+  { key: "email",               label: "Email",                    required: true,  note: "Blocks progress if unmapped" },
+  { key: "first_name",          label: "First Name",               required: true,  note: "" },
+  { key: "last_name",           label: "Last Name",                required: false, note: "" },
+  { key: "organization_name",   label: "Company Name",             required: false, note: "" },
+  { key: "organization_domain", label: "Company Domain",           required: true,  note: "Required for Firecrawl enrichment" },
+  { key: "title",               label: "Job Title",                required: false, note: "" },
 ];
 
 type ParseResult = {
@@ -394,7 +393,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   }
 
   async function handleConfirm() {
-    if (!mapping.email || !mapping.first_name) return;
+    if (!mapping.email || !mapping.first_name || !mapping.organization_domain) return;
     setImporting(true);
     try {
       const token = await getToken();
@@ -450,6 +449,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   if (stage === "map") {
     const emailMapped     = !!mapping.email;
     const firstNameMapped = !!mapping.first_name;
+    const domainMapped    = !!mapping.organization_domain;
 
     return (
       <div className="space-y-4">
@@ -475,11 +475,6 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
                   <span className="text-sm">
                     {pf.label}
                     {pf.required && <span className="text-destructive ml-1 text-xs">*</span>}
-                    {pf.recommended && !pf.required && (
-                      <span className="ml-1.5 text-[10px] font-medium text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                        recommended
-                      </span>
-                    )}
                   </span>
                   {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
                 </div>
@@ -520,10 +515,16 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
               Email column must be mapped before importing
             </div>
           )}
-          {!firstNameMapped && emailMapped && (
-            <div className="flex items-center gap-2 text-xs text-amber-400 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+          {emailMapped && !firstNameMapped && (
+            <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2">
               <AlertCircle className="size-3.5 shrink-0" />
-              First Name is required
+              First Name must be mapped before importing
+            </div>
+          )}
+          {emailMapped && firstNameMapped && !domainMapped && (
+            <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2">
+              <AlertCircle className="size-3.5 shrink-0" />
+              Company Domain must be mapped before importing
             </div>
           )}
           {fileError && (
@@ -538,7 +539,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={reset}>Back</Button>
             <Button
-              disabled={!emailMapped || !firstNameMapped || importing}
+              disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}
               onClick={handleConfirm}
             >
               {importing ? "Importing..." : "Confirm & Import"}

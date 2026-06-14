@@ -29,6 +29,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   return ok({ ...campaign, memberships: memberships ?? [] });
 }
 
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try { await requireAuth(_req); } catch (r) { return r as Response; }
+
+  const { id } = await params;
+  const db = createAdminClient();
+
+  const { error } = await db.from("campaigns").delete().eq("id", id);
+  if (error) return fail(500, "INTERNAL", error.message);
+
+  return ok({ deleted: id });
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: { id: string };
   try { user = await requireAuth(req); } catch (r) { return r as Response; }

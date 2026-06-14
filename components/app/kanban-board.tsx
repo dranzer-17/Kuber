@@ -10,9 +10,7 @@ const KANBAN_COLS: { id: LeadStatus; label: string; dot: string; header: string 
   { id: "New",            label: "New",            dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
   { id: "Enriching",      label: "Enriching",      dot: "bg-amber-400",  header: "border-amber-500/30"  },
   { id: "Enriched",       label: "Enriched",       dot: "bg-blue-400",   header: "border-blue-500/30"   },
-  { id: "Draft Ready",    label: "Draft Ready",    dot: "bg-violet-400", header: "border-violet-500/30" },
-  { id: "Approved",       label: "Approved",       dot: "bg-cyan-400",   header: "border-cyan-500/30"   },
-  { id: "Won",            label: "Won",            dot: "bg-green-400",  header: "border-green-500/30"  },
+  { id: "Open",           label: "Open",           dot: "bg-green-400",  header: "border-green-500/30"  },
   { id: "Closed",         label: "Closed",         dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
 ];
 
@@ -31,7 +29,7 @@ export function KanbanBoard({
           <div
             key={col.id}
             className="shrink-0 flex flex-col gap-2"
-            style={{ width: "calc((100% - 56px) / 8)", minWidth: "140px" }}
+            style={{ width: "calc((100% - 40px) / 6)", minWidth: "160px" }}
           >
             <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
               <span className={cn("size-2 rounded-full shrink-0", col.dot)} />

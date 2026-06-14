@@ -25,8 +25,19 @@ interface OrgData {
   industry: string | null;
   city: string | null;
   country: string | null;
+  enrichment_stage: string | null;
   leads?: Array<{ id: string; first_name: string | null; last_name: string | null; title: string | null; email: string | null }>;
 }
+
+const ENRICH_DOT: Record<string, string> = {
+  queued:   "bg-muted-foreground/40",
+  scraping: "bg-yellow-400 animate-pulse",
+  done:     "bg-green-500",
+  failed:   "bg-red-500",
+};
+const ENRICH_LABEL: Record<string, string> = {
+  queued: "Queued", scraping: "Enriching…", done: "Done", failed: "Failed",
+};
 
 type OrgForm = {
   name: string;
@@ -296,6 +307,13 @@ export function OrgDrawer({ orgId, onClose, onAddLead }: {
               ) : (
                 /* ── View mode ── */
                 <>
+                  {org.enrichment_stage && (
+                    <div className="flex items-center gap-2 px-1">
+                      <span className={cn("size-2.5 rounded-full shrink-0", ENRICH_DOT[org.enrichment_stage] ?? "bg-border")} />
+                      <span className="text-sm font-medium">{ENRICH_LABEL[org.enrichment_stage] ?? org.enrichment_stage}</span>
+                    </div>
+                  )}
+
                   <Section icon={Building2} label="Details">
                     <Field label="Name"     value={org.name} />
                     <Field label="Domain"   value={org.domain} />

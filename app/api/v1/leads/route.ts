@@ -110,14 +110,10 @@ export async function GET(req: NextRequest) {
   const { data, error, count } = await q;
   if (error) return fail(500, "INTERNAL", error.message);
 
-  // Derive latest crm_status from campaign_leads (most recent campaign)
   const leads = (data ?? []).map((l) => {
-    const cls = (l.campaign_leads ?? []) as { crm_status: string; interest_status: number | null; created_at: string; campaigns: { id: string; name: string } | null }[];
-    const sorted = [...cls].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const cls = (l.campaign_leads ?? []) as { crm_status: string; created_at: string; campaigns: { id: string; name: string } | null }[];
     return {
       ...l,
-      crm_status: sorted[0]?.crm_status ?? "new",
-      interest_status: sorted[0]?.interest_status ?? null,
       campaign_list: cls
         .filter((cl) => cl.campaigns)
         .map((cl) => ({ id: cl.campaigns!.id, name: cl.campaigns!.name, crm_status: cl.crm_status })),

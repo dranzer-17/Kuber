@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isAdminUser, isValidAdminSession } from "@/lib/auth/admin";
-import { type Lead, type LeadStatus, type LeadScore, type LeadSource, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, PIPELINE_STAGES, CAMPAIGN_ACTION_HELP, isRecentlyAdded } from "@/lib/leads";
+import { type Lead, type LeadStatus, type LeadScore, type LeadSource, type EnrichmentStage, type LeadsSort, isCampaignEligible, campaignIneligibleReason, sortLeads, PIPELINE_STAGES, CAMPAIGN_ACTION_HELP } from "@/lib/leads";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
@@ -36,9 +36,9 @@ import {
 import {
   LayoutDashboard, Users, Megaphone, LogOut, Plus,
   Eye, EyeOff, List, Kanban, RefreshCw, Columns3, Check, Search,
-  Building2, SlidersHorizontal, X, Settings,
+  Building2, SlidersHorizontal, X, Settings, Trash2, AlertTriangle,
 } from "lucide-react";
-import { fetchLeads, fetchCampaigns, rescrapeOrg } from "@/lib/api-client";
+import { fetchLeads, fetchCampaigns, rescrapeOrg, deleteLead, deleteCampaign } from "@/lib/api-client";
 
 type View = "dashboard" | "lead-generation" | "leads" | "campaigns" | "settings";
 type LeadsViewMode = "list" | "kanban";
@@ -200,21 +200,262 @@ function EnrichDot({ stage }: { stage: EnrichmentStage | null }) {
 
 const STATUS_DOT: Record<LeadStatus, string> = {
   "Input Required": "bg-yellow-400",
-  New:          "bg-zinc-400",
-  Enriching:    "bg-amber-400",
-  Enriched:     "bg-blue-400",
-  "Draft Ready":"bg-violet-400",
-  Approved:     "bg-cyan-400",
-  Won:          "bg-green-400",
-  Closed:       "bg-zinc-400",
+  New:       "bg-zinc-400",
+  Enriching: "bg-amber-400",
+  Enriched:  "bg-blue-400",
+  Open:      "bg-green-400",
+  Closed:    "bg-zinc-300",
 };
 
-const CAMPAIGN_CARD_STATUS_STYLES: Record<string, string> = {
-  Draft:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  Live:      "bg-green-500/15 text-green-400 border-green-500/25",
-  Scheduled: "bg-blue-500/15 text-blue-400 border-blue-500/25",
-  Paused:    "bg-amber-500/15 text-amber-400 border-amber-500/25",
+const CAMPAIGN_STATUS_STYLES: Record<string, { badge: string; dot: string }> = {
+  Draft:  { badge: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",  dot: "bg-zinc-400"  },
+  Live:   { badge: "bg-green-500/15 text-green-400 border-green-500/25", dot: "bg-green-400" },
+  Paused: { badge: "bg-amber-500/15 text-amber-400 border-amber-500/25", dot: "bg-amber-400" },
 };
+
+type CampaignStatus = "Draft" | "Live" | "Paused";
+
+function CampaignsListView({
+  campaigns,
+  onSelect,
+  onDeleted,
+  token,
+}: {
+  campaigns: Campaign[];
+  onSelect: (c: Campaign) => void;
+  onDeleted: (id: string) => void;
+  token: string;
+}) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<CampaignStatus | "All">("All");
+  const [deletingCampaign, setDeletingCampaign] = useState<Campaign | null>(null);
+  const [deleteCampaignLoading, setDeleteCampaignLoading] = useState(false);
+
+  const filtered = campaigns.filter((c) => {
+    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase());
+    const matchesStatus = statusFilter === "All" || c.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const counts: Record<CampaignStatus | "All", number> = {
+    All: campaigns.length,
+    Draft: campaigns.filter((c) => c.status === "Draft").length,
+    Live: campaigns.filter((c) => c.status === "Live").length,
+    Paused: campaigns.filter((c) => c.status === "Paused").length,
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto p-8 space-y-6">
+      {/* Header */}
+      <div>
+        <p className="text-sm text-muted-foreground mb-1">Outreach</p>
+        <h1 className="text-2xl font-bold">Campaigns</h1>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Search */}
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search campaigns…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-2 text-sm bg-secondary/50 border border-border rounded-lg placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+
+        {/* Status filter pills */}
+        <div className="flex items-center gap-1.5">
+          {(["All", "Draft", "Live", "Paused"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStatusFilter(s)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+                statusFilter === s
+                  ? s === "All"
+                    ? "bg-foreground text-background border-foreground"
+                    : cn(CAMPAIGN_STATUS_STYLES[s]?.badge, "border-current")
+                  : "bg-transparent text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
+              )}
+            >
+              {s}
+              <span className={cn(
+                "ml-1.5 tabular-nums",
+                statusFilter === s ? "opacity-70" : "opacity-50",
+              )}>
+                {counts[s]}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Campaign list */}
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-12 text-center">
+          <p className="text-sm text-muted-foreground">
+            {campaigns.length === 0
+              ? "No campaigns yet. Create one to start sending outreach emails."
+              : "No campaigns match your filters."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((c) => {
+            const style = CAMPAIGN_STATUS_STYLES[c.status] ?? CAMPAIGN_STATUS_STYLES.Draft;
+            const replyRate = c.sent > 0 ? Math.round((c.replied / c.sent) * 100) : 0;
+            return (
+              <div
+                key={c.id}
+                className="relative group/card rounded-xl border border-border bg-card transition-all hover:bg-secondary/30 hover:border-border/80 hover:shadow-sm"
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelect(c)}
+                  className="w-full p-5 flex items-center gap-5 text-left"
+                >
+                  {/* Status dot */}
+                  <div className={cn("size-2 rounded-full shrink-0 mt-0.5", style.dot)} />
+
+                  {/* Name + meta */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-semibold truncate">{c.name}</p>
+                      <span className={cn(
+                        "text-[10px] font-semibold uppercase tracking-wide border rounded-md px-1.5 py-0.5 shrink-0",
+                        style.badge,
+                      )}>
+                        {c.status}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={cn(
+                        "text-[11px] px-1.5 py-0.5 rounded border",
+                        c.humanInLoop
+                          ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
+                          : "text-muted-foreground bg-secondary/50 border-border",
+                      )}>
+                        {c.humanInLoop ? "Human review" : "Auto-send"}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground">Created {c.createdAt}</span>
+                    </div>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="flex items-center gap-px shrink-0 pr-8">
+                    {[
+                      { label: "Leads", value: c.leads, color: "text-foreground" },
+                      { label: "Sent", value: c.sent, color: "text-foreground" },
+                      { label: "Replied", value: c.replied, color: "text-green-400" },
+                      { label: "Reply rate", value: `${replyRate}%`, color: replyRate > 0 ? "text-green-400" : "text-muted-foreground" },
+                    ].map(({ label, value, color }, idx) => (
+                      <div
+                        key={label}
+                        className={cn(
+                          "text-center px-5 py-1",
+                          idx < 3 && "border-r border-border",
+                        )}
+                      >
+                        <p className={cn("text-lg font-bold tabular-nums", color)}>{value}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </button>
+
+                {/* Delete button — appears on hover */}
+                <button
+                  type="button"
+                  title="Delete campaign"
+                  onClick={() => setDeletingCampaign(c)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg opacity-0 group-hover/card:opacity-100 text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <DeleteConfirmModal
+        open={!!deletingCampaign}
+        title={`Delete "${deletingCampaign?.name}"?`}
+        description="This will permanently delete the campaign and all its leads, drafts, and send history. This cannot be undone."
+        loading={deleteCampaignLoading}
+        onClose={() => { if (!deleteCampaignLoading) setDeletingCampaign(null); }}
+        onConfirm={async () => {
+          if (!deletingCampaign) return;
+          setDeleteCampaignLoading(true);
+          try {
+            await deleteCampaign(token, deletingCampaign.id);
+            onDeleted(deletingCampaign.id);
+            setDeletingCampaign(null);
+          } finally {
+            setDeleteCampaignLoading(false);
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function DeleteConfirmModal({
+  open,
+  title,
+  description,
+  loading,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  loading?: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
+        <div className="flex items-start gap-4">
+          <div className="shrink-0 size-10 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center">
+            <AlertTriangle className="size-5 text-red-400" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm">{title}</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={loading}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center gap-2"
+          >
+            {loading ? <RefreshCw className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StatusDot({ status }: { status: LeadStatus }) {
   return (
@@ -539,7 +780,6 @@ export default function Home() {
   const [leadsSort,          setLeadsSort         ] = useState<LeadsSort>("newest");
   const [leadsEntityMode,    setLeadsEntityMode   ] = useState<LeadsEntityMode>("individual");
   const [selectedCampaign,   setSelectedCampaign  ] = useState<Campaign | null>(null);
-  const [selectedOrg,        setSelectedOrg       ] = useState<OrgRow | null>(null);
   const [filters,            setFilters           ] = useState<FilterState>(EMPTY_FILTERS);
   const [showFilters,        setShowFilters       ] = useState(false);
   const [selectedOrgId,      setSelectedOrgId     ] = useState<string | null>(null);
@@ -549,6 +789,8 @@ export default function Home() {
     editMode?: boolean;
   } | null>(null);
   const [enrichingIds,       setEnrichingIds      ] = useState<Set<string>>(new Set());
+  const [deletingLead,       setDeletingLead      ] = useState<Lead | null>(null);
+  const [deleteLeadLoading,  setDeleteLeadLoading ] = useState(false);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -982,9 +1224,8 @@ export default function Home() {
                   const orgRows = Array.from(orgMap.values());
 
                   return (
-                    <div className="flex gap-5 h-full">
-                      {/* Orgs table */}
-                      <div className={cn("rounded-xl border border-border bg-card shadow-sm overflow-hidden", selectedOrg ? "flex-1" : "w-full")}>
+                    <div>
+                      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden w-full">
                         <Table>
                           <TableHeader>
                             <TableRow className="border-border hover:bg-transparent">
@@ -1007,11 +1248,8 @@ export default function Home() {
                               orgRows.map((org) => (
                                 <TableRow
                                   key={org.id}
-                                  onClick={() => setSelectedOrg(selectedOrg?.id === org.id ? null : org)}
-                                  className={cn(
-                                    "cursor-pointer border-border transition-colors hover:bg-secondary/40",
-                                    selectedOrg?.id === org.id && "bg-secondary/30",
-                                  )}
+                                  onClick={() => setSelectedOrgId(org.id)}
+                                  className="cursor-pointer border-border transition-colors hover:bg-secondary/40"
                                 >
                                   <TableCell>
                                     <div className="flex items-center gap-2.5">
@@ -1041,65 +1279,6 @@ export default function Home() {
                         </Table>
                       </div>
 
-                      {/* Org detail panel */}
-                      {selectedOrg && (
-                        <div className="w-80 shrink-0 rounded-xl border border-border bg-card shadow-sm overflow-hidden flex flex-col">
-                          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                            <p className="text-sm font-semibold truncate">{selectedOrg.name}</p>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedOrg(null)}
-                              className="text-muted-foreground hover:text-foreground transition-colors ml-2 shrink-0"
-                            >
-                              <span className="sr-only">Close</span>
-                              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M18 6 6 18M6 6l12 12"/></svg>
-                            </button>
-                          </div>
-                          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                            <div className="flex items-center gap-2">
-                              <EnrichDot stage={selectedOrg.enrichmentStage} />
-                              <span className="text-xs text-muted-foreground capitalize">{selectedOrg.enrichmentStage ?? "not queued"}</span>
-                            </div>
-                            {selectedOrg.domain && (
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Domain</p>
-                                <p className="text-sm">{selectedOrg.domain}</p>
-                              </div>
-                            )}
-                            {selectedOrg.companyDescription && (
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">About</p>
-                                <p className="text-sm text-muted-foreground leading-relaxed">{selectedOrg.companyDescription}</p>
-                              </div>
-                            )}
-                            {selectedOrg.sellsTo && (
-                              <div>
-                                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Sells To</p>
-                                <p className="text-sm text-muted-foreground">{selectedOrg.sellsTo}</p>
-                              </div>
-                            )}
-                            <div>
-                              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Leads ({selectedOrg.leads.length})</p>
-                              <div className="space-y-2">
-                                {selectedOrg.leads.map((lead) => (
-                                  <button
-                                    key={lead.id}
-                                    type="button"
-                                    onClick={() => setSelectedLead(lead)}
-                                    className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-secondary transition-colors text-left"
-                                  >
-                                    <Avatar name={`${lead.firstName} ${lead.lastName}`} size="sm" />
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-semibold truncate">{lead.firstName} {lead.lastName}</p>
-                                      <p className="text-[11px] text-muted-foreground truncate">{lead.jobTitle || lead.email}</p>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })() : leadsViewMode === "kanban" ? (
@@ -1189,11 +1368,6 @@ export default function Home() {
                                   <div className="flex items-center gap-2.5">
                                     <Avatar name={`${lead.firstName} ${lead.lastName}`} size="sm" />
                                     <p className="text-sm font-semibold">{lead.firstName} {lead.lastName}</p>
-                                    {isRecentlyAdded(lead) && (
-                                      <span className="bg-blue-500/15 text-blue-400 text-[10px] px-1.5 py-0.5 rounded border border-blue-500/25 font-semibold shrink-0">
-                                        New
-                                      </span>
-                                    )}
                                   </div>
                                 </TableCell>
                                 {visibleCols.organization && <TableCell><span className="text-sm">{lead.company || "—"}</span></TableCell>}
@@ -1221,18 +1395,28 @@ export default function Home() {
                                   </TableCell>
                                 )}
                                 {visibleCols.added     && <TableCell><span className="text-xs text-muted-foreground">{lead.createdAt.slice(0, 10)}</span></TableCell>}
-                                <TableCell className="text-right pr-4" onClick={(e) => e.stopPropagation()}>
-                                  {showEnrichButton(lead) && lead.orgId && (
+                                <TableCell className="text-right pr-3" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-end gap-0.5">
+                                    {showEnrichButton(lead) && lead.orgId && (
+                                      <button
+                                        type="button"
+                                        title={lead.enrichmentStage === "failed" ? "Retry enrichment" : "Enrich"}
+                                        onClick={(e) => handleEnrichLead(lead, e)}
+                                        disabled={enrichingIds.has(lead.id)}
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded hover:bg-secondary disabled:opacity-50"
+                                      >
+                                        <RefreshCw className={cn("size-3.5", enrichingIds.has(lead.id) && "animate-spin")} />
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
-                                      title={lead.enrichmentStage === "failed" ? "Retry enrichment" : "Enrich"}
-                                      onClick={(e) => handleEnrichLead(lead, e)}
-                                      disabled={enrichingIds.has(lead.id)}
-                                      className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-secondary disabled:opacity-50"
+                                      title="Delete lead"
+                                      onClick={(e) => { e.stopPropagation(); setDeletingLead(lead); }}
+                                      className="p-1.5 rounded text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                                     >
-                                      <RefreshCw className={cn("size-3.5", enrichingIds.has(lead.id) && "animate-spin")} />
+                                      <Trash2 className="size-3.5" />
                                     </button>
-                                  )}
+                                  </div>
                                 </TableCell>
                               </TableRow>
                             );
@@ -1255,47 +1439,12 @@ export default function Home() {
               onBack={() => setSelectedCampaign(null)}
             />
           ) : (
-          <div className="max-w-5xl mx-auto p-8 space-y-6">
-            <div>
-              <p className="text-sm text-muted-foreground mb-1">Outreach</p>
-              <h1 className="text-2xl font-bold">Campaigns</h1>
-            </div>
-            {campaigns.length === 0 ? (
-              <div className="rounded-xl border border-border bg-card p-12 text-center">
-                <p className="text-sm text-muted-foreground">No campaigns yet. Create one to start sending outreach emails.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {campaigns.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setSelectedCampaign(c)}
-                    className="w-full rounded-xl border border-border bg-card shadow-sm p-5 flex items-center gap-5 text-left transition-colors hover:bg-secondary/30"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold truncate">{c.name}</p>
-                        <span className={cn(
-                          "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5 shrink-0",
-                          CAMPAIGN_CARD_STATUS_STYLES[c.status] ?? CAMPAIGN_CARD_STATUS_STYLES.Draft,
-                        )}>{c.status}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{c.humanInLoop ? "Human review ON" : "Auto-send"}</p>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      {[["Leads", c.leads], ["Sent", c.sent], ["Replied", c.replied]].map(([k, v]) => (
-                        <div key={String(k)} className="text-center">
-                          <p className="text-xl font-bold tabular-nums">{v}</p>
-                          <p className="text-[10px] text-muted-foreground uppercase">{k}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <CampaignsListView
+            campaigns={campaigns}
+            onSelect={setSelectedCampaign}
+            onDeleted={(id) => setCampaigns((prev) => prev.filter((c) => c.id !== id))}
+            token={session?.access_token ?? ""}
+          />
           )
         )}
 
@@ -1304,6 +1453,25 @@ export default function Home() {
     </div>
 
     {/* Overlays — outside the root flex container so they don't affect layout */}
+    <DeleteConfirmModal
+      open={!!deletingLead}
+      title={`Delete ${deletingLead ? `${deletingLead.firstName} ${deletingLead.lastName}`.trim() : "lead"}?`}
+      description="This will permanently remove the lead and all associated data. This cannot be undone."
+      loading={deleteLeadLoading}
+      onClose={() => { if (!deleteLeadLoading) setDeletingLead(null); }}
+      onConfirm={async () => {
+        if (!deletingLead || !session) return;
+        setDeleteLeadLoading(true);
+        try {
+          await deleteLead(session.access_token, deletingLead.id);
+          setLeads((prev) => prev.filter((l) => l.id !== deletingLead.id));
+          setDeletingLead(null);
+        } finally {
+          setDeleteLeadLoading(false);
+        }
+      }}
+    />
+
     {showFilters && (
       <FiltersModal
         filters={filters}
@@ -1350,6 +1518,8 @@ export default function Home() {
       orgId={selectedOrgId}
       onClose={() => setSelectedOrgId(null)}
       onAddLead={(org) => {
+        setSelectedOrgId(null);
+        setSelectedLead(null);
         setManualPrefill({
           prefillOrg: { id: org.id, name: org.name, industry: org.industry, domain: org.domain, country: org.country },
           prefillLeads: org.leads,

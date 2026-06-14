@@ -33,19 +33,13 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string)
 
 // ─── DB → frontend type mapping ───────────────────────────────────────────────
 
-const CRM_STATUS_MAP: Record<string, LeadStatus> = {
-  new:        "New",
-  enriching:  "Enriching",
-  enriched:   "Enriched",
-  draft:      "Draft Ready",
-  draft_ready: "Draft Ready",
-  approved:   "Approved",
-  sent:       "Approved",
-  replied:    "Closed",
-  won:        "Won",
-  closed:     "Closed",
-  skipped:    "New",
-  failed:     "New",
+const LEAD_STATUS_MAP: Record<string, LeadStatus> = {
+  new:            "New",
+  enriching:      "Enriching",
+  enriched:       "Enriched",
+  input_required: "Input Required",
+  open:           "Open",
+  closed:         "Closed",
 };
 
 const SOURCE_MAP: Record<string, LeadSource> = {
@@ -66,8 +60,7 @@ export interface DbLead {
   lead_source: string;
   created_at: string;
   is_likely_to_engage: boolean | null;
-  crm_status: string;
-  interest_status?: number | null;
+  status: string;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
   organizations: {
@@ -111,26 +104,10 @@ export function mapDbLead(l: DbLead): Lead {
   const score: LeadScore = l.is_likely_to_engage === true ? "Hot" : l.is_likely_to_engage === false ? "Cold" : "—";
   const org = l.organizations;
   const enrichmentStage = (org?.enrichment_stage as EnrichmentStage) ?? null;
-  const domain = org?.domain ?? "";
 
-  let status: LeadStatus = (() => {
-    if (l.crm_status && l.crm_status !== "new") {
-      if (l.crm_status === "replied") {
-        const interest = l.interest_status ?? 0;
-        return interest >= 1 ? "Won" : "Closed";
-      }
-      return CRM_STATUS_MAP[l.crm_status] ?? "New";
-    }
-    const stage = org?.enrichment_stage;
-    if (stage === "queued" || stage === "scraping") return "Enriching";
-    if (stage === "done") return "Enriched";
-    return "New";
-  })();
-
+  const status: LeadStatus = LEAD_STATUS_MAP[l.status] ?? "New";
   const email = l.email ?? "";
-  if (!email || (!domain && enrichmentStage !== "done")) {
-    status = "Input Required";
-  }
+  const domain = org?.domain ?? "";
 
   return {
     id: l.id,
@@ -213,6 +190,14 @@ export async function patchLead(token: string, id: string, body: {
 }): Promise<Lead> {
   const data = await apiFetch<DbLead>(`/api/v1/leads/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
   return mapDbLead(data);
+}
+
+export async function deleteLead(token: string, id: string): Promise<{ deleted: string }> {
+  return apiFetch(`/api/v1/leads/${id}`, { method: "DELETE" }, token);
+}
+
+export async function deleteCampaign(token: string, id: string): Promise<{ deleted: string }> {
+  return apiFetch(`/api/v1/campaigns/${id}`, { method: "DELETE" }, token);
 }
 
 export async function fetchOrg(token: string, id: string): Promise<Record<string, unknown>> {

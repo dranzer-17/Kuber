@@ -29,6 +29,7 @@ export const PatchLeadSchema = z.object({
   state: z.string().optional(),
   country: z.string().optional(),
   email_status: z.string().optional(),
+  status: z.enum(["new", "enriching", "enriched", "input_required", "open", "closed"]).optional(),
 });
 
 export const LeadListQuerySchema = z.object({

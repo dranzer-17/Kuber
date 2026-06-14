@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: cls } = await db
     .from("campaign_leads")
-    .select("crm_status, interest_status, campaign_id, created_at, campaigns(id, name)")
+    .select("crm_status, campaign_id, created_at, campaigns(id, name)")
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
 
@@ -30,10 +30,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return camp ? { id: camp.id, name: camp.name, crm_status: cl.crm_status } : null;
   }).filter(Boolean) as { id: string; name: string; crm_status: string }[];
 
-  const latestCrm = cls?.[0]?.crm_status ?? "new";
-  const interestStatus = cls?.[0]?.interest_status ?? null;
+  return ok({ ...lead, campaign_list: campaignList });
+}
 
-  return ok({ ...lead, crm_status: latestCrm, interest_status: interestStatus, campaign_list: campaignList });
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try { await requireAuth(_req); } catch (r) { return r as Response; }
+
+  const { id } = await params;
+  const db = createAdminClient();
+
+  const { error } = await db.from("leads").delete().eq("id", id);
+  if (error) return fail(500, "INTERNAL", error.message);
+
+  return ok({ deleted: id });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -10,13 +10,11 @@ import {
 
 const STATUS_STYLES: Record<LeadStatus, string> = {
   "Input Required": "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
-  New: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  Enriching: "bg-amber-500/15 text-amber-400 border-amber-500/25",
+  New:      "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+  Enriching:"bg-amber-500/15 text-amber-400 border-amber-500/25",
   Enriched: "bg-blue-500/15 text-blue-400 border-blue-500/25",
-  "Draft Ready": "bg-violet-500/15 text-violet-400 border-violet-500/25",
-  Approved: "bg-cyan-500/15 text-cyan-400 border-cyan-500/25",
-  Won: "bg-green-500/15 text-green-400 border-green-500/25",
-  Closed: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
+  Open:     "bg-green-500/15 text-green-400 border-green-500/25",
+  Closed:   "bg-zinc-500/15 text-zinc-300 border-zinc-500/25",
 };
 
 export function StatusBadge({ status }: { status: LeadStatus }) {
@@ -53,15 +51,20 @@ export function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "md"
   );
 }
 
+const STEPPER_STAGES: LeadStatus[] = ["New", "Enriching", "Enriched"];
+
 export function PipelineStepper({ currentStatus }: { currentStatus: LeadStatus }) {
-  const stepperStatus = currentStatus === "Input Required" ? "New" : currentStatus;
-  const current = STATUS_ORDER[stepperStatus];
+  const stepperStatus: LeadStatus =
+    currentStatus === "Input Required" || currentStatus === "New" ? "New"
+    : currentStatus === "Enriching" ? "Enriching"
+    : "Enriched";
+  const current = STEPPER_STAGES.indexOf(stepperStatus);
   return (
     <div>
-      {KANBAN_STAGES.map((stage, i) => {
+      {STEPPER_STAGES.map((stage, i) => {
         const done = i <= current;
         const active = i === current;
-        const last = i === KANBAN_STAGES.length - 1;
+        const last = i === STEPPER_STAGES.length - 1;
         return (
           <div key={stage} className="flex gap-3">
             <div className="flex flex-col items-center">

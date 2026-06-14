@@ -1,7 +1,7 @@
 export type LeadStatus =
   | "Input Required"
-  | "New" | "Enriching" | "Enriched" | "Draft Ready"
-  | "Approved" | "Won" | "Closed";
+  | "New" | "Enriching" | "Enriched"
+  | "Open" | "Closed";
 
 export type LeadScore = "Hot" | "Cold" | "—";
 
@@ -38,33 +38,30 @@ export type Lead = {
 };
 
 export const PIPELINE_STAGES: LeadStatus[] = [
-  "Input Required", "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
+  "Input Required", "New", "Enriching", "Enriched", "Open", "Closed",
 ];
 
 /** Kanban columns match full lead lifecycle including Input Required. */
 export const KANBAN_STAGES: LeadStatus[] = [
-  "Input Required", "New", "Enriching", "Enriched", "Draft Ready", "Approved", "Won", "Closed",
+  "Input Required", "New", "Enriching", "Enriched", "Open", "Closed",
 ];
 
 export const STEP_DESCRIPTIONS: Record<LeadStatus, string> = {
   "Input Required": "Missing email or company domain — add details before enrichment",
   New: "Lead created, awaiting enrichment",
-  Enriching: "Firecrawl + Apollo running",
+  Enriching: "Firecrawl scraping company website",
   Enriched: "Company profile ready",
-  "Draft Ready": "AI email draft generated",
-  Approved: "Draft approved, queued to send",
-  Won: "Positive reply or deal won",
+  Open: "Active — outreach in progress",
   Closed: "No longer pursuing this lead",
 };
 
 export const STATUS_ORDER: Record<LeadStatus, number> = {
   "Input Required": 0,
-  New: 0, Enriching: 1, Enriched: 2, "Draft Ready": 3,
-  Approved: 4, Won: 5, Closed: 6,
+  New: 1, Enriching: 2, Enriched: 3,
+  Open: 4, Closed: 5,
 };
 
 export function kanbanColumnFor(lead: Lead): LeadStatus {
-  if (lead.status === "Input Required") return "Input Required";
   if (KANBAN_STAGES.includes(lead.status)) return lead.status;
   return "New";
 }
