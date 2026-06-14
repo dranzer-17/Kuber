@@ -6,7 +6,7 @@ import {
   CAMPAIGN_BUCKET_LABELS,
   CAMPAIGN_KANBAN_COLS,
   campaignBucket,
-  type CampaignBucket,
+  type CampaignKanbanBucket,
 } from "@/lib/campaign-status";
 
 type DraftRow = { status: string } | { status: string }[] | null;
@@ -35,24 +35,24 @@ export async function GET(
 
   const { data: rows } = await db
     .from("campaign_leads")
-    .select("id, crm_status, email_drafts(status)")
+    .select("id, crm_status, draft_id, email_drafts(status)")
     .eq("campaign_id", id);
 
   const leads = rows ?? [];
-  const bucketCounts: Record<CampaignBucket, number> = {
+  const bucketCounts: Record<CampaignKanbanBucket, number> = {
     pending: 0,
     draft: 0,
     approved: 0,
     sent: 0,
-    replied: 0,
-    won: 0,
-    closed: 0,
   };
 
   let draftsGenerated = 0;
   let certified = 0;
   let sent = 0;
   let failed = 0;
+  let generating = 0;
+  let pending = 0;
+  let succeeded = 0;
 
   for (const row of leads) {
     const draft = unwrapDraft(row.email_drafts as DraftRow);
@@ -61,15 +61,18 @@ export async function GET(
     if (ds === "approved") certified++;
     if (ds === "sent") sent++;
     if (ds === "failed") failed++;
+    if (ds === "generating") generating++;
+    if (!draft || !row.draft_id) pending++;
+    if (ds === "draft" || ds === "approved" || ds === "sent") succeeded++;
     bucketCounts[campaignBucket(row)]++;
   }
 
   const replied = leads.filter((r) => r.crm_status === "replied").length;
-  const won = leads.filter((r) => r.crm_status === "won").length;
-  const closed = leads.filter((r) => r.crm_status === "closed").length;
-
   const sentTotal = Math.max(sent, campaign.sent_count ?? 0);
   const repliedTotal = Math.max(replied, campaign.replied_count ?? 0);
+
+  const attempted = succeeded + failed;
+  const successRate = attempted > 0 ? Math.round((succeeded / attempted) * 100) : 0;
 
   const stageDistribution = CAMPAIGN_KANBAN_COLS.map((col) => ({
     stage: col.id,
@@ -85,13 +88,19 @@ export async function GET(
       certified,
       sent: sentTotal,
       replied: repliedTotal,
-      won,
-      closed,
       failed,
     },
     rates: {
       replyRate: sentTotal > 0 ? Math.round((repliedTotal / sentTotal) * 100) : 0,
       certifyRate: draftsGenerated > 0 ? Math.round((certified / draftsGenerated) * 100) : 0,
+    },
+    draftGeneration: {
+      total: leads.length,
+      pending,
+      generating,
+      succeeded,
+      failed,
+      successRate,
     },
     stageDistribution,
   });

@@ -25,7 +25,7 @@ import {
   restoreDraftVersion,
   reopenDraft,
   fetchCampaignReport,
-  setCampaignLeadStatus,
+  retryFailedDrafts,
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
@@ -106,6 +106,29 @@ function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
 
 type CampaignViewTab = "list" | "kanban" | "report";
 
+function DraftStatusBadge({
+  label,
+  styleClass,
+  helpText,
+}: {
+  label: string;
+  styleClass: string;
+  helpText?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "text-[10px] font-semibold uppercase tracking-wide px-2 h-5 rounded-full shrink-0",
+        "inline-flex items-center justify-center gap-1 leading-none",
+        styleClass,
+      )}
+    >
+      {label}
+      {helpText && <InfoTip text={helpText} />}
+    </span>
+  );
+}
+
 export function CampaignDetail({
   campaign,
   onBack,
@@ -136,6 +159,8 @@ export function CampaignDetail({
   const [viewTab, setViewTab] = useState<CampaignViewTab>("list");
   const [report, setReport] = useState<CampaignReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryingAll, setRetryingAll] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -397,16 +422,48 @@ export function CampaignDetail({
     }
   }
 
-  async function handleSetOutcome(campaignLeadId: string, status: "won" | "closed") {
+  async function handleRetryOne(draftId: string, campaignLeadId: string) {
+    setRetryingId(campaignLeadId);
     setError("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      await setCampaignLeadStatus(session.access_token, campaign.id, campaignLeadId, status);
+      await regenerateDraft(session.access_token, draftId);
       await loadData();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setRetryingId(null);
     }
+  }
+
+  async function handleRetryAllFailed() {
+    setRetryingAll(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { retried, errors } = await retryFailedDrafts(session.access_token, campaign.id);
+      if (errors.length > 0 && retried === 0) {
+        setError(errors[0] ?? "Retry failed");
+      } else if (errors.length > 0) {
+        setError(`Retried ${retried}; ${errors.length} still failed`);
+      }
+      await loadData();
+      if (viewTab === "report") {
+        const data = await fetchCampaignReport(session.access_token, campaign.id);
+        setReport(data);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRetryingAll(false);
+    }
+  }
+
+  function handleKanbanSelect(campaignLeadId: string) {
+    setSelectedId(campaignLeadId);
+    setViewTab("list");
   }
 
   const checkedDraftCount = campaignLeads.filter(
@@ -545,6 +602,16 @@ export function CampaignDetail({
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">
                   {progress.failed} failed
                   <InfoTip text={CAMPAIGN_STATUS_HELP.failed} />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-5 px-1.5 text-[10px] gap-1 text-red-400 hover:text-red-300"
+                    disabled={retryingAll}
+                    onClick={() => void handleRetryAllFailed()}
+                  >
+                    {retryingAll ? <Loader2 className="size-2.5 animate-spin" /> : <RotateCcw className="size-2.5" />}
+                    Retry
+                  </Button>
                 </span>
               )}
             </div>
@@ -625,15 +692,46 @@ export function CampaignDetail({
             <Loader2 className="size-6 text-muted-foreground animate-spin" />
           </div>
         ) : report ? (
-          <CampaignReportView report={report} />
+          <CampaignReportView
+            report={report}
+            onRetryAllFailed={report.draftGeneration.failed > 0 ? handleRetryAllFailed : undefined}
+            retrying={retryingAll}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
             Could not load report.
           </div>
         )
+      ) : viewTab === "kanban" ? (
+        <div className="flex flex-col flex-1 min-h-0 bg-card/30">
+          <div className="px-4 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Campaign journey
+            </p>
+            {progress && progress.failed > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1.5 border-red-500/30 text-red-400"
+                disabled={retryingAll}
+                onClick={() => void handleRetryAllFailed()}
+              >
+                {retryingAll ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+                Retry failed ({progress.failed})
+              </Button>
+            )}
+          </div>
+          <CampaignKanban
+            leads={sortedCampaignLeads}
+            selectedId={selectedId}
+            onSelect={handleKanbanSelect}
+            onRetry={handleRetryOne}
+            retryingId={retryingId}
+          />
+          {error && <p className="text-sm text-destructive px-4 pb-3">{error}</p>}
+        </div>
       ) : (
       <div className="flex flex-1 min-h-0">
-        {viewTab === "list" ? (
         <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/50">
           <div className="px-4 py-3 border-b border-border shrink-0">
             <div className="flex items-center justify-between mb-1 gap-2">
@@ -734,7 +832,8 @@ export function CampaignDetail({
                       <p className="text-[10px] text-muted-foreground truncate">{lead?.title || lead?.email}</p>
                     </div>
                     <span className={cn(
-                      "text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap",
+                      "text-[10px] font-semibold uppercase tracking-wide px-1.5 h-5 rounded-full shrink-0 whitespace-nowrap",
+                      "inline-flex items-center justify-center leading-none",
                       getStatusStyle(cl),
                     )}>
                       {getSidebarBadge(cl, isGenerating)}
@@ -745,21 +844,6 @@ export function CampaignDetail({
             )}
           </div>
         </div>
-        ) : (
-        <div className="flex-1 min-w-0 max-w-2xl shrink-0 border-r border-border flex flex-col bg-card/50 overflow-hidden">
-          <div className="px-4 py-3 border-b border-border shrink-0">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Campaign journey
-            </p>
-          </div>
-          <CampaignKanban
-            leads={sortedCampaignLeads}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onSetStatus={handleSetOutcome}
-          />
-        </div>
-        )}
 
         {/* Draft review panel */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -771,26 +855,28 @@ export function CampaignDetail({
             <div className="flex-1 overflow-y-auto px-8 py-6">
               <div className="max-w-2xl mx-auto space-y-6">
                 {/* Lead header */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <Avatar name={selectedName} size="md" />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <h2 className="text-lg font-bold">{selectedName}</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {selectedLead?.title || selectedLead?.email}
-                      {selectedLead?.country ? ` · ${selectedLead.country}` : ""}
-                    </p>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                      <p className="text-sm text-muted-foreground">
+                        {selectedLead?.title || selectedLead?.email}
+                        {selectedLead?.country ? ` · ${selectedLead.country}` : ""}
+                      </p>
+                      <DraftStatusBadge
+                        label={getDisplayStatus(selected)}
+                        styleClass={getStatusStyle(selected)}
+                        helpText={
+                          selected.email_drafts?.status
+                            ? (CAMPAIGN_STATUS_HELP[selected.email_drafts.status] ?? CAMPAIGN_STATUS_HELP.none)
+                            : undefined
+                        }
+                      />
+                    </div>
                   </div>
-                  <span className={cn(
-                    "text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded inline-flex items-center gap-1",
-                    getStatusStyle(selected),
-                  )}>
-                    {getDisplayStatus(selected)}
-                    {selected.email_drafts?.status && (
-                      <InfoTip text={CAMPAIGN_STATUS_HELP[selected.email_drafts.status] ?? CAMPAIGN_STATUS_HELP.none} />
-                    )}
-                  </span>
                   {selected.email_drafts?.status === "sent" && (
-                    <CheckCircle2 className="size-5 text-green-400" />
+                    <CheckCircle2 className="size-5 text-green-400 shrink-0 mt-1" />
                   )}
                 </div>
 
@@ -801,53 +887,6 @@ export function CampaignDetail({
                   </div>
                 ) : selected.email_drafts ? (
                   <div className="space-y-4 rounded-xl border border-border bg-card p-6">
-                    {versions.length > 1 && (
-                      <div className="space-y-2">
-                        <button
-                          type="button"
-                          onClick={() => setHistoryOpen((o) => !o)}
-                          className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <History className="size-3.5" />
-                          Version history
-                          <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
-                        </button>
-                        {historyOpen && (
-                          <div className="flex flex-wrap gap-2">
-                            {versions.map((v) => (
-                              <button
-                                key={v.id}
-                                type="button"
-                                onClick={() => loadVersionPreview(v)}
-                                className={cn(
-                                  "text-xs rounded-lg border px-2.5 py-1.5 transition-colors",
-                                  (previewVersionId === v.id || (!previewVersionId && v.id === selected.email_drafts?.id))
-                                    ? "border-primary bg-primary/10 text-primary"
-                                    : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
-                                )}
-                              >
-                                v{v.version} · {format(new Date(v.created_at), "MMM d")}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {isPreviewingHistory && (
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs text-amber-400">Viewing historical version (read-only)</p>
-                            <Button size="sm" variant="outline" disabled={restoring} onClick={() => handleRestoreVersion(previewVersionId!)}>
-                              {restoring ? <Loader2 className="size-3 animate-spin" /> : "Restore this version"}
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => {
-                              setPreviewVersionId(null);
-                              setEditSubject(selected.email_drafts?.subject ?? "");
-                              setEditBody(selected.email_drafts?.body ?? "");
-                            }}>
-                              Back to current
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    )}
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
                       <Input
@@ -896,7 +935,55 @@ export function CampaignDetail({
                           <RotateCcw className="size-3.5" /> Regenerate
                         </Button>
                       )}
+                      {versions.length > 1 && (
+                        <Button
+                          variant="outline"
+                          className="gap-1.5"
+                          onClick={() => setHistoryOpen((o) => !o)}
+                        >
+                          <History className="size-3.5" />
+                          Version history
+                          <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
+                        </Button>
+                      )}
                     </div>
+
+                    {historyOpen && versions.length > 1 && (
+                      <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
+                        <div className="flex flex-wrap gap-2">
+                          {versions.map((v) => (
+                            <button
+                              key={v.id}
+                              type="button"
+                              onClick={() => loadVersionPreview(v)}
+                              className={cn(
+                                "text-xs rounded-lg border px-2.5 py-1.5 transition-colors",
+                                (previewVersionId === v.id || (!previewVersionId && v.id === selected.email_drafts?.id))
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
+                              )}
+                            >
+                              v{v.version} · {format(new Date(v.created_at), "MMM d")}
+                            </button>
+                          ))}
+                        </div>
+                        {isPreviewingHistory && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-xs text-amber-400">Viewing historical version (read-only)</p>
+                            <Button size="sm" variant="outline" disabled={restoring} onClick={() => handleRestoreVersion(previewVersionId!)}>
+                              {restoring ? <Loader2 className="size-3 animate-spin" /> : "Restore this version"}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => {
+                              setPreviewVersionId(null);
+                              setEditSubject(selected.email_drafts?.subject ?? "");
+                              setEditBody(selected.email_drafts?.body ?? "");
+                            }}>
+                              Back to current
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {regenOpen && (
                       <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">

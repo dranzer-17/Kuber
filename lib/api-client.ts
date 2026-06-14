@@ -340,6 +340,22 @@ export async function setCampaignLeadStatus(
   }, token);
 }
 
+export async function retryFailedDrafts(token: string, campaignId: string): Promise<{ retried: number; errors: string[] }> {
+  const { campaign_leads } = await fetchCampaignLeads(token, campaignId);
+  const failed = campaign_leads.filter((cl) => cl.email_drafts?.status === "failed" && cl.email_drafts?.id);
+  const errors: string[] = [];
+  let retried = 0;
+  for (const cl of failed) {
+    try {
+      await regenerateDraft(token, cl.email_drafts!.id);
+      retried++;
+    } catch (e) {
+      errors.push((e as Error).message);
+    }
+  }
+  return { retried, errors };
+}
+
 export async function fetchCampaignReport(token: string, campaignId: string): Promise<{
   campaignId: string;
   totals: {
@@ -348,11 +364,17 @@ export async function fetchCampaignReport(token: string, campaignId: string): Pr
     certified: number;
     sent: number;
     replied: number;
-    won: number;
-    closed: number;
     failed: number;
   };
   rates: { replyRate: number; certifyRate: number };
+  draftGeneration: {
+    total: number;
+    pending: number;
+    generating: number;
+    succeeded: number;
+    failed: number;
+    successRate: number;
+  };
   stageDistribution: Array<{ stage: string; label: string; count: number }>;
 }> {
   return apiFetch(`/api/v1/campaigns/${campaignId}/report`, {}, token);

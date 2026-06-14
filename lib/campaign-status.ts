@@ -1,13 +1,10 @@
-/** Per-campaign lead journey buckets (Campaign Kanban + Report). */
+/** Per-campaign lead journey buckets (Campaign Kanban + Report stage donut). */
 
-export type CampaignBucket =
+export type CampaignKanbanBucket =
   | "pending"
   | "draft"
   | "approved"
-  | "sent"
-  | "replied"
-  | "won"
-  | "closed";
+  | "sent";
 
 export type CampaignLeadLike = {
   crm_status: string;
@@ -21,19 +18,21 @@ function unwrapDraft(
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
-export function campaignBucket(cl: CampaignLeadLike): CampaignBucket {
+/** Kanban / journey stages — failed and in-progress drafts count as Pending. */
+export function campaignBucket(cl: CampaignLeadLike): CampaignKanbanBucket {
   const ds = unwrapDraft(cl.email_drafts)?.status;
   if (ds === "approved") return "approved";
   if (ds === "sent") return "sent";
   if (ds === "draft") return "draft";
-  if (cl.crm_status === "replied") return "replied";
-  if (cl.crm_status === "won") return "won";
-  if (cl.crm_status === "closed") return "closed";
   return "pending";
 }
 
+export function isFailedDraft(cl: CampaignLeadLike): boolean {
+  return unwrapDraft(cl.email_drafts)?.status === "failed";
+}
+
 export const CAMPAIGN_KANBAN_COLS: {
-  id: CampaignBucket;
+  id: CampaignKanbanBucket;
   label: string;
   dot: string;
   header: string;
@@ -42,17 +41,11 @@ export const CAMPAIGN_KANBAN_COLS: {
   { id: "draft", label: "Draft Ready", dot: "bg-blue-400", header: "border-blue-500/30" },
   { id: "approved", label: "Certified", dot: "bg-cyan-400", header: "border-cyan-500/30" },
   { id: "sent", label: "Sent", dot: "bg-teal-400", header: "border-teal-500/30" },
-  { id: "replied", label: "Replied", dot: "bg-green-400", header: "border-green-500/30" },
-  { id: "won", label: "Won", dot: "bg-emerald-400", header: "border-emerald-500/30" },
-  { id: "closed", label: "Closed", dot: "bg-zinc-500", header: "border-zinc-600/30" },
 ];
 
-export const CAMPAIGN_BUCKET_LABELS: Record<CampaignBucket, string> = {
+export const CAMPAIGN_BUCKET_LABELS: Record<CampaignKanbanBucket, string> = {
   pending: "Pending",
   draft: "Draft Ready",
   approved: "Certified",
   sent: "Sent",
-  replied: "Replied",
-  won: "Won",
-  closed: "Closed",
 };

@@ -1,19 +1,15 @@
 "use client";
 
+import { Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
+import { Button } from "@/components/ui/button";
 import {
   CAMPAIGN_KANBAN_COLS,
   campaignBucket,
-  type CampaignBucket,
+  isFailedDraft,
+  type CampaignKanbanBucket,
 } from "@/lib/campaign-status";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 export type CampaignKanbanLead = {
   id: string;
@@ -27,108 +23,115 @@ export type CampaignKanbanLead = {
   email_drafts: { id: string; status: string } | null;
 };
 
+const COL_COUNT = CAMPAIGN_KANBAN_COLS.length;
+
 export function CampaignKanban({
   leads,
   selectedId,
   onSelect,
-  onSetStatus,
+  onRetry,
+  retryingId,
 }: {
   leads: CampaignKanbanLead[];
   selectedId: string | null;
   onSelect: (campaignLeadId: string) => void;
-  onSetStatus?: (campaignLeadId: string, status: "won" | "closed") => void;
+  onRetry?: (draftId: string, campaignLeadId: string) => void;
+  retryingId?: string | null;
 }) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-4 min-h-0 flex-1 p-2">
-      {CAMPAIGN_KANBAN_COLS.map((col) => {
-        const colLeads = leads.filter((cl) => campaignBucket(cl) === col.id);
-        return (
-          <div
-            key={col.id}
-            className="shrink-0 flex flex-col gap-2"
-            style={{
-              width: `calc((100% - ${(CAMPAIGN_KANBAN_COLS.length - 1) * 8}px) / ${CAMPAIGN_KANBAN_COLS.length})`,
-              minWidth: "140px",
-            }}
-          >
-            <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
-              <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
-              <span className="text-xs font-semibold truncate">{col.label}</span>
-              <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0">
-                {colLeads.length}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1.5 flex-1">
-              {colLeads.map((cl) => {
-                const lead = cl.leads;
-                const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
-                const failed = cl.email_drafts?.status === "failed";
-                const isSelected = selectedId === cl.id;
-                return (
-                  <div
-                    key={cl.id}
-                    className={cn(
-                      "rounded-lg border bg-card p-2.5 cursor-pointer transition-colors",
-                      failed ? "border-red-500/50" : "border-border",
-                      isSelected ? "ring-1 ring-primary/50 bg-primary/5" : "hover:bg-secondary/40",
-                    )}
-                    onClick={() => onSelect(cl.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onSelect(cl.id);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="flex items-start gap-2">
-                      <Avatar name={name} size="sm" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{name}</p>
-                        <p className="text-[10px] text-muted-foreground truncate">
-                          {lead?.title || lead?.email}
-                        </p>
+    <div className="flex flex-col flex-1 min-h-0">
+      <p className="text-[11px] text-muted-foreground px-4 pt-2 shrink-0">
+        Click a lead to open in Leads view for review and certification.
+      </p>
+      <div className="flex gap-2 overflow-x-auto pb-4 min-h-0 flex-1 p-2">
+        {CAMPAIGN_KANBAN_COLS.map((col) => {
+          const colLeads = leads.filter((cl) => campaignBucket(cl) === col.id);
+          return (
+            <div
+              key={col.id}
+              className="shrink-0 flex flex-col gap-2"
+              style={{
+                width: `calc((100% - ${(COL_COUNT - 1) * 8}px) / ${COL_COUNT})`,
+                minWidth: "180px",
+              }}
+            >
+              <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
+                <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
+                <span className="text-xs font-semibold truncate">{col.label}</span>
+                <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0">
+                  {colLeads.length}
+                </span>
+              </div>
+              <div className="flex flex-col gap-1.5 flex-1 min-h-[120px]">
+                {colLeads.map((cl) => {
+                  const lead = cl.leads;
+                  const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
+                  const isFailed = isFailedDraft(cl);
+                  const isSelected = selectedId === cl.id;
+                  const isRetrying = retryingId === cl.id;
+                  return (
+                    <div
+                      key={cl.id}
+                      className={cn(
+                        "rounded-lg border bg-card p-2.5 cursor-pointer transition-colors",
+                        isFailed ? "border-red-500/50" : "border-border",
+                        isSelected ? "ring-1 ring-primary/50 bg-primary/5" : "hover:bg-secondary/40",
+                      )}
+                      onClick={() => onSelect(cl.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onSelect(cl.id);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div className="flex items-start gap-2">
+                        <Avatar name={name} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium truncate">{name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {lead?.title || lead?.email}
+                          </p>
+                        </div>
                       </div>
+                      {isFailed && onRetry && cl.email_drafts?.id && (
+                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-[10px] w-full gap-1 border-red-500/30 text-red-400 hover:text-red-300"
+                            disabled={!!retryingId}
+                            onClick={() => onRetry(cl.email_drafts!.id, cl.id)}
+                          >
+                            {isRetrying ? (
+                              <Loader2 className="size-2.5 animate-spin" />
+                            ) : (
+                              <RotateCcw className="size-2.5" />
+                            )}
+                            Retry
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                    {onSetStatus && (
-                      <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                        <Select
-                          value={cl.crm_status === "won" || cl.crm_status === "closed" ? cl.crm_status : ""}
-                          onValueChange={(v) => {
-                            if (v === "won" || v === "closed") onSetStatus(cl.id, v);
-                          }}
-                        >
-                          <SelectTrigger className="h-6 text-[10px] w-full">
-                            <SelectValue placeholder="Set outcome" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="won">Won</SelectItem>
-                            <SelectItem value="closed">Closed</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-export function countByBucket(leads: CampaignKanbanLead[]): Record<CampaignBucket, number> {
-  const counts: Record<CampaignBucket, number> = {
+export function countByBucket(leads: CampaignKanbanLead[]): Record<CampaignKanbanBucket, number> {
+  const counts: Record<CampaignKanbanBucket, number> = {
     pending: 0,
     draft: 0,
     approved: 0,
     sent: 0,
-    replied: 0,
-    won: 0,
-    closed: 0,
   };
   for (const cl of leads) counts[campaignBucket(cl)]++;
   return counts;
