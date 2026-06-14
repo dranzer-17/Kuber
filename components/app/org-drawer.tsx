@@ -239,8 +239,29 @@ export function OrgDrawer({ orgId, onClose, onAddLead }: {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {loading && (
-            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
-              <Loader2 className="size-4 animate-spin" /> Loading…
+            <div className="space-y-4 animate-pulse">
+              {/* Name + domain */}
+              <div className="space-y-2">
+                <div className="h-5 w-2/3 bg-secondary rounded" />
+                <div className="h-3 w-1/3 bg-secondary/60 rounded" />
+              </div>
+              {/* Enrichment dot row */}
+              <div className="flex items-center gap-2">
+                <div className="size-2 rounded-full bg-secondary shrink-0" />
+                <div className="h-3 w-16 bg-secondary/60 rounded" />
+              </div>
+              {/* Field rows */}
+              {[70, 50, 60, 80].map((w, i) => (
+                <div key={i} className="space-y-1.5">
+                  <div className="h-2.5 w-16 bg-secondary/60 rounded" />
+                  <div className="h-8 bg-secondary rounded-lg" style={{ width: `${w}%` }} />
+                </div>
+              ))}
+              {/* Description block */}
+              <div className="space-y-1.5">
+                <div className="h-2.5 w-20 bg-secondary/60 rounded" />
+                <div className="h-16 bg-secondary rounded-lg" />
+              </div>
             </div>
           )}
 

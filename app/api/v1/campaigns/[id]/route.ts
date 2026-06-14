@@ -35,7 +35,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const db = createAdminClient();
 
-  const { error } = await db.from("campaigns").delete().eq("id", id);
+  const { error } = await db.from("campaigns").update({ is_deleted: true }).eq("id", id);
   if (error) return fail(500, "INTERNAL", error.message);
 
   return ok({ deleted: id });

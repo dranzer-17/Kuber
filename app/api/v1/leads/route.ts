@@ -97,7 +97,8 @@ export async function GET(req: NextRequest) {
       `*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to, last_error),
        campaign_leads(crm_status, interest_status, created_at, campaigns(id, name))`,
       { count: "exact" }
-    );
+    )
+    .eq("is_deleted", false);
 
   if (country) q = q.eq("country", country);
   if (email_status) q = q.eq("email_status", email_status);

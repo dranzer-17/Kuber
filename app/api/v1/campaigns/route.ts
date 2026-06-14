@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await db
     .from("campaigns")
     .select("*")
+    .eq("is_deleted", false)
     .order("created_at", { ascending: false });
 
   if (error) return fail(500, "INTERNAL", error.message);

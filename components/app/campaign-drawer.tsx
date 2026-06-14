@@ -688,8 +688,26 @@ export function CampaignDetail({
 
       {viewTab === "report" ? (
         reportLoading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="size-6 text-muted-foreground animate-spin" />
+          <div className="flex-1 p-6 space-y-4 animate-pulse">
+            <div className="grid grid-cols-3 gap-4">
+              {[0,1,2].map((i) => (
+                <div key={i} className="rounded-xl border border-border bg-card p-4 space-y-2">
+                  <div className="h-3 w-16 bg-secondary rounded" />
+                  <div className="h-8 w-12 bg-secondary rounded" />
+                </div>
+              ))}
+            </div>
+            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <div className="h-3 w-24 bg-secondary rounded" />
+              <div className="h-4 bg-secondary/60 rounded-full" />
+              {[80,60,40,90,30].map((w,i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="h-3 w-20 bg-secondary/60 rounded" />
+                  <div className="h-3 bg-secondary rounded flex-1" style={{ width: `${w}%` }} />
+                  <div className="h-3 w-8 bg-secondary/60 rounded" />
+                </div>
+              ))}
+            </div>
           </div>
         ) : report ? (
           <CampaignReportView
@@ -788,8 +806,17 @@ export function CampaignDetail({
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="size-4 text-muted-foreground animate-spin" />
+              <div className="space-y-1 animate-pulse">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-2 py-2.5 rounded-lg">
+                    <div className="size-8 rounded-full bg-secondary shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div className="h-3 bg-secondary rounded" style={{ width: `${45 + (i % 3) * 15}%` }} />
+                      <div className="h-2.5 bg-secondary/60 rounded w-20" />
+                    </div>
+                    <div className="h-5 w-14 bg-secondary rounded-full shrink-0" />
+                  </div>
+                ))}
               </div>
             ) : sortedCampaignLeads.length === 0 ? (
               <p className="text-xs text-muted-foreground py-8 text-center px-2">No leads yet.</p>

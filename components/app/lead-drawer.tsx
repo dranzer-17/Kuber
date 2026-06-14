@@ -77,13 +77,17 @@ function Section({
   );
 }
 
-function EnrichStageBadge({ stage }: { stage: EnrichmentStage | null }) {
+function EnrichStageBadge({ stage, hasData }: { stage: EnrichmentStage | null; hasData?: boolean }) {
   if (!stage) return null;
+  const doneLabel = hasData ? "Enriched" : "Done (No Data)";
+  const doneCls   = hasData
+    ? "bg-green-500/10 text-green-400 border-green-500/20"
+    : "bg-yellow-500/10 text-yellow-400 border-yellow-500/20";
   const configs: Record<EnrichmentStage, { label: string; cls: string }> = {
-    queued:   { label: "In Queue",          cls: "bg-secondary text-muted-foreground border-border" },
-    scraping: { label: "Enriching...",       cls: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" },
-    done:     { label: "Enriched",           cls: "bg-green-500/10 text-green-400 border-green-500/20" },
-    failed:   { label: "Enrichment Failed",  cls: "bg-red-500/10 text-red-400 border-red-500/20" },
+    queued:   { label: "In Queue",         cls: "bg-secondary text-muted-foreground border-border" },
+    scraping: { label: "Enriching...",      cls: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" },
+    done:     { label: doneLabel,           cls: doneCls },
+    failed:   { label: "Enrichment Failed", cls: "bg-red-500/10 text-red-400 border-red-500/20" },
   };
   const c = configs[stage];
   return (
@@ -270,6 +274,10 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   const open = lead !== null;
   const currentStage = enrichData?.enrichment_stage ?? display?.enrichmentStage ?? null;
   const attempts = enrichData?.enrichment_attempts ?? 0;
+  const enrichHasData = !!(
+    (enrichData?.company_description || display?.companyDescription) ||
+    (display?.primaryProducts && display.primaryProducts.length > 0)
+  );
 
   return (
     <>
@@ -486,10 +494,10 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   <div className="flex items-center gap-2 flex-wrap">
                     <Building2 className="size-3 text-muted-foreground" />
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Company Enrichment</span>
-                    <EnrichStageBadge stage={currentStage} />
+                    <EnrichStageBadge stage={currentStage} hasData={enrichHasData} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {(currentStage === "failed" || currentStage === "queued" || currentStage === null) && attempts < 3 && (
+                    {(currentStage === "failed" || currentStage === "queued" || currentStage === null || (currentStage === "done" && !enrichHasData)) && attempts < 3 && (
                       <Button
                         size="sm" variant="outline"
                         className="h-6 px-2 text-[11px] gap-1"
@@ -497,7 +505,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         disabled={retrying}
                       >
                         <RotateCcw className={cn("size-3", retrying && "animate-spin")} />
-                        {currentStage === "failed" ? "Retry" : "Enrich"}
+                        {currentStage === "failed" || (currentStage === "done" && !enrichHasData) ? "Retry" : "Enrich"}
                       </Button>
                     )}
                     <button

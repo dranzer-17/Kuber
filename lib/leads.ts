@@ -61,8 +61,26 @@ export const STATUS_ORDER: Record<LeadStatus, number> = {
   Open: 4, Closed: 5,
 };
 
+/** True only when Firecrawl ran AND extracted real company data. */
+export function hasEnrichmentData(lead: Lead): boolean {
+  return (
+    lead.enrichmentStage === "done" &&
+    !!(lead.companyDescription || (lead.primaryProducts && lead.primaryProducts.length > 0))
+  );
+}
+
 export function kanbanColumnFor(lead: Lead): LeadStatus {
-  if (KANBAN_STAGES.includes(lead.status)) return lead.status;
+  // Terminal CRM statuses take priority
+  if (lead.status === "Open")   return "Open";
+  if (lead.status === "Closed") return "Closed";
+  // No email or domain → needs manual input before enrichment can run
+  if (!lead.email || !lead.domain) return "Input Required";
+  // Enrichment failed or finished but returned no useful data → still needs input
+  if (lead.enrichmentStage === "failed") return "Input Required";
+  if (lead.enrichmentStage === "done" && !hasEnrichmentData(lead)) return "Input Required";
+  if (lead.enrichmentStage === "done")     return "Enriched";
+  if (lead.enrichmentStage === "scraping") return "Enriching";
+  // queued or null → awaiting enrichment
   return "New";
 }
 
