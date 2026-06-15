@@ -4,13 +4,20 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { GenerateDraftsSchema, DraftsQuerySchema } from "@/lib/validators/drafts";
 import { complete, buildDraftSystem, DraftOutput } from "@/lib/services/llm";
-import { getEmailSignature } from "@/lib/services/settings";
+import { getSignature } from "@/lib/services/settings";
+import { getDraftSystemPrompt } from "@/lib/services/settings";
 import { KUBER_CONTEXT } from "@/lib/constants";
 import { z } from "zod";
 
 export const maxDuration = 300;
 
 const DraftSchema = z.object({ subject: z.string(), body: z.string() });
+
+// Approach A: instruct the LLM to NOT add a sign-off — we append it deterministically.
+const SIGNATURE_INSTRUCTION =
+  "\n\nIMPORTANT: Do NOT include any sign-off, signature, name, title, or contact " +
+  "details at the end. End the email body with your final sentence. The signature " +
+  "is added automatically by the system.";
 
 export async function GET(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -50,17 +57,36 @@ export async function POST(req: NextRequest) {
   const { campaign_id, lead_ids, limit } = parsed.data;
   const db = createAdminClient();
 
-  // Get campaign for human_in_loop setting
+  // Get campaign details including attachment + signature override
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, human_in_loop, signature_override")
+    .select("id, human_in_loop, signature_override, attachment_name, ai_prompt_context")
     .eq("id", campaign_id)
     .maybeSingle();
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
 
-  // Fetch email signature (campaign override takes priority over global setting)
-  const globalSignature = await getEmailSignature(db);
-  const effectiveSignature = campaign.signature_override?.trim() || globalSignature;
+  // Resolve structured signature (campaign override wins)
+  const sig = await getSignature(db);
+  const signatureBlock = campaign.signature_override?.trim()
+    || `Best regards,\n${sig.name}\n${sig.title}\n${sig.contact}`;
+
+  // Build the full system prompt
+  const baseSystemPrompt = await getDraftSystemPrompt(db);
+
+  // Campaign-level context (the per-campaign "Additional context for AI")
+  const campaignContext = campaign.ai_prompt_context
+    ? `\n\nAdditional campaign context:\n${campaign.ai_prompt_context}`
+    : "";
+
+  // Attachment instruction: only if the campaign has an attached file
+  const attachmentInstruction = campaign.attachment_name
+    ? `\n\nThere is a file attached to this email named "${campaign.attachment_name}". ` +
+      `Reference it naturally in ONE sentence near the end of the body ` +
+      `(e.g. "I've attached our product brochure for your reference."). ` +
+      `Do not invent details about the file beyond that it is attached.`
+    : "";
+
+  const systemPrompt = baseSystemPrompt + campaignContext + attachmentInstruction + SIGNATURE_INSTRUCTION;
 
   // Target: enriched leads with no draft (or failed draft)
   let q = db
@@ -119,21 +145,32 @@ export async function POST(req: NextRequest) {
 
     try {
       const { json, tier } = await complete<DraftOutput>({
-        system: buildDraftSystem(),
+        system: systemPrompt,
         user: userContent,
       });
 
       const validated = DraftSchema.safeParse(json);
       if (!validated.success) throw new Error("Draft shape mismatch");
 
+      // Approach A: deterministic signature append
+      let finalBody = validated.data.body.trim();
+
+      // Approach B fallback: replace any remaining LLM placeholders
+      finalBody = finalBody
+        .replaceAll("[Your Name]", sig.name)
+        .replaceAll("[Your Title]", sig.title)
+        .replaceAll("[Your Contact Information]", sig.contact)
+        .replaceAll("[Your Company]", sig.company);
+
+      // Append the signature block
+      finalBody = `${finalBody}\n\n${signatureBlock}`;
+
       const finalStatus = campaign.human_in_loop ? "draft" : "approved";
       const now = new Date().toISOString();
 
       await db.from("email_drafts").update({
         subject: validated.data.subject,
-        body: effectiveSignature
-          ? `${validated.data.body}\n\n${effectiveSignature}`
-          : validated.data.body,
+        body: finalBody,
         status: finalStatus,
         ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: user.id } : {}),
         updated_at: now,

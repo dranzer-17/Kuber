@@ -15,6 +15,12 @@ export const CreateCampaignSchema = z.object({
   follow_up_pattern: z
     .array(z.object({ step: z.number().int(), delay: z.number().int().min(0) }))
     .optional(),
+  // Campaign attachment fields (set by upload endpoint)
+  attachment_path: z.string().optional(),
+  attachment_name: z.string().optional(),
+  attachment_mime: z.string().optional(),
+  attachment_size: z.number().int().optional(),
+  attachment_url:  z.string().optional().nullable(),
 });
 
 export const PatchCampaignSchema = z.object({

@@ -87,6 +87,45 @@ export async function getEmailSignature(db: SupabaseClient): Promise<string> {
   return data?.value?.trim() || "";
 }
 
+// ── Structured signature ────────────────────────────────────────────────────
+
+const SIGNATURE_KEYS = [
+  "signature_name",
+  "signature_title",
+  "signature_contact",
+  "signature_company",
+] as const;
+
+const SIGNATURE_DEFAULTS = {
+  name:    "Kuber Polyplast Sales Team",
+  title:   "Business Development",
+  contact: "Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com",
+  company: "Kuber Polyplast",
+};
+
+export interface Signature {
+  name: string;
+  title: string;
+  contact: string;
+  company: string;
+}
+
+export async function getSignature(db: SupabaseClient): Promise<Signature> {
+  const { data: rows } = await db
+    .from("settings")
+    .select("key, value")
+    .in("key", [...SIGNATURE_KEYS]);
+
+  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
+
+  return {
+    name:    map.signature_name?.trim()    || SIGNATURE_DEFAULTS.name,
+    title:   map.signature_title?.trim()   || SIGNATURE_DEFAULTS.title,
+    contact: map.signature_contact?.trim() || SIGNATURE_DEFAULTS.contact,
+    company: map.signature_company?.trim() || SIGNATURE_DEFAULTS.company,
+  };
+}
+
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;

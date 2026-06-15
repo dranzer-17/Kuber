@@ -115,6 +115,18 @@ export function campaignIneligibleReason(lead: Lead): string | null {
   return null;
 }
 
+// ── Status sub-color classifier ─────────────────────────────────────────────
+
+export type InputRequiredReason = "missing_data" | "failed" | null;
+
+/** Why a lead is in Input Required — drives the card sub-color. */
+export function inputRequiredReason(lead: Lead): InputRequiredReason {
+  // Only meaningful for the Input Required column
+  if (kanbanColumnFor(lead) !== "Input Required") return null;
+  if (!lead.email || !lead.domain) return "missing_data";  // yellow
+  return "failed";                                          // orange (has domain, but failed/no-data)
+}
+
 export const ENRICHMENT_DOT_HELP: Record<EnrichmentStage | "none", string> = {
   queued: "Company queued for website scrape. Not ready for campaigns yet.",
   scraping: "Firecrawl is scraping the company website. Wait until enrichment completes.",

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronRight, Loader2, Clock, Calendar as CalendarIcon, Globe, Calendar } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronRight, Loader2, Clock, Calendar as CalendarIcon, Globe, Calendar, Paperclip, Upload, FileText, X, Check } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads";
 import { isCampaignEligible, CAMPAIGN_ACTION_HELP, getMostCommonCountry } from "@/lib/leads";
 import { COUNTRY_TO_TIMEZONE } from "@/lib/constants";
-import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchSettings } from "@/lib/api-client";
+import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchSettings, uploadCampaignAttachment } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 
 export type Campaign = {
@@ -119,6 +119,43 @@ export function CreateCampaignModal({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
+  const [attachment, setAttachment] = useState<{
+    attachment_path: string;
+    attachment_name: string;
+    attachment_mime: string;
+    attachment_size: number;
+    attachment_url: string | null;
+  } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError("");
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError("File exceeds 10MB"); return;
+    }
+    setUploading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const result = await uploadCampaignAttachment(token, file);
+      setAttachment(result);
+    } catch (err) {
+      setUploadError((err as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeAttachment() {
+    setAttachment(null);
+    setUploadError("");
+  }
+
   useEffect(() => {
     if (!open) return;
     const country = getMostCommonCountry(leads);
@@ -145,6 +182,7 @@ export function CreateCampaignModal({
     setScheduleDate(undefined); setSenderName(""); setAiPromptContext("");
     setSendDays({ monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false });
     setCreating(false); setError("");
+    setAttachment(null); setUploading(false); setUploadError("");
   }
 
   function handleClose() { reset(); onClose(); }
@@ -180,6 +218,13 @@ export function CreateCampaignModal({
             9, 0, 0,
           ).toISOString(),
         } : { send_mode: "now" as const }),
+        ...(attachment ? {
+          attachment_path: attachment.attachment_path,
+          attachment_name: attachment.attachment_name,
+          attachment_mime: attachment.attachment_mime,
+          attachment_size: attachment.attachment_size,
+          attachment_url: attachment.attachment_url,
+        } : {}),
       });
 
       await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
@@ -329,6 +374,57 @@ export function CreateCampaignModal({
             </div>
           </div>
 
+          <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+            <div className="flex items-start gap-2">
+              <Paperclip className="size-4 text-muted-foreground mt-0.5" />
+              <div>
+                <p className="font-medium text-sm">Attachment (optional)</p>
+                <p className="text-xs text-muted-foreground">
+                  Sent with every email in this campaign. PDF, DOC, XLS, PNG, JPG — max 10MB.
+                </p>
+              </div>
+            </div>
+
+            {!attachment ? (
+              <>
+                <input
+                  ref={fileInputRef} type="file" className="hidden"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+                  onChange={handleFileSelect}
+                />
+                <Button
+                  type="button" variant="outline" size="sm"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                  {uploading ? "Uploading…" : "Choose file"}
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background p-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="size-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm truncate">{attachment.attachment_name}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      ({(attachment.attachment_size / 1024 / 1024).toFixed(1)} MB)
+                    </span>
+                  </div>
+                  <button type="button" onClick={removeAttachment}
+                          className="text-muted-foreground hover:text-foreground">
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <p className="text-xs text-green-500 flex items-center gap-1">
+                  <Check className="size-3" /> The AI will mention the attachment in each email.
+                </p>
+              </div>
+            )}
+
+            {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
+          </div>
+
           <p className="text-xs text-muted-foreground">
             Drafts will be generated in the background. Review and certify them from the campaign view.
           </p>
@@ -337,7 +433,7 @@ export function CreateCampaignModal({
         </div>
 
         <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
-          <Button disabled={!name.trim() || creating || leads.length === 0} onClick={handleCreate} className="gap-1.5">
+          <Button disabled={!name.trim() || creating || uploading || leads.length === 0} onClick={handleCreate} className="gap-1.5">
             {creating ? (
               <><Loader2 className="size-3.5 animate-spin" /> Creating…</>
             ) : (

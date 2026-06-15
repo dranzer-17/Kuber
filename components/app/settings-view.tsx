@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Loader2, Lock, Save, User, Bot, LogOut,
-  ChevronRight, Sparkles,
+  ChevronRight, Sparkles, PenLine,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,11 @@ export function SettingsView() {
   const [targetMarkets,  setTargetMarkets ] = useState("");
   const [systemPrompt,   setSystemPrompt  ] = useState("");
 
+  // Signature fields
+  const [sigName,    setSigName   ] = useState("");
+  const [sigTitle,   setSigTitle  ] = useState("");
+  const [sigContact, setSigContact] = useState("");
+
   // Auth
   const [userEmail, setUserEmail] = useState("");
   const [userName,  setUserName  ] = useState("");
@@ -62,6 +67,9 @@ export function SettingsView() {
         );
         setTargetMarkets(s.client_target_markets ?? "");
         setSystemPrompt(s.system_prompt ?? "");
+        setSigName(s.signature_name ?? "");
+        setSigTitle(s.signature_title ?? "");
+        setSigContact(s.signature_contact ?? "");
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -84,6 +92,9 @@ export function SettingsView() {
         client_products:     clientProducts.join(", "),
         client_target_markets: targetMarkets,
         system_prompt:       systemPrompt,
+        signature_name:      sigName,
+        signature_title:     sigTitle,
+        signature_contact:   sigContact,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -271,6 +282,41 @@ export function SettingsView() {
                     Base prompt used when generating all email drafts. Campaign-level context is appended on top.
                   </p>
                 </div>
+
+                <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <PenLine className="size-4 text-muted-foreground" />
+                    <h3 className="text-sm font-semibold">Email Signature</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Used at the end of every generated email. Leave blank to use defaults.
+                  </p>
+
+                  <div className="space-y-1.5">
+                    <Label>Sender name</Label>
+                    <Input value={sigName} onChange={(e) => setSigName(e.target.value)}
+                           placeholder="Kuber Polyplast Sales Team" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Title</Label>
+                    <Input value={sigTitle} onChange={(e) => setSigTitle(e.target.value)}
+                           placeholder="Business Development" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Contact information</Label>
+                    <textarea
+                      className="w-full rounded-lg border border-border bg-secondary/20 p-3 text-sm min-h-[90px] resize-y"
+                      value={sigContact} onChange={(e) => setSigContact(e.target.value)}
+                      placeholder={"Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"} />
+                  </div>
+
+                  {/* Live preview */}
+                  <div className="rounded-lg border border-border bg-secondary/10 p-3 text-sm whitespace-pre-line text-muted-foreground">
+                    {["Best regards,", sigName || "Kuber Polyplast Sales Team", sigTitle || "Business Development", sigContact || "Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"].join("\n")}
+                  </div>
+                </section>
 
                 <div className="rounded-xl border border-border bg-secondary/20 p-6 space-y-2 opacity-50 pointer-events-none">
                   <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">

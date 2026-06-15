@@ -1,9 +1,9 @@
 "use client";
 
-import { AlertCircle, Info } from "lucide-react";
+import { Info, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lead, LeadStatus } from "@/lib/leads";
-import { kanbanColumnFor } from "@/lib/leads";
+import { kanbanColumnFor, inputRequiredReason } from "@/lib/leads";
 
 const KANBAN_COLS: { id: LeadStatus; label: string; dot: string; header: string }[] = [
   { id: "New",            label: "New",            dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
@@ -39,9 +39,7 @@ export function KanbanBoard({
             </div>
             <div className="flex flex-col gap-1.5">
               {colLeads.map((lead) => {
-                const failed = lead.enrichmentStage === "failed";
-                const missingData = !lead.email || !lead.domain;
-                const isInputRequired = col.id === "Input Required";
+                const reason = inputRequiredReason(lead);
                 return (
                   <button
                     key={lead.id}
@@ -49,15 +47,19 @@ export function KanbanBoard({
                     onClick={() => onCardClick(lead)}
                     className={cn(
                       "rounded-lg border bg-card p-2.5 text-left cursor-pointer hover:border-muted-foreground/50 transition-colors shadow-sm relative",
-                      failed ? "border-red-500/50" : "border-border",
+                      reason === "failed" ? "border-orange-500/40" : reason === "missing_data" ? "border-yellow-500/30" : "border-border",
                     )}
-                    title={failed && lead.lastError ? lead.lastError : undefined}
+                    title={reason === "failed" && lead.lastError ? lead.lastError : undefined}
                   >
-                    {failed && (
-                      <AlertCircle className="size-3 text-red-400 absolute top-2 right-2" />
+                    {reason === "missing_data" && (
+                      <span title="Add email or domain to enable enrichment" className="absolute top-2 right-2 text-yellow-400">
+                        <Info className="size-3" />
+                      </span>
                     )}
-                    {isInputRequired && !failed && (
-                      <Info className="size-3 text-amber-400 absolute top-2 right-2" />
+                    {reason === "failed" && (
+                      <span title="Enrichment failed — open to retry" className="absolute top-2 right-2 text-orange-400">
+                        <RotateCcw className="size-3" />
+                      </span>
                     )}
                     <p className="text-xs font-semibold truncate mb-0.5 pr-4">
                       {lead.firstName} {lead.lastName}
@@ -65,10 +67,10 @@ export function KanbanBoard({
                     <p className="text-[11px] text-muted-foreground truncate mb-2">{lead.company}</p>
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[10px] text-muted-foreground/60 truncate">
-                        {failed
-                          ? "Enrichment failed"
-                          : isInputRequired && missingData
-                          ? "Needs details"
+                        {reason === "failed"
+                          ? "Enrichment failed — retry"
+                          : reason === "missing_data"
+                          ? "Needs email or domain"
                           : lead.jobTitle}
                       </span>
                       {lead.score !== "—" && (

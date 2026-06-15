@@ -257,6 +257,9 @@ export function CampaignDetail({
   const progressPct = progress && progress.total > 0
     ? Math.round(((progress.draft + progress.approved + progress.sent + progress.failed) / progress.total) * 100)
     : 0;
+  const progressCompleted = progress
+    ? progress.draft + progress.approved + progress.sent + progress.failed
+    : 0;
 
   function getDisplayStatus(cl: CampaignLead): string {
     if (cl.email_drafts?.status) return DRAFT_STATUS_LABEL[cl.email_drafts.status] ?? cl.crm_status;
@@ -551,15 +554,22 @@ export function CampaignDetail({
           </div>
         </div>
 
-        {progress && isGenerating && (
-          <div className="space-y-1.5 max-w-xl">
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Draft generation</span>
-              <span>{progressPct}% · {progress.generating + progress.pending} remaining</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-              <div className="h-full bg-primary transition-all duration-500" style={{ width: `${progressPct}%` }} />
-            </div>
+        {progress && progress.total > 0 && progressCompleted < progress.total && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="relative inline-flex size-5 items-center justify-center">
+              <Loader2 className="size-5 animate-spin text-primary" />
+            </span>
+            <span className="font-medium text-foreground">
+              {progressCompleted} out of {progress.total}
+            </span>
+            <span>drafts generated</span>
+          </div>
+        )}
+
+        {progress && progress.total > 0 && progressCompleted >= progress.total && (
+          <div className="flex items-center gap-2 text-sm text-green-500">
+            <CheckCircle2 className="size-5" />
+            <span className="font-medium">{progress.total} drafts ready</span>
           </div>
         )}
 

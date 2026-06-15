@@ -274,6 +274,17 @@ export async function POST(req: NextRequest) {
   }
 
   const db = createAdminClient();
+
+  // ── Watchdog: reset orgs stuck in 'scraping' beyond the function's max lifetime
+  await db.from("organizations")
+    .update({
+      enrichment_stage: "queued",
+      enrichment_status: "REQUEUED_STUCK_SCRAPING",
+      has_scraped: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("enrichment_stage", "scraping")
+    .lt("enrichment_started_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
   let processed = 0;
   let succeeded = 0;
   let failed = 0;

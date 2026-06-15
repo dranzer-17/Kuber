@@ -390,8 +390,27 @@ export async function createCampaign(token: string, body: {
   schedule_timezone?: string; send_days?: Record<string, boolean>;
   send_mode?: "now" | "scheduled"; schedule_start_at?: string;
   ai_prompt_context?: string; sender_name?: string;
+  attachment_path?: string; attachment_name?: string;
+  attachment_mime?: string; attachment_size?: number;
+  attachment_url?: string | null;
 }): Promise<DbCampaign> {
   return apiFetch<DbCampaign>("/api/v1/campaigns", { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+export async function uploadCampaignAttachment(token: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/v1/campaigns/attachment", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error?.message ?? "Upload failed");
+  return json.data as {
+    attachment_path: string; attachment_name: string;
+    attachment_mime: string; attachment_size: number; attachment_url: string | null;
+  };
 }
 
 export async function fetchCampaignLeads(token: string, campaignId: string): Promise<{

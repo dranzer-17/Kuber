@@ -5,6 +5,8 @@ import {
   STEP_DESCRIPTIONS,
   STATUS_ORDER,
   STATUS_LABELS,
+  inputRequiredReason,
+  type Lead,
   type LeadScore,
   type LeadStatus,
 } from "@/lib/leads";
@@ -18,7 +20,19 @@ const STATUS_STYLES: Record<LeadStatus, string> = {
   Closed:   "bg-zinc-500/15 text-zinc-300 border-zinc-500/25",
 };
 
-export function StatusBadge({ status }: { status: LeadStatus }) {
+export function StatusBadge({ status, lead }: { status: LeadStatus; lead?: Lead }) {
+  // For Input Required, pick sub-color from the reason (if a lead is provided)
+  if (status === "Input Required" && lead) {
+    const reason = inputRequiredReason(lead);
+    const cls = reason === "failed"
+      ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+      : "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
+    return (
+      <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", cls)}>
+        {STATUS_LABELS[status]}
+      </span>
+    );
+  }
   return (
     <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", STATUS_STYLES[status])}>
       {STATUS_LABELS[status]}
