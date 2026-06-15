@@ -15,6 +15,23 @@ function normalizeDomain(raw: string): string {
     .toLowerCase();
 }
 
+// Fix D: detect when org domain doesn't match the email domain
+function domainMismatch(orgDomain: string | null, email: string | null): boolean {
+  if (!orgDomain || !email) return false;
+  const emailDomain = email.split("@")[1] ?? "";
+  return !emailDomain.includes(orgDomain) && !orgDomain.includes(emailDomain.split(".").slice(-2).join("."));
+}
+
+// Fix D: reject country values that look like job titles (Excel column misalignment)
+const TITLE_KEYWORDS = /^(manager|director|ceo|cfo|coo|cto|officer|executive|president|head|lead|chief|vp|supervisor|coordinator)$/i;
+function sanitizeCountry(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length <= 2) return undefined; // too short to be a country name
+  if (TITLE_KEYWORDS.test(trimmed)) return undefined;
+  return trimmed;
+}
+
 function emailHash(email: string): string {
   return crypto.createHash("sha1").update(email.toLowerCase()).digest("hex");
 }
@@ -71,7 +88,7 @@ async function processRows(
       org_name: orgNameCol ? String(row[orgNameCol] ?? "").trim() || "Unknown" : "Unknown",
       org_domain: orgDomainCol ? String(row[orgDomainCol] ?? "").trim() || undefined : undefined,
       title: titleCol ? String(row[titleCol] ?? "").trim() || undefined : undefined,
-      country: countryCol ? String(row[countryCol] ?? "").trim() || undefined : undefined,
+      country: sanitizeCountry(countryCol ? String(row[countryCol] ?? "").trim() || undefined : undefined),
     });
   }
 
@@ -91,13 +108,17 @@ async function processRows(
   for (let i = 0; i < toInsert.length; i += CHUNK) {
     for (const row of toInsert.slice(i, i + CHUNK)) {
       const normalizedDomain = row.org_domain ? normalizeDomain(row.org_domain) : null;
+      // Fix D: null out domain if it doesn't match the email domain
+      const safeDomain = (normalizedDomain && domainMismatch(normalizedDomain, row.email))
+        ? null
+        : normalizedDomain;
       let orgId: string;
-      if (normalizedDomain) {
-        const { data: byDomain } = await db.from("organizations").select("id").eq("domain", normalizedDomain).maybeSingle();
+      if (safeDomain) {
+        const { data: byDomain } = await db.from("organizations").select("id").eq("domain", safeDomain).maybeSingle();
         if (byDomain) { orgId = byDomain.id; }
         else {
           const { data: created } = await db.from("organizations")
-            .insert({ name: row.org_name, domain: normalizedDomain, created_at: new Date().toISOString() })
+            .insert({ name: row.org_name, domain: safeDomain, created_at: new Date().toISOString() })
             .select("id").single();
           orgId = created!.id;
         }

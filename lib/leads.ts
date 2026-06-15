@@ -71,7 +71,9 @@ export const STATUS_ORDER: Record<LeadStatus, number> = {
   Open: 3, Closed: 4,
 };
 
-/** True only when Firecrawl ran AND extracted real company data. */
+// The canary field: company_description (written by scrape-orgs route).
+// primary_products is checked for future-proofing but is never populated by the current scraper.
+// DO NOT add primary_products to the active scraper without also updating hasEnrichmentData.
 export function hasEnrichmentData(lead: Lead): boolean {
   return (
     lead.enrichmentStage === "done" &&
@@ -100,13 +102,15 @@ export function isRecentlyAdded(lead: Lead): boolean {
 }
 
 export function isCampaignEligible(lead: Lead): boolean {
-  return !!lead.email && !!lead.domain && lead.enrichmentStage === "done";
+  return !!lead.email && !!lead.domain && hasEnrichmentData(lead);
 }
 
 export function campaignIneligibleReason(lead: Lead): string | null {
   if (!lead.email) return "No email address";
   if (!lead.domain) return "No company domain — enrichment incomplete";
   if (lead.enrichmentStage === "failed") return "Company enrichment failed";
+  if (lead.enrichmentStage === "done" && !hasEnrichmentData(lead))
+    return "Company scraped but no usable data found — retry enrichment";
   if (lead.enrichmentStage !== "done") return "Company enrichment not finished yet";
   return null;
 }

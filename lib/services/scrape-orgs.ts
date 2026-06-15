@@ -123,6 +123,14 @@ export async function processOneOrg(
     updated_at: new Date().toISOString(),
   }).eq("id", org.id);
 
+  // Fix A: sync leads.status for every lead under this org
+  const hasData = !!(description) || primaryProducts.length > 0;
+  await db.from("leads")
+    .update({ status: hasData ? "enriched" : "input_required", updated_at: new Date().toISOString() })
+    .eq("organization_id", org.id)
+    .eq("is_deleted", false)
+    .not("status", "in", '("open","closed")');
+
   // Set non-apollo leads in campaign_leads to 'enriched'
   const { data: nonApolloLeads } = await db
     .from("leads").select("id")

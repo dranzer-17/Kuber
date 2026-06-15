@@ -50,6 +50,13 @@ async function markFailed(db: Db, orgId: string, status: string, errorMessage: s
     updated_at: new Date().toISOString(),
   }).eq("id", orgId);
 
+  // Fix A: sync leads.status when org enrichment fails
+  await db.from("leads")
+    .update({ status: "input_required", updated_at: new Date().toISOString() })
+    .eq("organization_id", orgId)
+    .eq("is_deleted", false)
+    .not("status", "in", '("open","closed")');
+
   await insertLog(db, {
     org_id: orgId,
     source: "system",
@@ -212,8 +219,17 @@ If you cannot determine a field, return null for that field.`,
     // ── E: Write results + mark complete ──────────────────────────────────────
     const totalDuration = Date.now() - orgStart;
 
+    // Fix E: LLM returned no usable data — treat as soft failure, not success
+    const hasExtractedData = !!(extracted?.company_description);
+    if (!hasExtractedData) {
+      await markFailed(db, org.id, "LLM_EXTRACTION_PARTIAL_NO_DATA",
+        "LLM returned no description or data for this org. Will retry.");
+      return;  // exit processOneOrg early — do not mark as done
+    }
+
+    // Only reach here if we have real data
     await db.from("organizations").update({
-      company_description: extracted?.company_description ?? null,
+      company_description: extracted.company_description,
       sells_to: extracted?.sells_to ?? null,
       enrichment_stage: "done",
       enrichment_status: "ENRICHMENT_COMPLETE",
@@ -221,6 +237,13 @@ If you cannot determine a field, return null for that field.`,
       last_error: null,
       updated_at: new Date().toISOString(),
     }).eq("id", org.id);
+
+    // Fix A: sync leads.status → enriched for all non-terminal leads under this org
+    await db.from("leads")
+      .update({ status: "enriched", updated_at: new Date().toISOString() })
+      .eq("organization_id", org.id)
+      .eq("is_deleted", false)
+      .not("status", "in", '("open","closed")');
 
     await insertLog(db, {
       org_id: org.id,

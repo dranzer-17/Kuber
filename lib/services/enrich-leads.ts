@@ -135,6 +135,14 @@ export async function enrichLeads(
             })
             .eq("id", orgId)
             .is("domain", null); // only overwrite when domain is still missing
+
+          // Fix A: sync affected leads — had no domain (input_required) → now has domain → new
+          await db.from("leads")
+            .update({ status: "new", updated_at: new Date().toISOString() })
+            .eq("organization_id", orgId)
+            .eq("status", "input_required")
+            .eq("is_deleted", false)
+            .not("email", "is", null);  // only if they also have email
         }
 
         if (orgId) enrichedOrgIds.add(orgId);
