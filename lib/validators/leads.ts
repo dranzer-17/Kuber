@@ -16,6 +16,8 @@ export const CreateLeadSchema = z.object({
   organization_industry: z.string().optional(),
   organization_country: z.string().optional(),
   batch_name: z.string().optional(),
+  color: z.string().optional(),
+  import_id: z.string().uuid().optional(),
 });
 
 export const PatchLeadSchema = z.object({
@@ -51,7 +53,9 @@ export const ApolloSearchSchema = z.object({
   max_pages: z.number().int().min(1).max(20).default(5),
   titles: z.array(z.string()).nullable().optional(),
   seniorities: z.array(z.string()).nullable().optional(),
-  batch_name: z.string().optional(),
+  batch_name: z.string().min(1),
+  color: z.string().default("violet"),
+  preview: z.boolean().optional(),
 });
 
 export const ExcelImportSchema = z.discriminatedUnion("mode", [
@@ -60,13 +64,15 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     mode: z.literal("import"),
     storage_path: z.string().min(1),
     mapping: z.record(z.string(), z.string()),
-    batch_name: z.string().optional(),
+    batch_name: z.string().min(1),
+    color: z.string().default("violet"),
   }),
   z.object({
     mode: z.literal("direct"),
     rows: z.array(z.record(z.string(), z.unknown())),
     mapping: z.record(z.string(), z.string()),
-    batch_name: z.string().optional(),
+    batch_name: z.string().min(1),
+    color: z.string().default("violet"),
   }),
 ]);
 

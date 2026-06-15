@@ -169,7 +169,7 @@ export async function resolveCampaignSignature(
 
   // 4. Global settings fallback
   const sig = await getSignature(db);
-  return `Best regards,\n${sig.name}\n${sig.title}\n${sig.contact}`;
+  return sig.contact;
 }
 
 export function invalidateSettingsCache() {

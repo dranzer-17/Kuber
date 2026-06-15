@@ -12,7 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: lead, error } = await db
     .from("leads")
-    .select("*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to, last_error)")
+    .select("*, organizations(id, name, domain, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error), imports(id, label, color)")
     .eq("id", id)
     .maybeSingle();
 

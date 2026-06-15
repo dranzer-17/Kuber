@@ -31,6 +31,9 @@ export type Lead = {
   sellsTo: string | null;
   lastError: string | null;
   hasScraped: boolean;
+  importId: string | null;
+  batchLabel: string | null;
+  batchColor: string | null;
 };
 
 export const PIPELINE_STAGES: LeadStatus[] = [

@@ -95,7 +95,8 @@ export async function GET(req: NextRequest) {
     .from("leads")
     .select(
       `*, organizations(id, name, domain, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error),
-       campaign_leads(crm_status, interest_status, created_at, campaigns(id, name))`,
+       campaign_leads(crm_status, interest_status, created_at, campaigns(id, name)),
+       imports(id, label, color)`,
       { count: "exact" }
     )
     .eq("is_deleted", false);
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
   const parsed = CreateLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, ...leadFields } = parsed.data;
+  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, ...leadFields } = parsed.data;
   const db = createAdminClient();
 
   // Check email uniqueness
@@ -154,10 +155,10 @@ export async function POST(req: NextRequest) {
 
   const apolloId = `manual_${crypto.randomUUID()}`;
 
-  let importId: string | null = null;
-  if (batch_name?.trim()) {
+  let importId: string | null = providedImportId ?? null;
+  if (!importId && batch_name?.trim()) {
     const { data: imp } = await db.from("imports")
-      .insert({ label: batch_name.trim(), source: "manual", created_by: user.id, lead_count: 0 })
+      .insert({ label: batch_name.trim(), source: "manual", created_by: user.id, lead_count: 0, color: color ?? "violet" })
       .select("id").single();
     importId = imp?.id ?? null;
   }

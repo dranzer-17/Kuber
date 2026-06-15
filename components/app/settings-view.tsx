@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Loader2, Lock, Save, User, Bot, LogOut,
-  ChevronRight, Sparkles, PenLine,
+  Lock, User, Bot, LogOut,
+  ChevronRight, Sparkles, PenLine, Bold, Italic, Underline,
+  List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { TagInput } from "@/components/app/lead-forms";
 import { fetchSettings, patchSettings } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
@@ -20,6 +21,7 @@ const PRODUCT_SUGGESTIONS = [
 ];
 
 type Section = "profile" | "ai" | "account";
+type AiSection = "context" | "drafts" | "footer" | "knowledge";
 
 const NAV_ITEMS: { id: Section; label: string; description: string }[] = [
   { id: "profile", label: "My Profile",    description: "Admin account details" },
@@ -27,8 +29,155 @@ const NAV_ITEMS: { id: Section; label: string; description: string }[] = [
   { id: "account", label: "Account",       description: "Sign out & security" },
 ];
 
+const AI_NAV_ITEMS: {
+  id: AiSection;
+  label: string;
+}[] = [
+  { id: "context", label: "Company Context"},
+  { id: "drafts", label: "Draft Editor"},
+  { id: "footer", label: "Email Footer"},
+  { id: "knowledge", label: "Knowledge Sources"},
+];
+
+type EditorCommand =
+  | "bold"
+  | "italic"
+  | "underline"
+  | "insertUnorderedList"
+  | "insertOrderedList"
+  | "undo"
+  | "redo"
+  | "removeFormat";
+
+function textToHtml(value: string) {
+  const escaped = value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  return escaped
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n/g, "<br />"))
+    .map((paragraph) => `<p>${paragraph || "<br />"}</p>`)
+    .join("");
+}
+
+function RichTextEditor({
+  label,
+  value,
+  onChange,
+  placeholder,
+  minHeight = 240,
+  helper,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  minHeight?: number;
+  helper?: string;
+}) {
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const lastSyncedValue = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!editorRef.current) return;
+    const current = editorRef.current.innerText.replace(/\n{3,}/g, "\n\n").trimEnd();
+    if (lastSyncedValue.current === value && current === value) return;
+    editorRef.current.innerHTML = textToHtml(value);
+    lastSyncedValue.current = value;
+  }, [value]);
+
+  function syncValue() {
+    const next = editorRef.current?.innerText.replace(/\n{3,}/g, "\n\n").trimEnd() ?? "";
+    lastSyncedValue.current = next;
+    onChange(next);
+  }
+
+  function runCommand(command: EditorCommand) {
+    editorRef.current?.focus();
+    document.execCommand(command);
+    syncValue();
+  }
+
+  function addLink() {
+    editorRef.current?.focus();
+    const url = window.prompt("Paste a URL");
+    if (!url) return;
+    document.execCommand("createLink", false, url);
+    syncValue();
+  }
+
+  const toolbar = [
+    { label: "Bold", icon: Bold, command: "bold" as const },
+    { label: "Italic", icon: Italic, command: "italic" as const },
+    { label: "Underline", icon: Underline, command: "underline" as const },
+    { label: "Bulleted list", icon: List, command: "insertUnorderedList" as const },
+    { label: "Numbered list", icon: ListOrdered, command: "insertOrderedList" as const },
+    { label: "Undo", icon: Undo2, command: "undo" as const },
+    { label: "Redo", icon: Redo2, command: "redo" as const },
+    { label: "Clear formatting", icon: Eraser, command: "removeFormat" as const },
+  ];
+
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+        <div className="flex flex-wrap items-center gap-1 border-b border-border bg-secondary/20 p-1.5">
+          <span className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground">
+            <Type className="size-3.5" />
+            Compose
+          </span>
+          <div className="mx-1 h-5 w-px bg-border" />
+          {toolbar.map(({ label: buttonLabel, icon: Icon, command }) => (
+            <button
+              key={command}
+              type="button"
+              aria-label={buttonLabel}
+              title={buttonLabel}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => runCommand(command)}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              <Icon className="size-4" />
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-label="Add link"
+            title="Add link"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={addLink}
+            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <Link2 className="size-4" />
+          </button>
+        </div>
+
+        <div
+          ref={editorRef}
+          role="textbox"
+          aria-label={label}
+          aria-multiline="true"
+          contentEditable
+          suppressContentEditableWarning
+          data-placeholder={placeholder}
+          onInput={syncValue}
+          onBlur={syncValue}
+          className="rich-editor min-w-0 bg-card px-4 py-3 text-sm leading-6 text-foreground outline-none"
+          style={{ minHeight }}
+        />
+      </div>
+
+      {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
+    </div>
+  );
+}
+
 export function SettingsView() {
   const [section, setSection] = useState<Section>("profile");
+  const [aiSection, setAiSection] = useState<AiSection>("context");
 
   // Settings data
   const [senderName,     setSenderName    ] = useState("");
@@ -50,6 +199,7 @@ export function SettingsView() {
   const [saving,  setSaving  ] = useState(false);
   const [saved,   setSaved   ] = useState(false);
   const [error,   setError   ] = useState("");
+  const activeAiNavItem = AI_NAV_ITEMS.find((item) => item.id === aiSection);
 
   useEffect(() => {
     async function load() {
@@ -149,6 +299,12 @@ export function SettingsView() {
           <span className="text-foreground font-medium">
             {NAV_ITEMS.find((n) => n.id === section)?.label}
           </span>
+          {section === "ai" && activeAiNavItem && (
+            <>
+              <ChevronRight className="size-3.5" />
+              <span className="text-foreground font-medium">{activeAiNavItem.label}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -174,19 +330,36 @@ export function SettingsView() {
           ))}
         </aside>
 
+        {section === "ai" && (
+          <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">AI &amp; Outreach</p>
+            {AI_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setAiSection(id)}
+                className={cn(
+                  "px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
+                  aiSection === id
+                    ? "bg-white text-black font-semibold"
+                    : "text-muted-foreground hover:text-white hover:bg-secondary/50",
+                )}
+              >
+                <Icon className="size-4 shrink-0" />
+                <span className="truncate">{label}</span>
+              </button>
+            ))}
+          </aside>
+        )}
+
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="relative flex-1 overflow-y-auto">
           {contentSkeleton}
-          {!loading && <div className="max-w-2xl mx-auto p-8 space-y-8">
+          {!loading && <div className="mx-auto w-full max-w-5xl p-8 space-y-8">
 
             {/* ── My Profile ── */}
             {section === "profile" && (
               <>
-                <div>
-                  <h2 className="text-lg font-semibold">My Profile</h2>
-                  <p className="text-sm text-muted-foreground mt-0.5">Your admin account information.</p>
-                </div>
-
                 {/* Avatar + name block */}
                 <div className="rounded-xl border border-border bg-card p-6 space-y-5">
                   <div className="flex items-center gap-4">
@@ -235,116 +408,122 @@ export function SettingsView() {
             {/* ── AI & Outreach ── */}
             {section === "ai" && (
               <>
-                <div>
-                  <h2 className="text-lg font-semibold">AI & Outreach</h2>
-                  <p className="text-sm text-muted-foreground mt-0.5">Configure how Kuber generates outreach emails.</p>
-                </div>
+                <div className="min-w-0 space-y-6">
+                    {aiSection === "context" && (
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Bot className="size-4 text-muted-foreground" />
+                              <h3 className="text-sm font-semibold">Company &amp; Client Info</h3>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              These details are appended to draft generation so emails stay grounded in the right business context.
+                            </p>
+                          </div>
+                          <span className="rounded-md bg-secondary px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                            Context
+                          </span>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <Label>Default sender name</Label>
+                            <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+                            <p className="text-xs text-muted-foreground">Used as the "From" name in outreach emails.</p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label>Client industry</Label>
+                            <Input value={clientIndustry} onChange={(e) => setClientIndustry(e.target.value)} placeholder="Plastics & Polymer Manufacturing" />
+                          </div>
+                        </div>
+                        <TagInput
+                          label="Client products"
+                          pills={clientProducts}
+                          suggestions={PRODUCT_SUGGESTIONS}
+                          onChange={setClientProducts}
+                          placeholder="Add product..."
+                        />
+                        <div className="space-y-1.5">
+                          <Label>Target markets</Label>
+                          <Input value={targetMarkets} onChange={(e) => setTargetMarkets(e.target.value)} placeholder="Packaging, Automotive, Agriculture" />
+                        </div>
+                      </section>
+                    )}
 
-                <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-                  <div className="flex items-center gap-2">
-                    <Bot className="size-4 text-muted-foreground" />
-                    <h3 className="text-sm font-semibold">Company &amp; Client Info</h3>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Default sender name</Label>
-                    <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-                    <p className="text-xs text-muted-foreground">Used as the "From" name in outreach emails.</p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Client industry</Label>
-                    <Input value={clientIndustry} onChange={(e) => setClientIndustry(e.target.value)} placeholder="Plastics & Polymer Manufacturing" />
-                  </div>
-                  <TagInput
-                    label="Client products"
-                    pills={clientProducts}
-                    suggestions={PRODUCT_SUGGESTIONS}
-                    onChange={setClientProducts}
-                    placeholder="Add product…"
-                  />
-                  <div className="space-y-1.5">
-                    <Label>Target markets</Label>
-                    <Input value={targetMarkets} onChange={(e) => setTargetMarkets(e.target.value)} placeholder="Packaging, Automotive, Agriculture" />
-                  </div>
-                </div>
+                    {aiSection === "drafts" && (
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-sm font-semibold">Email Draft Instructions</h3>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Control the style, constraints, and structure used when Kuber generates outreach drafts.
+                            </p>
+                          </div>
+                        </div>
+                        <RichTextEditor
+                          label="Base prompt"
+                          value={systemPrompt}
+                          onChange={setSystemPrompt}
+                          minHeight={360}
+                          placeholder="Tell the AI how to write concise, personalized B2B outreach..."
+                          helper="Campaign-level context is appended on top of this base prompt."
+                        />
+                      </section>
+                    )}
 
-                <div className="rounded-xl border border-border bg-card p-6 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="size-4 text-muted-foreground" />
-                    <h3 className="text-sm font-semibold">AI System Prompt</h3>
-                  </div>
-                  <Textarea
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={10}
-                    className="text-sm leading-relaxed resize-y"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Base prompt used when generating all email drafts. Campaign-level context is appended on top.
-                  </p>
-                </div>
+                    {aiSection === "footer" && (
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <PenLine className="size-4 text-muted-foreground" />
+                              <h3 className="text-sm font-semibold">Email Footer</h3>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Add the contact lines appended at the end of generated emails.
+                            </p>
+                          </div>
+                          <span className="rounded-md bg-secondary px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                            Signature
+                          </span>
+                        </div>
 
-                <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                  <div className="flex items-center gap-2">
-                    <PenLine className="size-4 text-muted-foreground" />
-                    <h3 className="text-sm font-semibold">Email Signature</h3>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Used at the end of every generated email. Leave blank to use defaults.
-                  </p>
+                        <RichTextEditor
+                          label="Contact footer"
+                          value={sigContact}
+                          onChange={setSigContact}
+                          minHeight={190}
+                          placeholder={"Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"}
+                        />
+                      </section>
+                    )}
 
-                  <div className="space-y-1.5">
-                    <Label>Sender name</Label>
-                    <Input value={sigName} onChange={(e) => setSigName(e.target.value)}
-                           placeholder="Kuber Polyplast Sales Team" />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label>Title</Label>
-                    <Input value={sigTitle} onChange={(e) => setSigTitle(e.target.value)}
-                           placeholder="Business Development" />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label>Contact information</Label>
-                    <textarea
-                      className="w-full rounded-lg border border-border bg-secondary/20 p-3 text-sm min-h-[90px] resize-y"
-                      value={sigContact} onChange={(e) => setSigContact(e.target.value)}
-                      placeholder={"Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"} />
-                  </div>
-
-                  {/* Live preview */}
-                  <div className="rounded-lg border border-border bg-secondary/10 p-3 text-sm whitespace-pre-line text-muted-foreground">
-                    {["Best regards,", sigName || "Kuber Polyplast Sales Team", sigTitle || "Business Development", sigContact || "Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"].join("\n")}
-                  </div>
-                </section>
-
-                <div className="rounded-xl border border-border bg-secondary/20 p-6 space-y-2 opacity-50 pointer-events-none">
-                  <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-                    <Lock className="size-4" /> Knowledge Sources
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Upload PDFs, FAQs, or product specs to enrich AI context — coming soon.
-                  </p>
+                    {aiSection === "knowledge" && (
+                      <section className="rounded-xl border border-border bg-secondary/20 p-6 space-y-3 opacity-60">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                          <Lock className="size-4" /> Knowledge Sources
+                        </div>
+                        <p className="max-w-xl text-sm text-muted-foreground">
+                          Upload PDFs, FAQs, or product specs to enrich AI context. This area is reserved for the upcoming knowledge workflow.
+                        </p>
+                        <div className="rounded-lg border border-dashed border-border bg-background/40 p-6 text-center text-sm text-muted-foreground">
+                          Coming soon
+                        </div>
+                      </section>
+                    )}
                 </div>
 
                 {error && <p className="text-xs text-destructive">{error}</p>}
                 {saved && <p className="text-sm text-green-400">Settings saved.</p>}
 
-                <Button onClick={handleSave} disabled={saving} className="gap-1.5">
-                  {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                  Save settings
-                </Button>
               </>
             )}
 
             {/* ── Account ── */}
             {section === "account" && (
               <>
-                <div>
-                  <h2 className="text-lg font-semibold">Account</h2>
-                  <p className="text-sm text-muted-foreground mt-0.5">Manage your session and account security.</p>
-                </div>
-
                 <div className="rounded-xl border border-border bg-card p-6 space-y-4">
                   <h3 className="text-sm font-semibold">Session</h3>
                   <div className="flex items-center justify-between py-3 border-t border-border">
@@ -375,6 +554,13 @@ export function SettingsView() {
             )}
 
           </div>}
+          {!loading && section === "ai" && (
+            <div className="sticky bottom-0 flex justify-end border-t border-border bg-background/95 px-8 py-4 backdrop-blur">
+              <Button onClick={handleSave} disabled={saving} className="min-w-24">
+                {saving ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>

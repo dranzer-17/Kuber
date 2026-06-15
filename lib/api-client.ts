@@ -61,6 +61,8 @@ export interface DbLead {
   created_at: string;
   is_likely_to_engage: boolean | null;
   status: string;
+  import_id: string | null;
+  imports: { id: string; label: string; color: string } | null;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
   organizations: {
@@ -126,6 +128,9 @@ export function mapDbLead(l: DbLead): Lead {
     sellsTo: org?.sells_to ?? null,
     lastError: org?.last_error ?? null,
     hasScraped: org?.has_scraped ?? false,
+    importId: l.import_id ?? null,
+    batchLabel: l.imports?.label ?? null,
+    batchColor: l.imports?.color ?? null,
   };
 }
 
@@ -215,24 +220,37 @@ export async function createLead(token: string, body: {
   organization_name: string; organization_domain?: string;
   organization_industry?: string; organization_country?: string;
   title?: string; country?: string;
-}): Promise<Lead> {
-  const data = await apiFetch<DbLead>("/api/v1/leads", { method: "POST", body: JSON.stringify(body) }, token);
-  return mapDbLead(data);
+  batch_name?: string; color?: string; import_id?: string;
+}): Promise<Lead & { import_id?: string | null }> {
+  const data = await apiFetch<DbLead & { import_id?: string | null }>("/api/v1/leads", { method: "POST", body: JSON.stringify(body) }, token);
+  return { ...mapDbLead(data), import_id: data.import_id };
 }
 
-export async function importExcelDirect(token: string, rows: Record<string, string>[], mapping: Record<string, string>): Promise<{
+export async function importExcelDirect(token: string, rows: Record<string, string>[], mapping: Record<string, string>, batch_name: string, color = "violet"): Promise<{
   inserted: number; skipped_blank_email: number; skipped_invalid_email: number;
   skipped_duplicate_in_file: number; skipped_duplicate_in_db: number;
 }> {
   return apiFetch("/api/v1/leads/import-excel", {
     method: "POST",
-    body: JSON.stringify({ mode: "direct", rows, mapping }),
+    body: JSON.stringify({ mode: "direct", rows, mapping, batch_name, color }),
+  }, token);
+}
+
+export type PreviewLead = { firstName: string; lastName: string; email: string; company: string; jobTitle: string; domain?: string };
+
+export async function apolloPreview(token: string, body: {
+  keywords: string[]; locations: string[]; max_pages: number;
+  titles?: string[]; seniorities?: string[]; batch_name: string; color?: string;
+}): Promise<{ preview: true; leads: PreviewLead[] }> {
+  return apiFetch("/api/v1/leads/apollo-search", {
+    method: "POST",
+    body: JSON.stringify({ ...body, preview: true }),
   }, token);
 }
 
 export async function apolloSearch(token: string, body: {
   keywords: string[]; locations: string[]; max_pages: number;
-  titles?: string[]; seniorities?: string[];
+  titles?: string[]; seniorities?: string[]; batch_name: string; color?: string;
 }): Promise<{ inserted: number; skipped: number; orgs_created: number }> {
   return apiFetch("/api/v1/leads/apollo-search", { method: "POST", body: JSON.stringify(body) }, token);
 }
@@ -431,6 +449,7 @@ export interface ImportBatch {
   label: string;
   source: string;
   lead_count: number;
+  color: string;
   created_at: string;
 }
 

@@ -67,3 +67,37 @@ body {
 
 button, [role="button"], a, label[for], select { cursor: pointer; }
 button:disabled, [role="button"][aria-disabled="true"] { cursor: not-allowed; }
+
+.rich-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.rich-editor p {
+  margin: 0 0 0.75rem;
+}
+
+.rich-editor p:last-child {
+  margin-bottom: 0;
+}
+
+.rich-editor ul,
+.rich-editor ol {
+  margin: 0.5rem 0 0.75rem 1.25rem;
+  padding-left: 1rem;
+}
+
+.rich-editor ul {
+  list-style: disc;
+}
+
+.rich-editor ol {
+  list-style: decimal;
+}
+
+.rich-editor a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

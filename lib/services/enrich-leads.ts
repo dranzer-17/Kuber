@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { bulkMatchChunked } from "@/lib/services/apollo";
+import { bulkMatch } from "@/lib/services/apollo";
+import { sleep } from "@/lib/http";
 
 const APP_SUBDOMAINS = /^(app|dashboard|portal|login|my|account|admin|web|mail|crm|api|secure)\./i;
 function normalizeDomain(raw: string): string {
@@ -33,28 +34,31 @@ export async function enrichLeads(
   db: SupabaseClient,
   targets: EnrichTarget[],
   chunkSize = 10,
+  onProgress?: (processed: number, total: number) => void,
 ): Promise<EnrichLeadsResult> {
-  const details = targets.map((t) => ({
-    id: t.apollo_id,
-    first_name: t.first_name ?? undefined,
-    organization_name: t.org_name ?? undefined,
-  }));
-
   let matched = 0;
   let verified = 0;
   let unverified = 0;
   let totalCredits = 0;
+  let processedCount = 0;
   const missingApolloIds: string[] = [];
   const enrichedOrgIds = new Set<string>();
   let warning: string | undefined;
 
   try {
-    const { results, totalCredits: tc } = await bulkMatchChunked(details, chunkSize);
-    totalCredits = tc;
+    for (let i = 0; i < targets.length; i += chunkSize) {
+      const chunkTargets = targets.slice(i, i + chunkSize);
+      const chunkDetails = chunkTargets.map((t) => ({
+        id: t.apollo_id,
+        first_name: t.first_name ?? undefined,
+        organization_name: t.org_name ?? undefined,
+      }));
 
-    for (const result of results) {
+      const result = await bulkMatch(chunkDetails);
+      totalCredits += result.credits_consumed ?? 0;
+
       for (const match of result.matches ?? []) {
-        const lead = targets.find((t) => t.apollo_id === match.id);
+        const lead = chunkTargets.find((t) => t.apollo_id === match.id);
         if (!lead) continue;
 
         matched++;
@@ -122,9 +126,6 @@ export async function enrichLeads(
           }
         }
 
-        // ── Part 1 fix: always write domain when Apollo provides it ──────────
-        // The org-merge block above may not match by name if names diverge
-        // slightly. This ensures domain is never left null when Apollo gives it.
         if (orgId && match.organization?.primary_domain) {
           await db.from("organizations")
             .update({
@@ -134,15 +135,14 @@ export async function enrichLeads(
               updated_at: new Date().toISOString(),
             })
             .eq("id", orgId)
-            .is("domain", null); // only overwrite when domain is still missing
+            .is("domain", null);
 
-          // Fix A: sync affected leads — had no domain (input_required) → now has domain → new
           await db.from("leads")
             .update({ status: "new", updated_at: new Date().toISOString() })
             .eq("organization_id", orgId)
             .eq("status", "input_required")
             .eq("is_deleted", false)
-            .not("email", "is", null);  // only if they also have email
+            .not("email", "is", null);
         }
 
         if (orgId) enrichedOrgIds.add(orgId);
@@ -170,6 +170,11 @@ export async function enrichLeads(
           .update({ crm_status: crm, updated_at: new Date().toISOString() })
           .eq("lead_id", lead.id);
       }
+
+      processedCount += chunkTargets.length;
+      onProgress?.(processedCount, targets.length);
+
+      if (i + chunkSize < targets.length) await sleep(500);
     }
   } catch (err) {
     const status = (err as { status?: number }).status;

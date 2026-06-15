@@ -1,6 +1,7 @@
 "use client";
 
-import { bulkDeleteLeads } from "@/lib/api-client";
+import { bulkDeleteLeads, fetchImports, type ImportBatch } from "@/lib/api-client";
+import { getBatchColor } from "@/lib/constants";
 
 import { useRef, useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
@@ -49,7 +50,7 @@ import {
 } from "@/components/ui/pagination";
 import {
   Users, Megaphone, Plus, List, Kanban, RefreshCw, Columns3, Check,
-  Search, Building2, SlidersHorizontal, X, Trash2,
+  Search, Building2, SlidersHorizontal, X, Trash2, AlertTriangle,
 } from "lucide-react";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ type FilterState = {
   statuses: Set<LeadStatus>;
   scores: Set<LeadScore>;
   sources: Set<LeadSource>;
+  batchLabels: Set<string>;
   createdFrom: Date | undefined;
   createdTo: Date | undefined;
 };
@@ -69,6 +71,7 @@ const EMPTY_FILTERS: FilterState = {
   statuses: new Set(),
   scores: new Set(),
   sources: new Set(),
+  batchLabels: new Set(),
   createdFrom: undefined,
   createdTo: undefined,
 };
@@ -78,6 +81,7 @@ function isFiltersEmpty(f: FilterState) {
     f.statuses.size === 0 &&
     f.scores.size === 0 &&
     f.sources.size === 0 &&
+    f.batchLabels.size === 0 &&
     !f.createdFrom &&
     !f.createdTo
   );
@@ -88,6 +92,7 @@ function activeFilterCount(f: FilterState) {
     (f.statuses.size > 0 ? 1 : 0) +
     (f.scores.size > 0 ? 1 : 0) +
     (f.sources.size > 0 ? 1 : 0) +
+    (f.batchLabels.size > 0 ? 1 : 0) +
     (f.createdFrom || f.createdTo ? 1 : 0)
   );
 }
@@ -116,6 +121,7 @@ const COLUMN_DEFS = [
   { key: "country",     label: "Country",      defaultVisible: false },
   { key: "domain",      label: "Domain",       defaultVisible: false },
   { key: "campaign",    label: "Campaign",     defaultVisible: false },
+  { key: "batch",       label: "Batch",        defaultVisible: true  },
 ] as const;
 
 type ColKey = typeof COLUMN_DEFS[number]["key"];
@@ -433,15 +439,19 @@ function FiltersModal({
   filters,
   onChange,
   onClose,
+  imports,
 }: {
   filters: FilterState;
   onChange: (f: FilterState) => void;
   onClose: () => void;
+  imports?: ImportBatch[];
 }) {
+  const safeImports = imports ?? [];
   const [draft, setDraft] = useState<FilterState>({
     statuses:    new Set(filters.statuses),
     scores:      new Set(filters.scores),
     sources:     new Set(filters.sources),
+    batchLabels: new Set(filters.batchLabels),
     createdFrom: filters.createdFrom,
     createdTo:   filters.createdTo,
   });
@@ -485,6 +495,18 @@ function FiltersModal({
             selected={draft.sources}
             onChange={(s) => setDraft((d) => ({ ...d, sources: s }))}
           />
+          {safeImports.length > 0 && (
+            <MultiSelectDropdown
+              label="Batch"
+              options={safeImports.map((b) => ({
+                value: b.label,
+                label: `${b.label} (${b.lead_count})`,
+                dot: getBatchColor(b.color).bg,
+              }))}
+              selected={draft.batchLabels}
+              onChange={(s) => setDraft((d) => ({ ...d, batchLabels: s }))}
+            />
+          )}
           <DateRangePicker
             from={draft.createdFrom}
             to={draft.createdTo}
@@ -495,7 +517,7 @@ function FiltersModal({
         <div className="flex items-center justify-between px-5 py-4 border-t border-border shrink-0">
           <button
             type="button"
-            onClick={() => setDraft({ statuses: new Set(), scores: new Set(), sources: new Set(), createdFrom: undefined, createdTo: undefined })}
+            onClick={() => setDraft({ statuses: new Set(), scores: new Set(), sources: new Set(), batchLabels: new Set(), createdFrom: undefined, createdTo: undefined })}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             Clear all
@@ -547,19 +569,24 @@ export default function LeadsPage() {
     const statusesParam = searchParams.get("statuses");
     const scoresParam   = searchParams.get("scores");
     const sourcesParam  = searchParams.get("sources");
+    const batchesParam  = searchParams.get("batches");
     const fromParam     = searchParams.get("from");
     const toParam       = searchParams.get("to");
     return {
       statuses:    statusesParam ? new Set(statusesParam.split(",") as LeadStatus[]) : new Set(),
       scores:      scoresParam   ? new Set(scoresParam.split(",")   as LeadScore[])  : new Set(),
       sources:     sourcesParam  ? new Set(sourcesParam.split(",")  as LeadSource[]) : new Set(),
+      batchLabels: batchesParam  ? new Set(batchesParam.split(","))                  : new Set(),
       createdFrom: fromParam ? new Date(fromParam) : undefined,
       createdTo:   toParam   ? new Date(toParam)   : undefined,
     };
   });
-  const [showFilters, setShowFilters] = useState(false);
-  const [page,        setPage       ] = useState(1);
-  const [pageSize,    setPageSize   ] = useState(50);
+  const [showFilters,      setShowFilters     ] = useState(false);
+  const [page,             setPage            ] = useState(1);
+  const [pageSize,         setPageSize        ] = useState(50);
+  const [importBatches,    setImportBatches   ] = useState<ImportBatch[]>([]);
+  const [showBulkDelete,   setShowBulkDelete  ] = useState(false);
+  const [bulkDeleting,     setBulkDeleting    ] = useState(false);
 
   // Sync filter/view state into URL so refresh preserves it
   useEffect(() => {
@@ -568,9 +595,10 @@ export default function LeadsPage() {
     if (leadsSort !== "newest")       params.set("sort",     leadsSort);
     if (leadsViewMode !== "list")     params.set("view",     leadsViewMode);
     if (leadsEntityMode !== "individual") params.set("entity", leadsEntityMode);
-    if (filters.statuses.size > 0)   params.set("statuses", [...filters.statuses].join(","));
-    if (filters.scores.size   > 0)   params.set("scores",   [...filters.scores].join(","));
-    if (filters.sources.size  > 0)   params.set("sources",  [...filters.sources].join(","));
+    if (filters.statuses.size > 0)     params.set("statuses", [...filters.statuses].join(","));
+    if (filters.scores.size   > 0)     params.set("scores",   [...filters.scores].join(","));
+    if (filters.sources.size  > 0)     params.set("sources",  [...filters.sources].join(","));
+    if (filters.batchLabels.size > 0)  params.set("batches",  [...filters.batchLabels].join(","));
     if (filters.createdFrom)          params.set("from", filters.createdFrom.toISOString().slice(0, 10));
     if (filters.createdTo)            params.set("to",   filters.createdTo.toISOString().slice(0, 10));
     const qs = params.toString();
@@ -580,11 +608,20 @@ export default function LeadsPage() {
   // Reset to page 1 whenever the filtered result set changes
   useEffect(() => { setPage(1); }, [searchQuery, filters, leadsSort]);
 
+  // Fetch import batches for the batch filter dropdown; re-run when leads refresh
+  useEffect(() => {
+    if (!session) return;
+    fetchImports(session.access_token)
+      .then((r) => setImportBatches(r.imports))
+      .catch(() => {});
+  }, [session, leads]);
+
   const filteredLeads = sortLeads(
     leads.filter((l) => {
       if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
       if (filters.scores.size   > 0 && !filters.scores.has(l.score))   return false;
       if (filters.sources.size  > 0 && !filters.sources.has(l.source)) return false;
+      if (filters.batchLabels.size > 0 && !filters.batchLabels.has(l.batchLabel ?? "")) return false;
       if (filters.createdFrom) {
         const leadDate = new Date(l.createdAt);
         leadDate.setHours(0, 0, 0, 0);
@@ -661,17 +698,7 @@ export default function LeadsPage() {
             </span>
             <Button
               size="sm" variant="destructive" className="gap-1.5"
-              onClick={async () => {
-                if (!session || checkedIds.size === 0) return;
-                if (!confirm(`Delete ${checkedIds.size} lead(s)? This cannot be undone.`)) return;
-                try {
-                  await bulkDeleteLeads(session.access_token, [...checkedIds]);
-                  setCheckedIds(new Set());
-                  void loadLeads(session.access_token);
-                } catch (e) {
-                  console.error("Bulk delete failed:", e);
-                }
-              }}
+              onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
             >
               <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
             </Button>
@@ -911,16 +938,11 @@ export default function LeadsPage() {
                     <span
                       onClick={toggleAll}
                       className={cn(
-                        "flex size-4 cursor-pointer rounded border items-center justify-center transition-colors",
-                        allEligibleChecked ? "bg-primary border-primary" : someChecked ? "bg-primary/40 border-primary/60" : "border-border hover:border-muted-foreground",
+                        "flex size-4 cursor-pointer rounded items-center justify-center transition-colors",
+                        allEligibleChecked ? "bg-primary ring-2 ring-primary" : someChecked ? "bg-primary/40 ring-2 ring-primary/60" : "bg-transparent ring-2 ring-white",
                       )}
                     >
                       {(allEligibleChecked || someChecked) && <Check className="size-2.5 text-primary-foreground" />}
-                    </span>
-                  </TableHead>
-                  <TableHead className="w-12">
-                    <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-muted-foreground">
-                      <InfoTip text={CAMPAIGN_ACTION_HELP.enrichmentColumn} />
                     </span>
                   </TableHead>
                   <TableHead className="text-xs font-semibold text-muted-foreground">Lead</TableHead>
@@ -940,8 +962,8 @@ export default function LeadsPage() {
                   {visibleCols.domain    && <TableHead className="text-xs font-semibold text-muted-foreground">Domain</TableHead>}
                   {visibleCols.country   && <TableHead className="text-xs font-semibold text-muted-foreground">Country</TableHead>}
                   {visibleCols.campaign  && <TableHead className="text-xs font-semibold text-muted-foreground">Campaign</TableHead>}
+                  {visibleCols.batch     && <TableHead className="text-xs font-semibold text-muted-foreground">Batch</TableHead>}
                   {visibleCols.added     && <TableHead className="text-xs font-semibold text-muted-foreground">Added</TableHead>}
-                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -969,17 +991,16 @@ export default function LeadsPage() {
                           <span
                             title={ineligibleReason ?? undefined}
                             className={cn(
-                              "flex size-4 rounded border items-center justify-center transition-colors",
+                              "flex size-4 rounded items-center justify-center transition-colors shrink-0",
                               !eligible && "cursor-not-allowed opacity-40",
                               eligible && "cursor-pointer",
-                              isChecked && eligible ? "bg-primary border-primary" : eligible ? "border-border hover:border-muted-foreground" : "border-border",
+                              isChecked && eligible
+                                ? "bg-primary ring-2 ring-primary"
+                                : "bg-transparent ring-2 ring-white",
                             )}
                           >
                             {isChecked && eligible && <Check className="size-2.5 text-primary-foreground" />}
                           </span>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <StatusDot status={lead.status} />
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2.5">
@@ -1011,17 +1032,19 @@ export default function LeadsPage() {
                             )}
                           </TableCell>
                         )}
+                        {visibleCols.batch && (
+                          <TableCell>
+                            {lead.batchLabel ? (() => {
+                              const bc = getBatchColor(lead.batchColor ?? "violet");
+                              return (
+                                <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-medium whitespace-nowrap", bc.pill)}>
+                                  {lead.batchLabel}
+                                </span>
+                              );
+                            })() : <span className="text-xs text-muted-foreground">—</span>}
+                          </TableCell>
+                        )}
                         {visibleCols.added     && <TableCell><span className="text-xs text-muted-foreground">{lead.createdAt.slice(0, 10)}</span></TableCell>}
-                        <TableCell className="text-right pr-3" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            title="Delete lead"
-                            onClick={(e) => { e.stopPropagation(); setDeletingLead(lead); }}
-                            className="p-1.5 rounded text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        </TableCell>
                       </TableRow>
                     );
                   })
@@ -1081,7 +1104,58 @@ export default function LeadsPage() {
           filters={filters}
           onChange={setFilters}
           onClose={() => setShowFilters(false)}
+          imports={importBatches}
         />
+      )}
+
+      {/* Bulk delete confirmation modal */}
+      {showBulkDelete && (
+        <div className="fixed inset-0 z-200 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!bulkDeleting) setShowBulkDelete(false); }} />
+          <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 size-10 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center">
+                <AlertTriangle className="size-5 text-red-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Delete {checkedIds.size} lead{checkedIds.size !== 1 ? "s" : ""}?</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">This will permanently remove the selected leads. This cannot be undone.</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDelete(false)}
+                disabled={bulkDeleting}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={bulkDeleting || !session}
+                onClick={async () => {
+                  if (!session) return;
+                  setBulkDeleting(true);
+                  try {
+                    await bulkDeleteLeads(session.access_token, [...checkedIds]);
+                    setCheckedIds(new Set());
+                    setShowBulkDelete(false);
+                    void loadLeads(session.access_token);
+                  } catch (e) {
+                    console.error("Bulk delete failed:", e);
+                  } finally {
+                    setBulkDeleting(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center gap-2"
+              >
+                {bulkDeleting ? <RefreshCw className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

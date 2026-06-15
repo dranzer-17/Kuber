@@ -93,3 +93,20 @@ export const DEFAULT_FOLLOW_UP_PATTERN = [
   { step: 2, delay: 30 },
   { step: 3, delay: 90 },
 ];
+
+export const BATCH_COLORS = [
+  { name: "violet", bg: "bg-violet-400",  ring: "ring-violet-400",  text: "text-violet-400",  pill: "bg-violet-500/15 border-violet-500/30 text-violet-400"  },
+  { name: "blue",   bg: "bg-blue-400",    ring: "ring-blue-400",    text: "text-blue-400",    pill: "bg-blue-500/15 border-blue-500/30 text-blue-400"         },
+  { name: "cyan",   bg: "bg-cyan-400",    ring: "ring-cyan-400",    text: "text-cyan-400",    pill: "bg-cyan-500/15 border-cyan-500/30 text-cyan-400"         },
+  { name: "green",  bg: "bg-green-400",   ring: "ring-green-400",   text: "text-green-400",   pill: "bg-green-500/15 border-green-500/30 text-green-400"      },
+  { name: "amber",  bg: "bg-amber-400",   ring: "ring-amber-400",   text: "text-amber-400",   pill: "bg-amber-500/15 border-amber-500/30 text-amber-400"      },
+  { name: "orange", bg: "bg-orange-400",  ring: "ring-orange-400",  text: "text-orange-400",  pill: "bg-orange-500/15 border-orange-500/30 text-orange-400"   },
+  { name: "pink",   bg: "bg-pink-400",    ring: "ring-pink-400",    text: "text-pink-400",    pill: "bg-pink-500/15 border-pink-500/30 text-pink-400"         },
+  { name: "teal",   bg: "bg-teal-400",    ring: "ring-teal-400",    text: "text-teal-400",    pill: "bg-teal-500/15 border-teal-500/30 text-teal-400"         },
+] as const;
+
+export type BatchColorName = typeof BATCH_COLORS[number]["name"];
+
+export function getBatchColor(name: string) {
+  return BATCH_COLORS.find((c) => c.name === name) ?? BATCH_COLORS[0];
+}

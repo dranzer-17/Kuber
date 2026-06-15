@@ -33,6 +33,8 @@ export interface DbLead {
   created_at: string;
   is_likely_to_engage: boolean | null;
   status: string;
+  import_id?: string | null;
+  imports?: { id: string; label: string; color: string } | null;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
   organizations: {
@@ -100,6 +102,9 @@ export function mapDbLead(l: DbLead): Lead {
     sellsTo: org?.sells_to ?? null,
     lastError: org?.last_error ?? null,
     hasScraped: org?.has_scraped ?? false,
+    importId: l.import_id ?? null,
+    batchLabel: l.imports?.label ?? null,
+    batchColor: l.imports?.color ?? null,
   };
 }
 
