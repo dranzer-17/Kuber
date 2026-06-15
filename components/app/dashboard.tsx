@@ -109,14 +109,16 @@ export function DashboardView({ leads, campaigns, onNavigate }: DashboardViewPro
   });
 
   // Stage donut
-  const STAGE_NAMES = ["Input Required","New","Enriching","Enriched","Draft Ready","Approved","Won","Closed"] as const;
+  const STAGE_NAMES = ["New","Input Required","Enriched","Won","Closed"] as const;
   const STAGE_DONUT_COLORS = [
-    "#ca8a04","#1e40af","#1d4ed8","#2563eb","#3b82f6","#60a5fa","#22c55e","#71717a",
+    "#71717a","#ca8a04","#2563eb","#22c55e","#6b7280",
   ];
   const stageDonutData = STAGE_NAMES
     .map((name, i) => ({
       name,
-      value: leads.filter((l) => l.status === name).length,
+      value: name === "Won"
+        ? leads.filter((l) => l.status === "Open").length
+        : leads.filter((l) => l.status === name).length,
       color: STAGE_DONUT_COLORS[i],
     }))
     .filter((d) => d.value > 0);

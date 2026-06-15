@@ -6,6 +6,7 @@ export const PatchSettingsSchema = z.object({
   client_industry: z.string().optional(),
   client_products: z.string().optional(),
   client_target_markets: z.string().optional(),
+  email_signature: z.string().optional(),
 });
 
 export const SETTINGS_KEYS = [
@@ -14,4 +15,5 @@ export const SETTINGS_KEYS = [
   "client_industry",
   "client_products",
   "client_target_markets",
+  "email_signature",
 ] as const;

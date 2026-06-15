@@ -1,16 +1,15 @@
 "use client";
 
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lead, LeadStatus } from "@/lib/leads";
 import { kanbanColumnFor } from "@/lib/leads";
 
 const KANBAN_COLS: { id: LeadStatus; label: string; dot: string; header: string }[] = [
-  { id: "Input Required", label: "Input Required", dot: "bg-yellow-400", header: "border-yellow-500/30" },
   { id: "New",            label: "New",            dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
-  { id: "Enriching",      label: "Enriching",      dot: "bg-amber-400",  header: "border-amber-500/30"  },
+  { id: "Input Required", label: "Input Required", dot: "bg-yellow-400", header: "border-yellow-500/30" },
   { id: "Enriched",       label: "Enriched",       dot: "bg-blue-400",   header: "border-blue-500/30"   },
-  { id: "Open",           label: "Open",           dot: "bg-green-400",  header: "border-green-500/30"  },
+  { id: "Open",           label: "Win",            dot: "bg-green-400",  header: "border-green-500/30"  },
   { id: "Closed",         label: "Closed",         dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
 ];
 
@@ -29,7 +28,7 @@ export function KanbanBoard({
           <div
             key={col.id}
             className="shrink-0 flex flex-col gap-2"
-            style={{ width: "calc((100% - 40px) / 6)", minWidth: "160px" }}
+            style={{ width: "calc((100% - 32px) / 5)", minWidth: "160px" }}
           >
             <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
               <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
@@ -41,6 +40,8 @@ export function KanbanBoard({
             <div className="flex flex-col gap-1.5">
               {colLeads.map((lead) => {
                 const failed = lead.enrichmentStage === "failed";
+                const missingData = !lead.email || !lead.domain;
+                const isInputRequired = col.id === "Input Required";
                 return (
                   <button
                     key={lead.id}
@@ -55,12 +56,21 @@ export function KanbanBoard({
                     {failed && (
                       <AlertCircle className="size-3 text-red-400 absolute top-2 right-2" />
                     )}
+                    {isInputRequired && !failed && (
+                      <Info className="size-3 text-amber-400 absolute top-2 right-2" />
+                    )}
                     <p className="text-xs font-semibold truncate mb-0.5 pr-4">
                       {lead.firstName} {lead.lastName}
                     </p>
                     <p className="text-[11px] text-muted-foreground truncate mb-2">{lead.company}</p>
                     <div className="flex items-center justify-between gap-1">
-                      <span className="text-[10px] text-muted-foreground/60 truncate">{lead.jobTitle}</span>
+                      <span className="text-[10px] text-muted-foreground/60 truncate">
+                        {failed
+                          ? "Enrichment failed"
+                          : isInputRequired && missingData
+                          ? "Needs details"
+                          : lead.jobTitle}
+                      </span>
                       {lead.score !== "—" && (
                         <span
                           className={cn(

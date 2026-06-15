@@ -78,6 +78,15 @@ export async function getDraftSystemPrompt(db: SupabaseClient): Promise<string> 
   return `${withJson}\n\n${buildClientContextBlock(client)}`;
 }
 
+export async function getEmailSignature(db: SupabaseClient): Promise<string> {
+  const { data } = await db
+    .from("settings")
+    .select("value")
+    .eq("key", "email_signature")
+    .maybeSingle();
+  return data?.value?.trim() || "";
+}
+
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;

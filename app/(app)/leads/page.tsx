@@ -1,5 +1,7 @@
 "use client";
 
+import { bulkDeleteLeads } from "@/lib/api-client";
+
 import { useRef, useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -13,6 +15,7 @@ import {
   campaignIneligibleReason,
   sortLeads,
   PIPELINE_STAGES,
+  STATUS_LABELS,
   CAMPAIGN_ACTION_HELP,
   type EnrichmentStage,
 } from "@/lib/leads";
@@ -444,10 +447,10 @@ function FiltersModal({
   });
 
   const statusOptions: DropdownOption<LeadStatus>[] = PIPELINE_STAGES.map((s) => ({
-    value: s, label: s, dot: STATUS_DOT[s],
+    value: s, label: STATUS_LABELS[s], dot: STATUS_DOT[s],
   }));
   const scoreOptions: DropdownOption<LeadScore>[] = ALL_SCORES.map((s) => ({
-    value: s, label: s === "—" ? "Unscored" : s, dot: SCORE_DOT[s],
+    value: s, label: s === "Hot" ? "Hot Lead" : s === "Cold" ? "Cold Lead" : "Unscored", dot: SCORE_DOT[s],
   }));
   const sourceOptions: DropdownOption<LeadSource>[] = ALL_SOURCES.map((s) => ({
     value: s, label: s,
@@ -637,8 +640,6 @@ export default function LeadsPage() {
 
   function toggleOne(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    const lead = pagedLeads.find((l) => l.id === id);
-    if (!lead || !isCampaignEligible(lead)) return;
     setCheckedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -658,6 +659,22 @@ export default function LeadsPage() {
                 <span className="text-muted-foreground font-normal"> · {ineligibleCheckedCount} not ready for outreach</span>
               )}
             </span>
+            <Button
+              size="sm" variant="destructive" className="gap-1.5"
+              onClick={async () => {
+                if (!session || checkedIds.size === 0) return;
+                if (!confirm(`Delete ${checkedIds.size} lead(s)? This cannot be undone.`)) return;
+                try {
+                  await bulkDeleteLeads(session.access_token, [...checkedIds]);
+                  setCheckedIds(new Set());
+                  void loadLeads(session.access_token);
+                } catch (e) {
+                  console.error("Bulk delete failed:", e);
+                }
+              }}
+            >
+              <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
+            </Button>
             <Button
               size="sm" className="gap-1.5"
               disabled={!canCreateCampaign}

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { GenerateDraftsSchema, DraftsQuerySchema } from "@/lib/validators/drafts";
 import { complete, buildDraftSystem, DraftOutput } from "@/lib/services/llm";
+import { getEmailSignature } from "@/lib/services/settings";
 import { KUBER_CONTEXT } from "@/lib/constants";
 import { z } from "zod";
 
@@ -52,10 +53,14 @@ export async function POST(req: NextRequest) {
   // Get campaign for human_in_loop setting
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, human_in_loop")
+    .select("id, human_in_loop, signature_override")
     .eq("id", campaign_id)
     .maybeSingle();
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
+
+  // Fetch email signature (campaign override takes priority over global setting)
+  const globalSignature = await getEmailSignature(db);
+  const effectiveSignature = campaign.signature_override?.trim() || globalSignature;
 
   // Target: enriched leads with no draft (or failed draft)
   let q = db
@@ -126,7 +131,9 @@ export async function POST(req: NextRequest) {
 
       await db.from("email_drafts").update({
         subject: validated.data.subject,
-        body: validated.data.body,
+        body: effectiveSignature
+          ? `${validated.data.body}\n\n${effectiveSignature}`
+          : validated.data.body,
         status: finalStatus,
         ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: user.id } : {}),
         updated_at: now,

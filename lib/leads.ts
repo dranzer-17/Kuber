@@ -38,13 +38,23 @@ export type Lead = {
 };
 
 export const PIPELINE_STAGES: LeadStatus[] = [
-  "Input Required", "New", "Enriching", "Enriched", "Open", "Closed",
+  "New", "Input Required", "Enriched", "Open", "Closed",
 ];
 
 /** Kanban columns match full lead lifecycle including Input Required. */
 export const KANBAN_STAGES: LeadStatus[] = [
-  "Input Required", "New", "Enriching", "Enriched", "Open", "Closed",
+  "New", "Input Required", "Enriched", "Open", "Closed",
 ];
+
+/** Client-facing labels. Internal status values stay stable for the DB + filters. */
+export const STATUS_LABELS: Record<LeadStatus, string> = {
+  "Input Required": "Input Required",
+  New: "New",
+  Enriching: "Enriching",
+  Enriched: "Enriched",
+  Open: "Win",
+  Closed: "Closed",
+};
 
 export const STEP_DESCRIPTIONS: Record<LeadStatus, string> = {
   "Input Required": "Missing email or company domain — add details before enrichment",
@@ -56,9 +66,9 @@ export const STEP_DESCRIPTIONS: Record<LeadStatus, string> = {
 };
 
 export const STATUS_ORDER: Record<LeadStatus, number> = {
-  "Input Required": 0,
-  New: 1, Enriching: 2, Enriched: 3,
-  Open: 4, Closed: 5,
+  New: 0, "Input Required": 1,
+  Enriching: 2, Enriched: 2,
+  Open: 3, Closed: 4,
 };
 
 /** True only when Firecrawl ran AND extracted real company data. */
@@ -79,7 +89,7 @@ export function kanbanColumnFor(lead: Lead): LeadStatus {
   if (lead.enrichmentStage === "failed") return "Input Required";
   if (lead.enrichmentStage === "done" && !hasEnrichmentData(lead)) return "Input Required";
   if (lead.enrichmentStage === "done")     return "Enriched";
-  if (lead.enrichmentStage === "scraping") return "Enriching";
+  if (lead.enrichmentStage === "scraping") return "New";
   // queued or null → awaiting enrichment
   return "New";
 }

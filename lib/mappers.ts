@@ -1,0 +1,137 @@
+import type { Lead, LeadStatus, LeadScore, LeadSource, EnrichmentStage } from "@/lib/leads";
+import type { Campaign } from "@/components/app/create-campaign-modal";
+
+// ─── DB → frontend status maps ───────────────────────────────────────────────
+
+export const LEAD_STATUS_MAP: Record<string, LeadStatus> = {
+  new:            "New",
+  enriching:      "Enriching",
+  enriched:       "Enriched",
+  input_required: "Input Required",
+  open:           "Open",
+  closed:         "Closed",
+};
+
+export const SOURCE_MAP: Record<string, LeadSource> = {
+  apollo: "Apollo",
+  excel:  "Excel",
+  manual: "Manual",
+};
+
+// ─── DB row shapes ────────────────────────────────────────────────────────────
+
+export interface DbLead {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  headline: string | null;
+  country: string | null;
+  lead_source: string;
+  created_at: string;
+  is_likely_to_engage: boolean | null;
+  status: string;
+  campaign_name?: string | null;
+  campaign_list?: { id: string; name: string; crm_status: string }[];
+  organizations: {
+    id: string;
+    name: string;
+    domain: string | null;
+    description: string | null;
+    unsubscribed: boolean;
+    has_scraped: boolean;
+    primary_products: string[] | null;
+    competitors: string[] | null;
+    news_summary: string | null;
+    intent_signals: string[] | null;
+    enrichment_stage: string | null;
+    company_description: string | null;
+    sells_to: string | null;
+    last_error: string | null;
+  } | null;
+}
+
+export interface DbCampaign {
+  id: string;
+  name: string;
+  status: string;
+  human_in_loop: boolean;
+  total_leads: number;
+  sent_count: number;
+  replied_count: number;
+  created_at: string;
+  instantly_campaign_id: string | null;
+  daily_limit: number | null;
+  window_from: string | null;
+  window_to: string | null;
+  schedule_timezone: string | null;
+  send_days: Record<string, boolean> | null;
+  ai_prompt_context: string | null;
+  sender_name: string | null;
+}
+
+// ─── Mapper functions ─────────────────────────────────────────────────────────
+
+export function mapDbLead(l: DbLead): Lead {
+  const score: LeadScore = l.is_likely_to_engage === true ? "Hot" : l.is_likely_to_engage === false ? "Cold" : "—";
+  const org = l.organizations;
+  const enrichmentStage = (org?.enrichment_stage as EnrichmentStage) ?? null;
+
+  const status: LeadStatus = LEAD_STATUS_MAP[l.status] ?? "New";
+  const email = l.email ?? "";
+  const domain = org?.domain ?? "";
+
+  return {
+    id: l.id,
+    firstName: l.first_name ?? "",
+    lastName: l.last_name ?? "",
+    email,
+    company: org?.name ?? "",
+    domain,
+    jobTitle: l.title ?? l.headline ?? "",
+    phone: l.phone ?? "",
+    country: l.country ?? "",
+    status,
+    score,
+    source: SOURCE_MAP[l.lead_source] ?? "Manual",
+    campaign: l.campaign_name ?? (l.campaign_list?.[0]?.name ?? ""),
+    campaigns: l.campaign_list ?? [],
+    createdAt: l.created_at,
+    orgId: org?.id ?? null,
+    enrichmentStage,
+    companyDescription: org?.company_description ?? org?.description ?? null,
+    sellsTo: org?.sells_to ?? null,
+    lastError: org?.last_error ?? null,
+    hasScraped: org?.has_scraped ?? false,
+    primaryProducts: org?.primary_products ?? [],
+    competitors: org?.competitors ?? [],
+    newsSummary: org?.news_summary ?? null,
+    intentSignals: org?.intent_signals ?? [],
+  };
+}
+
+export function mapDbCampaign(c: DbCampaign): Campaign {
+  const statusMap: Record<string, Campaign["status"]> = {
+    draft: "Draft", processing: "Draft", active: "Live", paused: "Paused", completed: "Live", archived: "Paused",
+  };
+  return {
+    id: c.id,
+    name: c.name,
+    status: statusMap[c.status] ?? "Draft",
+    leads: c.total_leads,
+    sent: c.sent_count,
+    replied: c.replied_count,
+    humanInLoop: c.human_in_loop,
+    createdAt: c.created_at.slice(0, 10),
+    instantlyId: c.instantly_campaign_id ?? null,
+    dailyLimit: c.daily_limit ?? 30,
+    windowFrom: c.window_from ?? "08:00",
+    windowTo: c.window_to ?? "18:00",
+    timezone: c.schedule_timezone ?? "Asia/Kolkata",
+    sendDays: c.send_days ?? {},
+    aiPromptContext: c.ai_prompt_context ?? undefined,
+    senderName: c.sender_name ?? undefined,
+  };
+}

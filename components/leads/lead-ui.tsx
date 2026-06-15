@@ -4,6 +4,7 @@ import {
   KANBAN_STAGES,
   STEP_DESCRIPTIONS,
   STATUS_ORDER,
+  STATUS_LABELS,
   type LeadScore,
   type LeadStatus,
 } from "@/lib/leads";
@@ -20,7 +21,7 @@ const STATUS_STYLES: Record<LeadStatus, string> = {
 export function StatusBadge({ status }: { status: LeadStatus }) {
   return (
     <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", STATUS_STYLES[status])}>
-      {status}
+      {STATUS_LABELS[status]}
     </span>
   );
 }
@@ -51,12 +52,11 @@ export function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "md"
   );
 }
 
-const STEPPER_STAGES: LeadStatus[] = ["New", "Enriching", "Enriched"];
+const STEPPER_STAGES: LeadStatus[] = ["New", "Enriched"];
 
 export function PipelineStepper({ currentStatus }: { currentStatus: LeadStatus }) {
   const stepperStatus: LeadStatus =
-    currentStatus === "Input Required" || currentStatus === "New" ? "New"
-    : currentStatus === "Enriching" ? "Enriching"
+    currentStatus === "Input Required" || currentStatus === "New" || currentStatus === "Enriching" ? "New"
     : "Enriched";
   const current = STEPPER_STAGES.indexOf(stepperStatus);
   return (

@@ -196,6 +196,10 @@ export async function deleteLead(token: string, id: string): Promise<{ deleted: 
   return apiFetch(`/api/v1/leads/${id}`, { method: "DELETE" }, token);
 }
 
+export async function bulkDeleteLeads(token: string, ids: string[]): Promise<{ deleted: number }> {
+  return apiFetch("/api/v1/leads/bulk-delete", { method: "POST", body: JSON.stringify({ ids }) }, token);
+}
+
 export async function deleteCampaign(token: string, id: string): Promise<{ deleted: string }> {
   return apiFetch(`/api/v1/campaigns/${id}`, { method: "DELETE" }, token);
 }
