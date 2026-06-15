@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete, type DraftOutput } from "@/lib/services/llm";
-import { getDraftSystemPrompt } from "@/lib/services/settings";
+import { getDraftSystemPrompt, resolveCampaignSignature } from "@/lib/services/settings";
 import { KUBER_CONTEXT } from "@/lib/constants";
 
 const DraftSchema = z.object({ subject: z.string(), body: z.string() });
@@ -44,6 +44,12 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
+// Approach A: instruct the LLM to NOT add a sign-off — we append it deterministically.
+const SIGNATURE_INSTRUCTION =
+  "\n\nIMPORTANT: Do NOT include any sign-off, signature, name, title, position, or " +
+  "contact details at the end. End the email body with your final sentence only. " +
+  "The signature is appended automatically by the system.";
+
 function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?: string, aiPromptContext?: string): string {
   const org = unwrapOrg(lead.organizations);
   const lines = [
@@ -59,6 +65,7 @@ function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?
     `Products: ${(org?.primary_products ?? []).join(", ") || "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
     `Kuber context: ${KUBER_CONTEXT}`,
+    `Instruction: Write a complete email body. Do NOT use any bracketed placeholders like [Your Name].`,
   ];
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
   if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
@@ -81,6 +88,23 @@ export async function generateOneDraft(
   if (!lead) return { ok: false, reason: "Lead not found" };
   if (!lead.email) return { ok: false, reason: "Lead has no email" };
 
+  // --- Fetch full campaign for signature + attachment resolution ---
+  const { data: campaign } = await db
+    .from("campaigns")
+    .select("id, signature_override, signature_user_id, created_by, attachment_name, ai_prompt_context")
+    .eq("id", campaignId)
+    .maybeSingle();
+
+  const signatureBlock = await resolveCampaignSignature(db, campaign ?? {});
+
+  const attachmentInstruction = campaign?.attachment_name
+    ? `\n\nIMPORTANT: A file named "${campaign.attachment_name}" is attached to this email. ` +
+      `You MUST reference it naturally in ONE sentence near the end (before the closing line), ` +
+      `e.g. "I've attached our company brochure for your reference." ` +
+      `Do not invent details about the file beyond that it is attached.`
+    : "";
+
+  // --- Draft row (insert or reuse) ---
   let draftId = existingDraftId;
 
   if (!draftId) {
@@ -104,7 +128,14 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const systemPrompt = await getDraftSystemPrompt(db);
+    const baseSystemPrompt = await getDraftSystemPrompt(db);
+    // Assemble full system prompt with campaign context + attachment + signature instructions
+    const systemPrompt =
+      baseSystemPrompt
+      + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
+      + attachmentInstruction
+      + SIGNATURE_INSTRUCTION;
+
     const { json } = await complete<DraftOutput>({
       system: systemPrompt,
       user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext),
@@ -113,12 +144,25 @@ export async function generateOneDraft(
     const validated = DraftSchema.safeParse(json);
     if (!validated.success) throw new Error("Draft shape mismatch");
 
+    // Approach B safety net — remove any placeholder the LLM emitted anyway:
+    let finalBody = validated.data.body.trim();
+    finalBody = finalBody
+      .replace(/\[Your Name\]/gi, "")
+      .replace(/\[Your (Title|Position)\]/gi, "")
+      .replace(/\[Your Contact Information\]/gi, "")
+      .replace(/\[Your Company\]/gi, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    // Append the resolved signature:
+    finalBody = `${finalBody}\n\n${signatureBlock}`;
+
     const finalStatus = humanInLoop ? "draft" : "approved";
     const now = new Date().toISOString();
 
     await db.from("email_drafts").update({
       subject: validated.data.subject,
-      body: validated.data.body,
+      body: finalBody,
       status: finalStatus,
       ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: userId ?? null } : {}),
       updated_at: now,

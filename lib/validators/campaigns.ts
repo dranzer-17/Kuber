@@ -21,6 +21,8 @@ export const CreateCampaignSchema = z.object({
   attachment_mime: z.string().optional(),
   attachment_size: z.number().int().optional(),
   attachment_url:  z.string().optional().nullable(),
+  // Per-admin signature
+  signature_user_id: z.string().uuid().optional(),
 });
 
 export const PatchCampaignSchema = z.object({

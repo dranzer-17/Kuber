@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
       follow_up_pattern: parsed.data.follow_up_pattern ?? DEFAULT_FOLLOW_UP_PATTERN,
       status: "draft",
       created_by: user.id,
+      signature_user_id: parsed.data.signature_user_id ?? user.id,
       created_at: new Date().toISOString(),
     })
     .select()

@@ -2,22 +2,8 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
-import { GenerateDraftsSchema, DraftsQuerySchema } from "@/lib/validators/drafts";
-import { complete, buildDraftSystem, DraftOutput } from "@/lib/services/llm";
-import { getSignature } from "@/lib/services/settings";
-import { getDraftSystemPrompt } from "@/lib/services/settings";
-import { KUBER_CONTEXT } from "@/lib/constants";
-import { z } from "zod";
+import { DraftsQuerySchema } from "@/lib/validators/drafts";
 
-export const maxDuration = 300;
-
-const DraftSchema = z.object({ subject: z.string(), body: z.string() });
-
-// Approach A: instruct the LLM to NOT add a sign-off — we append it deterministically.
-const SIGNATURE_INSTRUCTION =
-  "\n\nIMPORTANT: Do NOT include any sign-off, signature, name, title, or contact " +
-  "details at the end. End the email body with your final sentence. The signature " +
-  "is added automatically by the system.";
 
 export async function GET(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -46,158 +32,15 @@ export async function GET(req: NextRequest) {
   return ok({ drafts: data, total: count, page, limit });
 }
 
-export async function POST(req: NextRequest) {
-  let user: { id: string };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
-
-  const body = await req.json().catch(() => null);
-  const parsed = GenerateDraftsSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
-
-  const { campaign_id, lead_ids, limit } = parsed.data;
-  const db = createAdminClient();
-
-  // Get campaign details including attachment + signature override
-  const { data: campaign } = await db
-    .from("campaigns")
-    .select("id, human_in_loop, signature_override, attachment_name, ai_prompt_context")
-    .eq("id", campaign_id)
-    .maybeSingle();
-  if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
-
-  // Resolve structured signature (campaign override wins)
-  const sig = await getSignature(db);
-  const signatureBlock = campaign.signature_override?.trim()
-    || `Best regards,\n${sig.name}\n${sig.title}\n${sig.contact}`;
-
-  // Build the full system prompt
-  const baseSystemPrompt = await getDraftSystemPrompt(db);
-
-  // Campaign-level context (the per-campaign "Additional context for AI")
-  const campaignContext = campaign.ai_prompt_context
-    ? `\n\nAdditional campaign context:\n${campaign.ai_prompt_context}`
-    : "";
-
-  // Attachment instruction: only if the campaign has an attached file
-  const attachmentInstruction = campaign.attachment_name
-    ? `\n\nThere is a file attached to this email named "${campaign.attachment_name}". ` +
-      `Reference it naturally in ONE sentence near the end of the body ` +
-      `(e.g. "I've attached our product brochure for your reference."). ` +
-      `Do not invent details about the file beyond that it is attached.`
-    : "";
-
-  const systemPrompt = baseSystemPrompt + campaignContext + attachmentInstruction + SIGNATURE_INSTRUCTION;
-
-  // Target: enriched leads with no draft (or failed draft)
-  let q = db
-    .from("campaign_leads")
-    .select("id, lead_id, draft_id, leads(id, first_name, last_name, title, seniority, country, organization_id, organizations(name, description, company_description, sells_to, primary_products, keywords))")
-    .eq("campaign_id", campaign_id)
-    .or("crm_status.eq.enriched,crm_status.eq.draft")
-    .is("draft_id", null)
-    .limit(limit);
-
-  if (lead_ids && lead_ids.length > 0) q = q.in("lead_id", lead_ids);
-
-  // Also include failed drafts for regeneration
-  const { data: targets } = await q;
-
-  let generated = 0;
-  let generatedFailed = 0;
-  let autoApproved = 0;
-  const tierStats = { tier1: 0, tier2: 0 };
-
-  for (const target of targets ?? []) {
-    const lead = Array.isArray(target.leads) ? target.leads[0] : target.leads;
-    if (!lead) continue;
-
-    const org = Array.isArray(lead.organizations) ? lead.organizations[0] : lead.organizations;
-
-    // Build prompt
-    const userContent = JSON.stringify({
-      first_name: lead.first_name,
-      title: lead.title,
-      seniority: lead.seniority,
-      country: lead.country,
-      company: {
-        name: org?.name,
-        description: org?.company_description ?? org?.description,
-        sells_to: org?.sells_to,
-        primary_products: org?.primary_products,
-        keywords: org?.keywords,
-      },
-      kuber_context: KUBER_CONTEXT,
-    });
-
-    // Insert draft as generating
-    const { data: draft, error: dErr } = await db
-      .from("email_drafts")
-      .insert({
-        lead_id: lead.id,
-        campaign_id,
-        status: "generating",
-        created_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-
-    if (dErr) { generatedFailed++; continue; }
-
-    try {
-      const { json, tier } = await complete<DraftOutput>({
-        system: systemPrompt,
-        user: userContent,
-      });
-
-      const validated = DraftSchema.safeParse(json);
-      if (!validated.success) throw new Error("Draft shape mismatch");
-
-      // Approach A: deterministic signature append
-      let finalBody = validated.data.body.trim();
-
-      // Approach B fallback: replace any remaining LLM placeholders
-      finalBody = finalBody
-        .replaceAll("[Your Name]", sig.name)
-        .replaceAll("[Your Title]", sig.title)
-        .replaceAll("[Your Contact Information]", sig.contact)
-        .replaceAll("[Your Company]", sig.company);
-
-      // Append the signature block
-      finalBody = `${finalBody}\n\n${signatureBlock}`;
-
-      const finalStatus = campaign.human_in_loop ? "draft" : "approved";
-      const now = new Date().toISOString();
-
-      await db.from("email_drafts").update({
-        subject: validated.data.subject,
-        body: finalBody,
-        status: finalStatus,
-        ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: user.id } : {}),
-        updated_at: now,
-      }).eq("id", draft.id);
-
-      // Link draft to campaign_lead
-      await db.from("campaign_leads").update({
-        draft_id: draft.id,
-        crm_status: finalStatus === "approved" ? "approved" : "draft",
-        updated_at: now,
-      }).eq("id", target.id);
-
-      if (tier === 1) tierStats.tier1++; else tierStats.tier2++;
-      generated++;
-      if (finalStatus === "approved") autoApproved++;
-    } catch {
-      await db.from("email_drafts").update({ status: "failed", updated_at: new Date().toISOString() }).eq("id", draft.id);
-      generatedFailed++;
-    }
-  }
-
-  const { count: remaining } = await db
-    .from("campaign_leads")
-    .select("id", { count: "exact", head: true })
-    .eq("campaign_id", campaign_id)
-    .eq("crm_status", "enriched")
-    .is("draft_id", null);
-
-  return ok({ generated, failed: generatedFailed, auto_approved: autoApproved, llm_tier_stats: tierStats, remaining: remaining ?? 0 });
+/**
+ * @deprecated — This inline POST generator is NOT called by the frontend.
+ * The frontend uses POST /api/v1/campaigns/[id]/generate-drafts → lib/services/generate-drafts.ts.
+ * Keeping GET for draft listing. POST returns 410 Gone to prevent accidental use.
+ */
+export async function POST() {
+  return fail(
+    410,
+    "DEPRECATED",
+    "This endpoint is deprecated. Use POST /api/v1/campaigns/{id}/generate-drafts instead.",
+  );
 }

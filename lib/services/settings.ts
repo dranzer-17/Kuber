@@ -126,7 +126,54 @@ export async function getSignature(db: SupabaseClient): Promise<Signature> {
   };
 }
 
+// ── Per-admin campaign signature resolver ────────────────────────────────────
+
+/**
+ * Resolve the signature block for a campaign, per the resolution order:
+ *   1. campaign.signature_override (free-text)
+ *   2. user_signatures[campaign.signature_user_id] (explicitly chosen admin)
+ *   3. user_signatures[campaign.created_by] (campaign creator — the normal case)
+ *   4. global settings.signature_* fields
+ *   5. hardcoded defaults
+ *
+ * Returns the full text block to append to the email body.
+ */
+export async function resolveCampaignSignature(
+  db: SupabaseClient,
+  campaign: {
+    signature_override?: string | null;
+    signature_user_id?: string | null;
+    created_by?: string | null;
+  },
+): Promise<string> {
+  // 1. Free-text override wins
+  if (campaign.signature_override?.trim()) {
+    return campaign.signature_override.trim();
+  }
+
+  // 2 & 3. Per-admin signature: chosen admin, else campaign creator
+  const targetUserId = campaign.signature_user_id ?? campaign.created_by ?? null;
+  if (targetUserId) {
+    const { data: usig } = await db
+      .from("user_signatures")
+      .select("full_name, title, contact")
+      .eq("user_id", targetUserId)
+      .maybeSingle();
+    if (usig?.full_name) {
+      const parts = ["Best regards,", usig.full_name];
+      if (usig.title)   parts.push(usig.title);
+      if (usig.contact) parts.push(usig.contact);
+      return parts.join("\n");
+    }
+  }
+
+  // 4. Global settings fallback
+  const sig = await getSignature(db);
+  return `Best regards,\n${sig.name}\n${sig.title}\n${sig.contact}`;
+}
+
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;
 }
+
