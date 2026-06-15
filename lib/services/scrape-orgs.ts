@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { scrapeOrg, searchWeb } from "@/lib/services/firecrawl";
-import { complete, EXTRACTION_SYSTEM, INTELLIGENCE_SYSTEM } from "@/lib/services/llm";
+import { scrapeOrg } from "@/lib/services/firecrawl";
+import { complete, EXTRACTION_SYSTEM } from "@/lib/services/llm";
 import { sleep } from "@/lib/http";
 import { z } from "zod";
 
@@ -9,21 +9,17 @@ const ExtractionSchema = z.object({
   primary_products: z.array(z.string()),
 });
 
-const IntelligenceSchema = z.object({
-  news_summary: z.string().nullable(),
-  competitors: z.array(z.string()),
-  intent_signals: z.array(z.string()),
-});
+
 
 export interface ScrapeOrgStats {
   scraped: number;
   skipped_no_domain: number;
   extraction_fallback_used: number;
   credits_used: number;
-  failed: Array<{ org_id: string; stage: "scrape" | "extract" | "intelligence"; reason: string }>;
+  failed: Array<{ org_id: string; stage: "scrape" | "extract"; reason: string }>;
 }
 
-/** Scrape + extract + intelligence for a single org. Updates the DB row. */
+/** Scrape + extract for a single org. Updates the DB row. */
 export async function processOneOrg(
   db: SupabaseClient,
   org: { id: string; domain: string | null; name: string },
@@ -88,43 +84,14 @@ export async function processOneOrg(
   }
   if (usedFallback) stats.extraction_fallback_used++;
 
-  // Web intelligence via Firecrawl search
-  let newsSummary: string | null = null;
-  let competitors: string[] = [];
-  let intentSignals: string[] = [];
-
-  try {
-    const [newsText, competitorText] = await Promise.all([
-      searchWeb(`${org.name} funding news hiring expansion 2024 2025`, 5),
-      searchWeb(`${org.name} competitors similar companies`, 4),
-    ]);
-    await sleep(300);
-
-    const combined = [newsText, competitorText].filter(Boolean).join("\n\n===\n\n");
-    if (combined.trim().length > 100) {
-      const { json } = await complete({ system: INTELLIGENCE_SYSTEM, user: combined.slice(0, 14_000) });
-      const v = IntelligenceSchema.safeParse(json);
-      if (v.success) {
-        newsSummary = v.data.news_summary;
-        competitors = v.data.competitors;
-        intentSignals = v.data.intent_signals;
-      }
-    }
-  } catch { /* non-fatal */ }
-
   await db.from("organizations").update({
-    description,
-    primary_products: primaryProducts.length > 0 ? primaryProducts : null,
-    firecrawl_md_path: mdPath,
-    news_summary: newsSummary,
-    competitors: competitors.length > 0 ? competitors : null,
-    intent_signals: intentSignals.length > 0 ? intentSignals : null,
+    company_description: description,
     has_scraped: true,
     updated_at: new Date().toISOString(),
   }).eq("id", org.id);
 
   // Fix A: sync leads.status for every lead under this org
-  const hasData = !!(description) || primaryProducts.length > 0;
+  const hasData = !!description;
   await db.from("leads")
     .update({ status: hasData ? "enriched" : "input_required", updated_at: new Date().toISOString() })
     .eq("organization_id", org.id)

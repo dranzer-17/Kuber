@@ -274,10 +274,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   const open = lead !== null;
   const currentStage = enrichData?.enrichment_stage ?? display?.enrichmentStage ?? null;
   const attempts = enrichData?.enrichment_attempts ?? 0;
-  const enrichHasData = !!(
-    (enrichData?.company_description || display?.companyDescription) ||
-    (display?.primaryProducts && display.primaryProducts.length > 0)
-  );
+  const enrichHasData = !!((enrichData?.company_description || display?.companyDescription));
 
   return (
     <>

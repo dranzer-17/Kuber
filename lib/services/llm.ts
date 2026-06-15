@@ -176,19 +176,6 @@ export interface DraftOutput {
 
 export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Return ONLY valid JSON, no markdown fences: { "description": string (2-3 sentences: what they manufacture and who they sell to), "primary_products": string[] }`;
 
-export interface IntelligenceOutput {
-  news_summary: string | null;
-  competitors: string[];
-  intent_signals: string[];
-}
-
-export const INTELLIGENCE_SYSTEM = `You are a B2B sales intelligence analyst. Given web search results about a company, extract the following. Return ONLY valid JSON, no markdown fences:
-{
-  "news_summary": string | null,  // 1-2 sentences summarising recent news, funding, or expansions. null if nothing relevant found.
-  "competitors": string[],         // list of competitor company names mentioned. empty array if none found.
-  "intent_signals": string[]       // buying/growth signals: hiring roles, new markets, product launches, expansions. empty array if none found.
-}`;
-
 export const DRAFT_JSON_SUFFIX =
   '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string}. The body field is the full email text.';
 

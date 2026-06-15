@@ -16,11 +16,18 @@ export async function POST(req: NextRequest) {
   const parsed = ApolloSearchSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { keywords, locations, max_pages, titles, seniorities } = parsed.data;
+  const { keywords, locations, max_pages, titles, seniorities, batch_name } = parsed.data;
 
   if (!process.env.APOLLO_API_KEY) return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured");
 
   const db = createAdminClient();
+
+  // Create batch/import row
+  const batchLabel = batch_name?.trim() || `Apollo – ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}`;
+  const { data: importRow } = await db.from("imports")
+    .insert({ label: batchLabel, source: "apollo", created_by: user.id, lead_count: 0 })
+    .select("id").single();
+  const importId = importRow?.id ?? null;
 
   // ── Phase 1: Search all keywords/pages, batch-insert leads ───────────────
 
@@ -116,6 +123,7 @@ export async function POST(req: NextRequest) {
           organization_id: orgId,
           lead_source: "apollo",
           created_by: user.id,
+          import_id: importId,
           created_at: new Date().toISOString(),
         }];
       });
@@ -186,6 +194,10 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
     }).catch(() => { /* intentional fire-and-forget */ });
+  }
+
+  if (importId && inserted > 0) {
+    await db.from("imports").update({ lead_count: inserted }).eq("id", importId);
   }
 
   return ok({

@@ -67,13 +67,8 @@ export interface DbLead {
     id: string;
     name: string;
     domain: string | null;
-    description: string | null;
     unsubscribed: boolean;
     has_scraped: boolean;
-    primary_products: string[] | null;
-    competitors: string[] | null;
-    news_summary: string | null;
-    intent_signals: string[] | null;
     enrichment_stage: string | null;
     company_description: string | null;
     sells_to: string | null;
@@ -127,14 +122,10 @@ export function mapDbLead(l: DbLead): Lead {
     createdAt: l.created_at,
     orgId: org?.id ?? null,
     enrichmentStage,
-    companyDescription: org?.company_description ?? org?.description ?? null,
+    companyDescription: org?.company_description ?? null,
     sellsTo: org?.sells_to ?? null,
     lastError: org?.last_error ?? null,
     hasScraped: org?.has_scraped ?? false,
-    primaryProducts: org?.primary_products ?? [],
-    competitors: org?.competitors ?? [],
-    newsSummary: org?.news_summary ?? null,
-    intentSignals: org?.intent_signals ?? [],
   };
 }
 
@@ -431,4 +422,28 @@ export async function addLeadsToCampaign(token: string, campaignId: string, lead
     method: "POST",
     body: JSON.stringify({ lead_ids: leadIds }),
   }, token);
+}
+
+// ─── Imports / Batches ────────────────────────────────────────────────────────
+
+export interface ImportBatch {
+  id: string;
+  label: string;
+  source: string;
+  lead_count: number;
+  created_at: string;
+}
+
+export async function fetchImports(token: string): Promise<{ imports: ImportBatch[] }> {
+  return apiFetch("/api/v1/imports", {}, token);
+}
+
+// ─── Per-admin Signature ──────────────────────────────────────────────────────
+
+export async function fetchMySignature(token: string): Promise<{ full_name: string; title: string; contact: string; email: string }> {
+  return apiFetch("/api/v1/settings/signature", {}, token);
+}
+
+export async function saveMySignature(token: string, sig: { full_name: string; title: string; contact: string }): Promise<{ saved: boolean }> {
+  return apiFetch("/api/v1/settings/signature", { method: "PUT", body: JSON.stringify(sig) }, token);
 }

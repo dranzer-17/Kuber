@@ -88,13 +88,13 @@ export async function GET(req: NextRequest) {
   const parsed = LeadListQuerySchema.safeParse(sp);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
-  const { country, email_status, lead_source, organization_id, email_domain_catchall, page, limit } = parsed.data;
+  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, page, limit } = parsed.data;
   const db = createAdminClient();
 
   let q = db
     .from("leads")
     .select(
-      `*, organizations(id, name, domain, description, unsubscribed, has_scraped, primary_products, competitors, news_summary, intent_signals, enrichment_stage, company_description, sells_to, last_error),
+      `*, organizations(id, name, domain, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error),
        campaign_leads(crm_status, interest_status, created_at, campaigns(id, name))`,
       { count: "exact" }
     )
@@ -105,6 +105,8 @@ export async function GET(req: NextRequest) {
   if (lead_source) q = q.eq("lead_source", lead_source);
   if (organization_id) q = q.eq("organization_id", organization_id);
   if (email_domain_catchall !== undefined) q = q.eq("email_domain_catchall", email_domain_catchall === "true");
+  if (import_id) q = q.eq("import_id", import_id);
+  if (created_after) q = q.gte("created_at", created_after);
 
   q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
 
@@ -132,7 +134,7 @@ export async function POST(req: NextRequest) {
   const parsed = CreateLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { organization_name, organization_domain, organization_industry, organization_country, email, ...leadFields } = parsed.data;
+  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, ...leadFields } = parsed.data;
   const db = createAdminClient();
 
   // Check email uniqueness
@@ -152,6 +154,14 @@ export async function POST(req: NextRequest) {
 
   const apolloId = `manual_${crypto.randomUUID()}`;
 
+  let importId: string | null = null;
+  if (batch_name?.trim()) {
+    const { data: imp } = await db.from("imports")
+      .insert({ label: batch_name.trim(), source: "manual", created_by: user.id, lead_count: 0 })
+      .select("id").single();
+    importId = imp?.id ?? null;
+  }
+
   const { data, error } = await db
     .from("leads")
     .insert({
@@ -161,12 +171,17 @@ export async function POST(req: NextRequest) {
       apollo_id: apolloId,
       lead_source: "manual",
       created_by: user.id,
+      import_id: importId,
       created_at: new Date().toISOString(),
     })
     .select()
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
+
+  if (importId) {
+    await db.from("imports").update({ lead_count: 1 }).eq("id", importId);
+  }
 
   // Fire enrichment if a domain was provided (new org will be queued)
   if (organization_domain && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {

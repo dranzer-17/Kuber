@@ -31,10 +31,6 @@ export type Lead = {
   sellsTo: string | null;
   lastError: string | null;
   hasScraped: boolean;
-  primaryProducts: string[];
-  competitors: string[];
-  newsSummary: string | null;
-  intentSignals: string[];
 };
 
 export const PIPELINE_STAGES: LeadStatus[] = [
@@ -72,28 +68,16 @@ export const STATUS_ORDER: Record<LeadStatus, number> = {
 };
 
 // The canary field: company_description (written by scrape-orgs route).
-// primary_products is checked for future-proofing but is never populated by the current scraper.
-// DO NOT add primary_products to the active scraper without also updating hasEnrichmentData.
 export function hasEnrichmentData(lead: Lead): boolean {
-  return (
-    lead.enrichmentStage === "done" &&
-    !!(lead.companyDescription || (lead.primaryProducts && lead.primaryProducts.length > 0))
-  );
+  return lead.enrichmentStage === "done" && !!lead.companyDescription;
 }
 
+/**
+ * DB trigger `compute_lead_status` is now authoritative — just return the status.
+ * See Backend.md v7 §1.3 for the trigger definition.
+ */
 export function kanbanColumnFor(lead: Lead): LeadStatus {
-  // Terminal CRM statuses take priority
-  if (lead.status === "Open")   return "Open";
-  if (lead.status === "Closed") return "Closed";
-  // No email or domain → needs manual input before enrichment can run
-  if (!lead.email || !lead.domain) return "Input Required";
-  // Enrichment failed or finished but returned no useful data → still needs input
-  if (lead.enrichmentStage === "failed") return "Input Required";
-  if (lead.enrichmentStage === "done" && !hasEnrichmentData(lead)) return "Input Required";
-  if (lead.enrichmentStage === "done")     return "Enriched";
-  if (lead.enrichmentStage === "scraping") return "New";
-  // queued or null → awaiting enrichment
-  return "New";
+  return lead.status;
 }
 
 export function isRecentlyAdded(lead: Lead): boolean {
@@ -121,8 +105,7 @@ export type InputRequiredReason = "missing_data" | "failed" | null;
 
 /** Why a lead is in Input Required — drives the card sub-color. */
 export function inputRequiredReason(lead: Lead): InputRequiredReason {
-  // Only meaningful for the Input Required column
-  if (kanbanColumnFor(lead) !== "Input Required") return null;
+  if (lead.status !== "Input Required") return null;
   if (!lead.email || !lead.domain) return "missing_data";  // yellow
   return "failed";                                          // orange (has domain, but failed/no-data)
 }

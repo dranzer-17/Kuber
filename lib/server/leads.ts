@@ -1,9 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapDbLead, type DbLead } from "@/lib/mappers";
 
-const LEAD_SELECT = `*, organizations(id, name, domain, description, unsubscribed, has_scraped,
-  primary_products, competitors, news_summary, intent_signals, enrichment_stage,
-  company_description, sells_to, last_error),
+const LEAD_SELECT = `*, organizations(id, name, domain, unsubscribed, has_scraped,
+  enrichment_stage, company_description, sells_to, last_error),
   campaign_leads(crm_status, interest_status, created_at, campaigns(id, name))`;
 
 export async function getLeads(

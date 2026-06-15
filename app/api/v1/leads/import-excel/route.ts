@@ -51,7 +51,8 @@ async function processRows(
   rows: Record<string, unknown>[],
   mapping: Record<string, string>,
   userId: string,
-  db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>
+  db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
+  importId?: string | null
 ) {
   const emailCol = mapping["email"];
   const firstNameCol = mapping["first_name"];
@@ -138,6 +139,7 @@ async function processRows(
         country: row.country ?? null, organization_id: orgId!,
         apollo_id: `excel_${emailHash(row.email)}`,
         lead_source: "excel", created_by: userId,
+        import_id: importId ?? null,
         created_at: new Date().toISOString(),
       });
       if (!error) insertedCount++;
@@ -162,7 +164,15 @@ export async function POST(req: NextRequest) {
   if (parsed.data.mode === "direct") {
     const { rows, mapping } = parsed.data;
     if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
-    const result = await processRows(rows, mapping, user.id, db);
+    const batchLabel = (parsed.data as any).batch_name?.trim() || `Excel import – ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short" })}`;
+    const { data: importRow } = await db.from("imports")
+      .insert({ label: batchLabel, source: "excel", created_by: user.id, lead_count: 0 })
+      .select("id").single();
+    const importId = importRow?.id ?? null;
+    const result = await processRows(rows, mapping, user.id, db, importId);
+    if (importId && result.inserted > 0) {
+      await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId);
+    }
     return ok(result);
   }
 
@@ -187,6 +197,14 @@ export async function POST(req: NextRequest) {
   // mode === "import"
   const { mapping } = parsed.data;
   if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
-  const result = await processRows(parsed_excel.rows, mapping, user.id, db);
+  const batchLabel = (parsed.data as any).batch_name?.trim() || `Excel import – ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short" })}`;
+  const { data: importRow2 } = await db.from("imports")
+    .insert({ label: batchLabel, source: "excel", created_by: user.id, lead_count: 0 })
+    .select("id").single();
+  const importId2 = importRow2?.id ?? null;
+  const result = await processRows(parsed_excel.rows, mapping, user.id, db, importId2);
+  if (importId2 && result.inserted > 0) {
+    await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId2);
+  }
   return ok(result);
 }

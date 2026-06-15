@@ -39,13 +39,8 @@ export interface DbLead {
     id: string;
     name: string;
     domain: string | null;
-    description: string | null;
     unsubscribed: boolean;
     has_scraped: boolean;
-    primary_products: string[] | null;
-    competitors: string[] | null;
-    news_summary: string | null;
-    intent_signals: string[] | null;
     enrichment_stage: string | null;
     company_description: string | null;
     sells_to: string | null;
@@ -101,14 +96,10 @@ export function mapDbLead(l: DbLead): Lead {
     createdAt: l.created_at,
     orgId: org?.id ?? null,
     enrichmentStage,
-    companyDescription: org?.company_description ?? org?.description ?? null,
+    companyDescription: org?.company_description ?? null,
     sellsTo: org?.sells_to ?? null,
     lastError: org?.last_error ?? null,
     hasScraped: org?.has_scraped ?? false,
-    primaryProducts: org?.primary_products ?? [],
-    competitors: org?.competitors ?? [],
-    newsSummary: org?.news_summary ?? null,
-    intentSignals: org?.intent_signals ?? [],
   };
 }
 
