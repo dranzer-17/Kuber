@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown,
-  List, LayoutGrid, BarChart2,
+  List, LayoutGrid, BarChart2, Paperclip, FileText, Upload,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,8 @@ import {
   reopenDraft,
   fetchCampaignReport,
   retryFailedDrafts,
+  uploadCampaignLeadAttachment,
+  removeCampaignLeadAttachment,
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
@@ -64,6 +66,12 @@ const DRAFT_STATUS_STYLE: Record<string, string> = {
   rejected:   "bg-zinc-500/10 text-zinc-400",
 };
 
+type AttachmentInfo = {
+  perLead: { name: string; size: number; mime: string } | null;
+  campaignDefault: { name: string; size: number; mime: string } | null;
+  effective: { name: string; size: number; source: "lead" | "campaign" } | null;
+};
+
 type CampaignLead = {
   id: string;
   lead_id: string;
@@ -71,6 +79,7 @@ type CampaignLead = {
   created_at: string;
   leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
   email_drafts: { id: string; subject: string | null; body: string | null; status: string } | null;
+  attachment?: AttachmentInfo;
 };
 
 type DraftProgress = {
@@ -161,6 +170,8 @@ export function CampaignDetail({
   const [reportLoading, setReportLoading] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingAll, setRetryingAll] = useState(false);
+  const leadFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingLeadAtt, setUploadingLeadAtt] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -865,6 +876,9 @@ export function CampaignDetail({
                       <p className="text-sm font-medium truncate">{name}</p>
                       <p className="text-[10px] text-muted-foreground truncate">{lead?.title || lead?.email}</p>
                     </div>
+                    {cl.attachment?.perLead && (
+                      <Paperclip className="size-3 text-blue-400 shrink-0" title={`Custom file: ${cl.attachment.perLead.name}`} />
+                    )}
                     <span className={cn(
                       "text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap",
                       "inline-flex items-center justify-center",
@@ -1032,6 +1046,84 @@ export function CampaignDetail({
                         </Button>
                       </div>
                     )}
+
+                    {/* Attachment panel */}
+                    <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Paperclip className="size-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">Attachment</span>
+                      </div>
+
+                      {selected.attachment?.effective ? (
+                        <div className="flex items-center justify-between rounded-lg border border-border bg-background p-2.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="size-4 text-muted-foreground shrink-0" />
+                            <span className="text-sm truncate">{selected.attachment.effective.name}</span>
+                            {selected.attachment.effective.size != null && (
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                ({(selected.attachment.effective.size / 1024 / 1024).toFixed(1)} MB)
+                              </span>
+                            )}
+                            <span className={cn(
+                              "ml-1 shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                              selected.attachment.effective.source === "lead"
+                                ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                : "bg-zinc-500/15 text-zinc-400 border-zinc-500/30"
+                            )}>
+                              {selected.attachment.effective.source === "lead" ? "This lead only" : "Campaign default"}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button type="button" onClick={() => leadFileRef.current?.click()}
+                                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1">
+                              Change
+                            </button>
+                            {selected.attachment.perLead && (
+                              <button type="button" onClick={async () => {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                if (!session) return;
+                                await removeCampaignLeadAttachment(session.access_token, selected.id);
+                                void loadData();
+                              }}
+                              className="text-xs text-red-400 hover:text-red-300 px-2 py-1">
+                                Use campaign default
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">No attachment will be sent with this email.</p>
+                      )}
+
+                      <input ref={leadFileRef} type="file" className="hidden"
+                             accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+                             onChange={async (e) => {
+                               const file = e.target.files?.[0];
+                               if (!file) return;
+                               if (file.size > 10 * 1024 * 1024) { setError("File exceeds 10MB"); return; }
+                               setUploadingLeadAtt(true);
+                               try {
+                                 const { data: { session } } = await supabase.auth.getSession();
+                                 if (!session) return;
+                                 await uploadCampaignLeadAttachment(session.access_token, selected.id, file);
+                                 void loadData();
+                               } catch (err) {
+                                 setError((err as Error).message);
+                               } finally {
+                                 setUploadingLeadAtt(false);
+                                 if (leadFileRef.current) leadFileRef.current.value = "";
+                               }
+                             }} />
+                      <Button variant="outline" size="sm" disabled={uploadingLeadAtt}
+                              onClick={() => leadFileRef.current?.click()}
+                              className="gap-1.5">
+                        {uploadingLeadAtt ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                        {selected.attachment?.perLead ? "Replace file for this lead" : "Use a different file for this lead"}
+                      </Button>
+                      <p className="text-[11px] text-muted-foreground">
+                        Overrides the campaign attachment for this lead only. PDF, DOC, XLS, PNG, JPG · max 10MB.
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <div className="rounded-xl border border-border bg-card p-12 text-center">

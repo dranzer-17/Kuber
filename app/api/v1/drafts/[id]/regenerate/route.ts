@@ -45,6 +45,7 @@ export async function POST(
     .from("campaign_leads")
     .select(`
       id, lead_id,
+      attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
       leads(
         id, first_name, last_name, email, title, headline, seniority, country,
         organizations(name, domain, company_description, sells_to, keywords)

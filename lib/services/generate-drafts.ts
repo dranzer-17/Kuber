@@ -29,6 +29,7 @@ type LeadRow = {
 export type CampaignLeadTarget = {
   id: string;
   lead_id: string;
+  attachment_name?: string | null;
   leads: LeadRow | LeadRow[] | null;
 };
 
@@ -94,8 +95,11 @@ export async function generateOneDraft(
 
   const signatureBlock = await resolveCampaignSignature(db, campaign ?? {});
 
-  const attachmentInstruction = campaign?.attachment_name
-    ? `\n\nIMPORTANT: A file named "${campaign.attachment_name}" is attached to this email. ` +
+  // Per-lead attachment overrides campaign default
+  const effectiveAttachmentName = target.attachment_name ?? campaign?.attachment_name ?? null;
+
+  const attachmentInstruction = effectiveAttachmentName
+    ? `\n\nIMPORTANT: A file named "${effectiveAttachmentName}" is attached to this email. ` +
       `You MUST reference it naturally in ONE sentence near the end (before the closing line), ` +
       `e.g. "I've attached our company brochure for your reference." ` +
       `Do not invent details about the file beyond that it is attached.`
@@ -148,6 +152,8 @@ export async function generateOneDraft(
       .replace(/\[Your (Title|Position)\]/gi, "")
       .replace(/\[Your Contact Information\]/gi, "")
       .replace(/\[Your Company\]/gi, "")
+      // Strip trailing sign-off the LLM adds despite SIGNATURE_INSTRUCTION
+      .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
@@ -205,6 +211,7 @@ export async function fetchDraftTargets(
     .from("campaign_leads")
     .select(`
       id, lead_id,
+      attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
       leads!inner(
         id, first_name, last_name, email, title, headline, seniority, country,
         organizations(name, domain, company_description, sells_to, keywords)

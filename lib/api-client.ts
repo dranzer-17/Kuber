@@ -466,3 +466,29 @@ export async function fetchMySignature(token: string): Promise<{ full_name: stri
 export async function saveMySignature(token: string, sig: { full_name: string; title: string; contact: string }): Promise<{ saved: boolean }> {
   return apiFetch("/api/v1/settings/signature", { method: "PUT", body: JSON.stringify(sig) }, token);
 }
+
+// ─── Per-lead Attachment Override ──────────────────────────────────────────────
+
+export async function uploadCampaignLeadAttachment(
+  token: string,
+  campaignLeadId: string,
+  file: File,
+): Promise<{ attachment_name: string; attachment_size: number; attachment_mime: string; attachment_url: string | null }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/v1/campaign-leads/${campaignLeadId}/attachment`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error?.message ?? "Upload failed");
+  return json.data;
+}
+
+export async function removeCampaignLeadAttachment(
+  token: string,
+  campaignLeadId: string,
+): Promise<{ cleared: boolean }> {
+  return apiFetch(`/api/v1/campaign-leads/${campaignLeadId}/attachment`, { method: "DELETE" }, token);
+}

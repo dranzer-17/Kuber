@@ -37,6 +37,7 @@ export type Campaign = {
   sendDays?: Record<string, boolean>;
   aiPromptContext?: string;
   senderName?: string;
+  attachmentName?: string;
 };
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {

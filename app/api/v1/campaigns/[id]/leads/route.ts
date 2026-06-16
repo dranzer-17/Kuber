@@ -17,10 +17,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { crm_status, page, limit } = parsed.data;
   const db = createAdminClient();
 
+  // Fetch campaign default attachment (once)
+  const { data: campaign } = await db
+    .from("campaigns")
+    .select("attachment_name, attachment_size, attachment_mime")
+    .eq("id", id).maybeSingle();
+
   let q = db
     .from("campaign_leads")
     .select(
-      "*, leads(first_name, last_name, email, email_status, title, country, email_domain_catchall, organization_id), email_drafts(id, subject, body, status)",
+      `*, attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
+       leads(first_name, last_name, email, email_status, title, country, email_domain_catchall, organization_id),
+       email_drafts(id, subject, body, status)`,
       { count: "exact" }
     )
     .eq("campaign_id", id);
@@ -31,7 +39,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data, error, count } = await q;
   if (error) return fail(500, "INTERNAL", error.message);
 
-  return ok({ campaign_leads: data, total: count, page, limit });
+  // Compute resolved attachment per lead
+  const items = (data ?? []).map((cl: Record<string, unknown>) => ({
+    ...cl,
+    attachment: {
+      perLead: cl.attachment_name
+        ? { name: cl.attachment_name, size: cl.attachment_size, mime: cl.attachment_mime }
+        : null,
+      campaignDefault: campaign?.attachment_name
+        ? { name: campaign.attachment_name, size: campaign.attachment_size, mime: campaign.attachment_mime }
+        : null,
+      effective: cl.attachment_name
+        ? { name: cl.attachment_name, size: cl.attachment_size, source: "lead" as const }
+        : campaign?.attachment_name
+        ? { name: campaign.attachment_name, size: campaign.attachment_size, source: "campaign" as const }
+        : null,
+    },
+  }));
+
+  return ok({ campaign_leads: items, total: count, page, limit });
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

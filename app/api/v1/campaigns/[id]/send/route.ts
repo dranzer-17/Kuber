@@ -29,7 +29,7 @@ export async function POST(
   const db = createAdminClient();
   const { data: campaign } = await db
     .from("campaigns")
-    .select("name, human_in_loop, instantly_campaign_id, daily_limit, window_from, window_to, schedule_timezone, send_days, sender_name, sent_count")
+    .select("name, human_in_loop, instantly_campaign_id, daily_limit, window_from, window_to, schedule_timezone, send_days, sender_name, sent_count, attachment_path, attachment_name")
     .eq("id", id)
     .single();
 
@@ -42,6 +42,7 @@ export async function POST(
     .from("campaign_leads")
     .select(`
       id, lead_id, draft_id,
+      attachment_path, attachment_name,
       leads(id, first_name, last_name, email),
       email_drafts!inner(id, subject, body, status)
     `)
@@ -71,9 +72,23 @@ export async function POST(
   type LeadData = { id: string; first_name: string | null; last_name: string | null; email: string | null };
   type DraftData = { id: string; subject: string | null; body: string | null; status: string };
 
-  const emails = rows.map((row) => {
+  const emails = await Promise.all(rows.map(async (row) => {
     const lead = (Array.isArray(row.leads) ? row.leads[0] : row.leads) as LeadData | null;
     const draft = (Array.isArray(row.email_drafts) ? row.email_drafts[0] : row.email_drafts) as DraftData | null;
+
+    // Resolve per-lead → campaign attachment path + generate fresh signed URL
+    const attachmentPath = (row as Record<string, unknown>).attachment_path as string | null
+      ?? campaign.attachment_path ?? null;
+    let attachmentUrl: string | null = null;
+    let attachmentName: string | null = (row as Record<string, unknown>).attachment_name as string | null
+      ?? campaign.attachment_name ?? null;
+    if (attachmentPath) {
+      const { data: signed } = await db.storage
+        .from("campaign-attachments")
+        .createSignedUrl(attachmentPath, 60 * 60);
+      attachmentUrl = signed?.signedUrl ?? null;
+    }
+
     return {
       campaignLeadId: row.id,
       draftId: draft!.id,
@@ -82,8 +97,10 @@ export async function POST(
       lastName: lead!.last_name ?? "",
       subject: draft!.subject!,
       body: draft!.body!,
+      attachmentUrl,
+      attachmentName,
     };
-  });
+  }));
 
   const sendDays = (campaign.send_days as Record<string, boolean> | null) ?? DEFAULT_SEND_DAYS;
 
