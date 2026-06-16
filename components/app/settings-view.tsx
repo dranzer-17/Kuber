@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TagInput } from "@/components/app/lead-forms";
-import { fetchSettings, patchSettings } from "@/lib/api-client";
+import { fetchLogo, fetchSettings, patchSettings, removeLogo, uploadLogo } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -186,6 +186,9 @@ export function SettingsView() {
   const [clientProducts, setClientProducts] = useState<string[]>([]);
   const [targetMarkets,  setTargetMarkets ] = useState("");
   const [systemPrompt,   setSystemPrompt  ] = useState("");
+  const [logoPath,       setLogoPath      ] = useState<string | null>(null);
+  const [logoUrl,        setLogoUrl       ] = useState<string | null>(null);
+  const [logoUploading,  setLogoUploading ] = useState(false);
 
   // Signature fields
   const [sigName,    setSigName   ] = useState("");
@@ -221,6 +224,10 @@ export function SettingsView() {
         setSigName(s.signature_name ?? "");
         setSigTitle(s.signature_title ?? "");
         setSigContact(s.signature_contact ?? "");
+
+        const l = await fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
+        setLogoPath(l.logo_path);
+        setLogoUrl(l.logo_url);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -229,6 +236,41 @@ export function SettingsView() {
     }
     void load();
   }, []);
+
+  async function handleLogoPick(file: File | null) {
+    if (!file) return;
+    setLogoUploading(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await uploadLogo(token, file);
+      setLogoPath(res.logo_path);
+      setLogoUrl(res.logo_url);
+      await patchSettings(token, { brand_logo_path: res.logo_path });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
+  async function handleLogoRemove() {
+    setLogoUploading(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      await removeLogo(token);
+      setLogoPath(null);
+      setLogoUrl(null);
+      await patchSettings(token, { brand_logo_path: "" });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLogoUploading(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -435,6 +477,55 @@ export function SettingsView() {
                           <div className="space-y-1.5">
                             <Label>Client industry</Label>
                             <Input value={clientIndustry} onChange={(e) => setClientIndustry(e.target.value)} placeholder="Plastics & Polymer Manufacturing" />
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-border bg-secondary/10 p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold">Logo</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Upload a square logo (PNG/JPG/WebP, up to 2MB). It will appear in the app sidebar.
+                              </p>
+                            </div>
+                            {logoUrl ? (
+                              <img
+                                src={logoUrl}
+                                alt="Brand logo"
+                                className="size-10 rounded-lg border border-border bg-card object-contain shrink-0"
+                              />
+                            ) : (
+                              <div className="size-10 rounded-lg border border-border bg-card flex items-center justify-center shrink-0">
+                                <span className="text-xs font-bold text-muted-foreground">K</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-3 flex items-center gap-2 flex-wrap">
+                            <label className={cn(
+                              "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors",
+                              "h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90",
+                              logoUploading && "opacity-60 pointer-events-none",
+                            )}>
+                              {logoUploading ? "Uploading..." : (logoUrl ? "Replace logo" : "Upload logo")}
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                className="hidden"
+                                onChange={(e) => void handleLogoPick(e.target.files?.[0] ?? null)}
+                              />
+                            </label>
+
+                            {logoPath && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-9"
+                                disabled={logoUploading}
+                                onClick={() => void handleLogoRemove()}
+                              >
+                                Remove
+                              </Button>
+                            )}
                           </div>
                         </div>
                         <TagInput

@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings,
   RefreshCw, Trash2, AlertTriangle,
 } from "lucide-react";
 import { AppProvider, useApp } from "@/lib/app-context";
 import { isCampaignEligible, type Lead } from "@/lib/leads";
-import { deleteLead } from "@/lib/api-client";
+import { deleteLead, fetchLogo } from "@/lib/api-client";
 import { CreateCampaignModal } from "@/components/app/create-campaign-modal";
 import { LeadDrawer } from "@/components/app/lead-drawer";
 import { OrgDrawer } from "@/components/app/org-drawer";
@@ -108,12 +108,22 @@ function AppShell({ children }: { children: React.ReactNode }) {
     setDeleteLeadLoading,
   } = useApp();
 
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
   // Auth guard
   useEffect(() => {
     if (!loadingSession && !session) {
       router.replace("/");
     }
   }, [loadingSession, session, router]);
+
+  // Fetch signed logo URL (auth required)
+  useEffect(() => {
+    if (!session) return;
+    fetchLogo(session.access_token)
+      .then((r) => setLogoUrl(r.logo_url))
+      .catch(() => setLogoUrl(null));
+  }, [session]);
 
   if (loadingSession) {
     return (
@@ -157,9 +167,17 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <div className="h-screen flex bg-background overflow-hidden">
         <aside className="w-56 shrink-0 border-r border-border flex flex-col bg-card">
           <div className="px-4 py-5 border-b border-border flex items-center gap-2.5">
-            <div className="size-8 bg-foreground rounded-lg flex items-center justify-center">
-              <span className="text-background text-sm font-black">K</span>
-            </div>
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt="Brand logo"
+                className="size-8 rounded-lg border border-border bg-card object-contain"
+              />
+            ) : (
+              <div className="size-8 bg-foreground rounded-lg flex items-center justify-center">
+                <span className="text-background text-sm font-black">K</span>
+              </div>
+            )}
             <span className="font-bold">Kuber</span>
           </div>
           <nav className="flex-1 p-2 space-y-0.5">

@@ -386,6 +386,39 @@ export async function patchSettings(token: string, body: Record<string, string>)
   return apiFetch("/api/v1/settings", { method: "PATCH", body: JSON.stringify(body) }, token);
 }
 
+export async function fetchLogo(token: string): Promise<{ logo_path: string | null; logo_url: string | null }> {
+  return apiFetch("/api/v1/settings/logo", {}, token);
+}
+
+export async function uploadLogo(token: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/v1/settings/logo", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error?.message ?? "Upload failed");
+  return json.data as {
+    logo_path: string;
+    logo_url: string | null;
+    logo_name: string;
+    logo_mime: string;
+    logo_size: number;
+  };
+}
+
+export async function removeLogo(token: string): Promise<{ cleared: boolean }> {
+  const res = await fetch("/api/v1/settings/logo", {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error?.message ?? "Remove failed");
+  return json.data as { cleared: boolean };
+}
+
 // ─── Campaigns ────────────────────────────────────────────────────────────────
 
 export async function fetchCampaigns(token: string): Promise<Campaign[]> {
