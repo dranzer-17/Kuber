@@ -1180,6 +1180,10 @@ export function CampaignDetail({
       <OrgDrawer
         orgId={drawerOrgId}
         onClose={() => setDrawerOrgId(null)}
+        onLeadClick={(leadId) => {
+          setDrawerOrgId(null);
+          setDrawerLead({ id: leadId, firstName: "", lastName: "", email: "", company: "", domain: "", phone: "", jobTitle: "", country: "", status: "Enriched", score: "—", source: "Apollo", campaign: "", campaigns: [], createdAt: new Date().toISOString(), orgId: null, enrichmentStage: null, companyDescription: null, sellsTo: null, lastError: null, hasScraped: false, importId: null, batchLabel: null, batchColor: null });
+        }}
       />
     </div>
   );

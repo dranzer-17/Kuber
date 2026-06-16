@@ -84,10 +84,11 @@ function Section({
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export function OrgDrawer({ orgId, onClose, onAddLead }: {
+export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
   orgId: string | null;
   onClose: () => void;
   onAddLead?: (org: { id: string; name: string; industry: string; domain: string; country: string; leads: Array<{ id: string; firstName: string; lastName: string; email: string; jobTitle: string }> }) => void;
+  onLeadClick?: (leadId: string) => void;
 }) {
   const [org,     setOrg    ] = useState<OrgData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -395,8 +396,15 @@ export function OrgDrawer({ orgId, onClose, onAddLead }: {
                     ) : (
                       <div className="space-y-2">
                         {(org.leads ?? []).map((lead) => (
-                          <div key={lead.id} className="rounded-lg border border-border bg-card px-3 py-2">
-                            <p className="text-sm font-medium">
+                          <div
+                            key={lead.id}
+                            onClick={() => onLeadClick?.(lead.id)}
+                            className={cn(
+                              "rounded-lg border border-border bg-card px-3 py-2",
+                              onLeadClick && "cursor-pointer hover:bg-secondary/40 hover:border-primary/30 transition-colors",
+                            )}
+                          >
+                            <p className={cn("text-sm font-medium", onLeadClick && "group-hover:text-primary")}>
                               {[lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unnamed"}
                             </p>
                             {lead.title && <p className="text-xs text-muted-foreground">{lead.title}</p>}

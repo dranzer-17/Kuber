@@ -8,7 +8,7 @@ import {
   RefreshCw, Trash2, AlertTriangle,
 } from "lucide-react";
 import { AppProvider, useApp } from "@/lib/app-context";
-import { isCampaignEligible } from "@/lib/leads";
+import { isCampaignEligible, type Lead } from "@/lib/leads";
 import { deleteLead } from "@/lib/api-client";
 import { CreateCampaignModal } from "@/components/app/create-campaign-modal";
 import { LeadDrawer } from "@/components/app/lead-drawer";
@@ -254,6 +254,17 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <OrgDrawer
         orgId={selectedOrgId}
         onClose={() => setSelectedOrgId(null)}
+        onLeadClick={(leadId) => {
+          const found = leads.find((l) => l.id === leadId);
+          if (found) {
+            setSelectedOrgId(null);
+            setSelectedLead(found);
+          } else {
+            // Build minimal shell — LeadDrawer fetches fresh data on mount
+            setSelectedOrgId(null);
+            setSelectedLead({ id: leadId, firstName: "", lastName: "", email: "", company: "", domain: "", phone: "", jobTitle: "", country: "", status: "Enriched", score: "—", source: "Apollo", campaign: "", campaigns: [], createdAt: new Date().toISOString(), orgId: null, enrichmentStage: null, companyDescription: null, sellsTo: null, lastError: null, hasScraped: false, importId: null, batchLabel: null, batchColor: null } satisfies Lead);
+          }
+        }}
         onAddLead={(org) => {
           setSelectedOrgId(null);
           setSelectedLead(null);
