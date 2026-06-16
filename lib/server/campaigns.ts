@@ -7,7 +7,7 @@ export async function getCampaigns(db: SupabaseClient) {
     .select("*")
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((c: any) => mapDbCampaign(c as unknown as DbCampaign));
+  return (data ?? []).map((c) => mapDbCampaign(c as unknown as DbCampaign));
 }
 
 export async function getCampaign(db: SupabaseClient, id: string) {

@@ -6,13 +6,14 @@ import {
 } from "recharts";
 import {
   Activity, Award, BarChart2, Calendar, Mail,
-  Megaphone, PieChart as PieIcon,
+  Megaphone, PieChart as PieIcon, Tags,
   TrendingUp, Users, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_ORDER, type Lead } from "@/lib/leads";
-import { Avatar, StatusBadge } from "@/components/leads/lead-ui";
+import { getBatchColor } from "@/lib/constants";
 import type { Campaign } from "@/components/app/create-campaign-modal";
+import type { ImportBatch } from "@/lib/api-client";
 
 // ─── Chart helpers ────────────────────────────────────────────────────────────
 
@@ -75,10 +76,12 @@ function StatCard({
 interface DashboardViewProps {
   leads: Lead[];
   campaigns: Campaign[];
+  imports: ImportBatch[];
   onNavigate: (view: "lead-generation" | "leads" | "campaigns") => void;
+  onSelectBatch: (label: string) => void;
 }
 
-export function DashboardView({ leads, campaigns, onNavigate }: DashboardViewProps) {
+export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectBatch }: DashboardViewProps) {
   const totalLeads    = leads.length;
   const hotLeads      = leads.filter((l) => l.score === "Hot").length;
   const enrichedLeads = leads.filter((l) => STATUS_ORDER[l.status] >= 2).length;
@@ -122,8 +125,6 @@ export function DashboardView({ leads, campaigns, onNavigate }: DashboardViewPro
       color: STAGE_DONUT_COLORS[i],
     }))
     .filter((d) => d.value > 0);
-
-  const recentLeads = leads.slice(0, 5);
 
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto">
@@ -237,36 +238,43 @@ export function DashboardView({ leads, campaigns, onNavigate }: DashboardViewPro
       {/* ── Bottom row ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-        {/* Recent leads */}
+        {/* Batches */}
         <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h3 className="text-sm font-semibold">Recent Leads</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Latest additions to your pipeline</p>
+              <h3 className="text-sm font-semibold">Batches</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Click a batch to view its leads</p>
             </div>
             <div className="p-2 rounded-lg border border-border bg-secondary">
-              <Activity className="size-3.5 text-muted-foreground" />
+              <Tags className="size-3.5 text-muted-foreground" />
             </div>
           </div>
-          {recentLeads.length === 0 ? (
+          {imports.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">
-              No leads yet. Start by adding leads from the Lead Generation page.
+              No batches yet. Import leads from Apollo, Excel, or manual entry to create one.
             </p>
           ) : (
             <div className="space-y-1">
-              {recentLeads.map((l) => (
-                <div key={l.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-secondary/50 transition-colors">
-                  <Avatar name={`${l.firstName} ${l.lastName}`} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{l.firstName} {l.lastName}</p>
-                    <p className="text-xs text-muted-foreground truncate">{l.company} · {l.jobTitle}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={l.status} />
-                    <span className="text-xs text-muted-foreground">{l.createdAt}</span>
-                  </div>
-                </div>
-              ))}
+              {imports.map((b) => {
+                const bc = getBatchColor(b.color);
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => onSelectBatch(b.label)}
+                    className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-secondary/50 transition-colors text-left"
+                  >
+                    <span className={cn("size-2.5 rounded-full shrink-0", bc.bg)} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{b.label}</p>
+                      <p className="text-xs text-muted-foreground truncate capitalize">{b.source}</p>
+                    </div>
+                    <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-medium whitespace-nowrap shrink-0", bc.pill)}>
+                      {b.lead_count} lead{b.lead_count !== 1 ? "s" : ""}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>

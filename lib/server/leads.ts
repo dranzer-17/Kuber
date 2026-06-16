@@ -16,5 +16,5 @@ export async function getLeads(
   q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
   const { data, error, count } = await q;
   if (error) throw new Error(error.message);
-  return { leads: (data ?? []).map((l: any) => mapDbLead(l as unknown as DbLead)), total: count ?? 0 };
+  return { leads: (data ?? []).map((l) => mapDbLead(l as unknown as DbLead)), total: count ?? 0 };
 }

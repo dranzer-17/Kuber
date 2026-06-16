@@ -430,7 +430,7 @@ export function SettingsView() {
                           <div className="space-y-1.5">
                             <Label>Default sender name</Label>
                             <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-                            <p className="text-xs text-muted-foreground">Used as the "From" name in outreach emails.</p>
+                            <p className="text-xs text-muted-foreground">Used as the &quot;From&quot; name in outreach emails.</p>
                           </div>
                           <div className="space-y-1.5">
                             <Label>Client industry</Label>

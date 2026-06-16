@@ -6,6 +6,7 @@ import { BATCH_COLORS, getBatchColor } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { InfoTip } from "@/components/ui/info-tip";
 import { X, Users, AlertCircle } from "lucide-react";
 import type { PreviewLead } from "@/lib/api-client";
 
@@ -90,6 +91,10 @@ function BatchConfirmModalInner({
               <div className="flex items-center gap-1">
                 <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
                 <span className="text-destructive text-xs">*</span>
+                <InfoTip
+                  side="right"
+                  text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch, letting you filter, track, and build campaigns by source."
+                />
                 {batchName.trim() && (
                   <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
                     <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />

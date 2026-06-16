@@ -80,7 +80,7 @@ export async function POST(
     const attachmentPath = (row as Record<string, unknown>).attachment_path as string | null
       ?? campaign.attachment_path ?? null;
     let attachmentUrl: string | null = null;
-    let attachmentName: string | null = (row as Record<string, unknown>).attachment_name as string | null
+    const attachmentName: string | null = (row as Record<string, unknown>).attachment_name as string | null
       ?? campaign.attachment_name ?? null;
     if (attachmentPath) {
       const { data: signed } = await db.storage
