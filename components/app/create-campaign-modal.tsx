@@ -229,7 +229,8 @@ export function CreateCampaignModal({
       });
 
       await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
-      await triggerDraftGeneration(token, dbCampaign.id);
+      // fire-and-forget — drafts generate in background, don't block the redirect
+      void triggerDraftGeneration(token, dbCampaign.id);
 
       const campaign = mapDbCampaign({ ...dbCampaign, total_leads: eligibleLeads.length });
       onCreated(campaign);
@@ -409,7 +410,9 @@ export function CreateCampaignModal({
                     <FileText className="size-4 text-muted-foreground shrink-0" />
                     <span className="text-sm truncate">{attachment.attachment_name}</span>
                     <span className="text-xs text-muted-foreground shrink-0">
-                      ({(attachment.attachment_size / 1024 / 1024).toFixed(1)} MB)
+                      ({attachment.attachment_size >= 1024 * 1024
+        ? (attachment.attachment_size / 1024 / 1024).toFixed(1) + " MB"
+        : Math.round(attachment.attachment_size / 1024) + " KB"})
                     </span>
                   </div>
                   <button type="button" onClick={removeAttachment}

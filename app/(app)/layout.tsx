@@ -226,8 +226,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
           setCampaigns((p) => [c, ...p]);
           setShowCreateCampaign(false);
           setCheckedIds(new Set());
-          if (session) void loadCampaigns(session.access_token);
-          router.push("/campaigns");
+          router.push(`/campaigns/${c.id}`);
         }}
         leads={leads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l))}
       />

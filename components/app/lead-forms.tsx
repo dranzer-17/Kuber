@@ -408,6 +408,14 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const wb   = XLSX.read(data, { type: "array" });
         const ws   = wb.Sheets[wb.SheetNames[0]];
+        // Parse as raw arrays first to find the actual header row (first non-empty row)
+        const raw  = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: "" });
+        const headerRowIdx = raw.findIndex((row) => row.some((cell) => String(cell ?? "").trim() !== ""));
+        if (headerRowIdx === -1) { setFileError("The file appears to be empty."); return; }
+        // Re-parse starting from the detected header row
+        const range = XLSX.utils.decode_range(ws["!ref"] ?? "A1");
+        range.s.r = headerRowIdx;
+        ws["!ref"] = XLSX.utils.encode_range(range);
         const json = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
         if (json.length === 0) { setFileError("The file appears to be empty."); return; }
         const cols = Object.keys(json[0]);

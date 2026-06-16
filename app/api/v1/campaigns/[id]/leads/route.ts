@@ -20,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Fetch campaign default attachment (once)
   const { data: campaign } = await db
     .from("campaigns")
-    .select("attachment_name, attachment_size, attachment_mime")
+    .select("attachment_name, attachment_size, attachment_mime, attachment_url")
     .eq("id", id).maybeSingle();
 
   let q = db
@@ -50,9 +50,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? { name: campaign.attachment_name, size: campaign.attachment_size, mime: campaign.attachment_mime }
         : null,
       effective: cl.attachment_name
-        ? { name: cl.attachment_name, size: cl.attachment_size, source: "lead" as const }
+        ? { name: cl.attachment_name, size: cl.attachment_size, url: cl.attachment_url ?? null, source: "lead" as const }
         : campaign?.attachment_name
-        ? { name: campaign.attachment_name, size: campaign.attachment_size, source: "campaign" as const }
+        ? { name: campaign.attachment_name, size: campaign.attachment_size, url: campaign.attachment_url ?? null, source: "campaign" as const }
         : null,
     },
   }));
@@ -84,43 +84,47 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const blockedNotEnriched: string[] = [];
   const skippedExisting: string[] = [];
 
-  for (const leadId of parsed.data.lead_ids) {
-    const { data: lead } = await db
-      .from("leads")
-      .select("id, email, organization_id, organizations(domain, enrichment_stage, unsubscribed)")
-      .eq("id", leadId)
-      .maybeSingle();
+  const leadIds = parsed.data.lead_ids;
 
-    if (!lead) { notFound.push(leadId); continue; }
+  // Bulk-fetch all leads in one query
+  const { data: leads } = await db
+    .from("leads")
+    .select("id, email, organization_id, organizations(domain, enrichment_stage, unsubscribed)")
+    .in("id", leadIds);
 
+  const leadMap = new Map((leads ?? []).map((l) => [l.id, l]));
+
+  // Check existing campaign_leads in bulk
+  const { data: existingCls } = await db
+    .from("campaign_leads")
+    .select("lead_id")
+    .eq("campaign_id", id)
+    .in("lead_id", leadIds);
+  const existingSet = new Set((existingCls ?? []).map((r) => r.lead_id));
+
+  const toInsert: object[] = [];
+  const now = new Date().toISOString();
+
+  for (const leadId of leadIds) {
+    if (!leadMap.has(leadId)) { notFound.push(leadId); continue; }
+    if (existingSet.has(leadId)) { skippedExisting.push(leadId); continue; }
+
+    const lead = leadMap.get(leadId)!;
     const org = Array.isArray(lead.organizations) ? lead.organizations[0] : lead.organizations;
+
     if (org?.unsubscribed) { blockedUnsubscribed.push(leadId); continue; }
 
-    const isEligible =
-      !!lead.email &&
-      !!org?.domain &&
-      org.enrichment_stage === "done";
-
+    const isEligible = !!lead.email && !!org?.domain && org.enrichment_stage === "done";
     if (!isEligible) { blockedNotEnriched.push(leadId); continue; }
 
-    const crmStatus = "enriched";
-
-    const { error } = await db.from("campaign_leads").insert({
-      campaign_id: id,
-      lead_id: leadId,
-      crm_status: crmStatus,
-      created_by: user.id,
-      created_at: new Date().toISOString(),
-    });
-
-    if (error?.code === "23505") { skippedExisting.push(leadId); continue; }
-    if (error) return fail(500, "INTERNAL", error.message);
-
+    toInsert.push({ campaign_id: id, lead_id: leadId, crm_status: "enriched", created_by: user.id, created_at: now });
     added.push(leadId);
   }
 
-  // Update total_leads counter from actual count (accurate, avoids needing an RPC)
-  if (added.length > 0) {
+  if (toInsert.length > 0) {
+    const { error } = await db.from("campaign_leads").insert(toInsert);
+    if (error) return fail(500, "INTERNAL", error.message);
+
     const { count } = await db
       .from("campaign_leads")
       .select("id", { count: "exact", head: true })

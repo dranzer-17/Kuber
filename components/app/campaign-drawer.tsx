@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
-  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown,
+  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown, ChevronRight,
   List, LayoutGrid, BarChart2, Paperclip, FileText, Upload,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -12,7 +12,7 @@ import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import {
   fetchCampaignLeads,
   fetchDraftProgress,
@@ -31,9 +31,12 @@ import {
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
+import { LeadDrawer } from "@/components/app/lead-drawer";
+import { OrgDrawer } from "@/components/app/org-drawer";
 import { supabase } from "@/lib/supabase";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
+import type { Lead } from "@/lib/leads";
 import {
   DRAFT_BADGE_SHORT,
   CAMPAIGN_STATUS_HELP,
@@ -69,7 +72,7 @@ const DRAFT_STATUS_STYLE: Record<string, string> = {
 type AttachmentInfo = {
   perLead: { name: string; size: number; mime: string } | null;
   campaignDefault: { name: string; size: number; mime: string } | null;
-  effective: { name: string; size: number; source: "lead" | "campaign" } | null;
+  effective: { name: string; size: number; url: string | null; source: "lead" | "campaign" } | null;
 };
 
 type CampaignLead = {
@@ -172,6 +175,8 @@ export function CampaignDetail({
   const [retryingAll, setRetryingAll] = useState(false);
   const leadFileRef = useRef<HTMLInputElement>(null);
   const [uploadingLeadAtt, setUploadingLeadAtt] = useState(false);
+  const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
+  const [drawerOrgId, setDrawerOrgId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -496,7 +501,7 @@ export function CampaignDetail({
       {/* Header */}
       <div className="border-b border-border px-8 py-5 shrink-0 space-y-4">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
               onClick={onBack}
@@ -505,78 +510,58 @@ export function CampaignDetail({
               <ArrowLeft className="size-4" /> All campaigns
             </button>
             <div className="h-5 w-px bg-border shrink-0" />
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="size-9 rounded-xl bg-secondary border border-border flex items-center justify-center shrink-0">
-                <Megaphone className="size-4 text-muted-foreground" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-xl font-bold truncate">{campaign.name}</h1>
-                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                  <span className={cn(
-                    "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5",
-                    STATUS_STYLES[campaign.status] ?? STATUS_STYLES.Draft,
-                  )}>{campaign.status}</span>
-                  {campaign.humanInLoop && (
-                    <span className="text-[10px] text-muted-foreground">Human review ON</span>
-                  )}
-                  {isGenerating && (
-                    <span className="text-[10px] text-amber-400 flex items-center gap-1">
-                      <Loader2 className="size-2.5 animate-spin" /> Generating drafts…
-                    </span>
-                  )}
-                </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold truncate">{campaign.name}</h1>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <span className={cn(
+                  "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5",
+                  STATUS_STYLES[campaign.status] ?? STATUS_STYLES.Draft,
+                )}>{campaign.status}</span>
+                {campaign.humanInLoop && (
+                  <span className="text-[10px] text-muted-foreground">Human review</span>
+                )}
+                {isGenerating && (
+                  <span className="text-[10px] text-amber-400 flex items-center gap-1">
+                    <Loader2 className="size-2.5 animate-spin" /> Generating…
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
             {draftReadyLeads.length > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <Button
-                  variant="outline"
-                  className="gap-1.5 shrink-0"
-                  disabled={certifying}
-                  onClick={handleCertifyAll}
-                >
-                  {certifying ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Check className="size-3.5" />
-                  )}
-                  Certify all draft-ready ({draftReadyLeads.length})
-                </Button>
-                <InfoTip text={CAMPAIGN_ACTION_HELP.certifyAll} side="bottom" />
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1">
               <Button
-                className="gap-1.5 shrink-0"
-                disabled={sending || certifiedCount === 0}
-                onClick={handleSend}
+                variant="outline"
+                size="sm"
+                disabled={certifying}
+                onClick={handleCertifyAll}
               >
-                {sending ? (
-                  <><Loader2 className="size-3.5 animate-spin" /> Sending…</>
-                ) : (
-                  <><Send className="size-3.5" /> Send certified ({certifiedCount})</>
-                )}
+                {certifying ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+                Certify all ({draftReadyLeads.length})
               </Button>
-              <InfoTip text={CAMPAIGN_ACTION_HELP.sendCertified} side="bottom" />
-            </span>
+            )}
+            <Button
+              size="sm"
+              disabled={sending || certifiedCount === 0}
+              onClick={handleSend}
+            >
+              {sending ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+              {sending ? "Sending…" : `Send (${certifiedCount})`}
+            </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-6 flex-wrap">
-          <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-4 text-sm">
             {[
-              { icon: Users, label: "Leads", value: campaign.leads },
-              { icon: Send, label: "Sent", value: campaign.sent },
-              { icon: MessageSquare, label: "Replied", value: campaign.replied },
-            ].map(({ icon: Icon, label, value }) => (
-              <div key={label} className="flex items-center gap-2">
-                <Icon className="size-3.5 text-muted-foreground" />
-                <span className="text-sm font-bold tabular-nums">{value}</span>
-                <span className="text-xs text-muted-foreground">{label}</span>
-              </div>
+              { label: "Leads", value: campaign.leads },
+              { label: "Sent", value: campaign.sent },
+              { label: "Replied", value: campaign.replied },
+            ].map(({ label, value }) => (
+              <span key={label} className="text-muted-foreground">
+                <span className="font-semibold text-foreground tabular-nums">{value}</span> {label}
+              </span>
             ))}
           </div>
 
@@ -620,63 +605,27 @@ export function CampaignDetail({
           )}
 
         </div>
-
-        {configOpen && (
-          <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden text-sm max-w-lg">
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
-              <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
-            </div>
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
-              <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
-            </div>
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
-              <span className="font-medium">{campaign.timezone ?? "—"}</span>
-            </div>
-            {activeDays.length > 0 && (
-              <div className="flex items-center justify-between px-4 py-2.5">
-                <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
-                <span className="font-medium">{activeDays.join(", ")}</span>
-              </div>
-            )}
-            {campaign.instantlyId && (
-              <div className="px-4 py-2.5">
-                <a
-                  href={`https://app.instantly.ai/app/campaign/${campaign.instantlyId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-sm text-primary hover:underline"
-                >
-                  <ExternalLink className="size-3.5" /> View in Instantly
-                </a>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* View tabs: List | Kanban | Report */}
       <div className="border-b border-border px-8 py-2 shrink-0 flex items-center justify-between">
         <div className="flex gap-1">
         {([
-          { id: "list" as const, label: "Leads", icon: List },
-          { id: "kanban" as const, label: "Kanban", icon: LayoutGrid },
-          { id: "report" as const, label: "Report", icon: BarChart2 },
-        ]).map(({ id, label, icon: Icon }) => (
+          { id: "list" as const, label: "Leads" },
+          { id: "kanban" as const, label: "Kanban" },
+          { id: "report" as const, label: "Report" },
+        ]).map(({ id, label }) => (
           <button
             key={id}
             type="button"
             onClick={() => setViewTab(id)}
             className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
               viewTab === id
                 ? "bg-secondary text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
             )}
           >
-            <Icon className="size-3.5" />
             {label}
           </button>
         ))}
@@ -694,13 +643,51 @@ export function CampaignDetail({
               <CheckCircle2 className="size-4" /> {progress.total} ready
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => setConfigOpen((o) => !o)}
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            {configOpen ? "Hide config" : "Show config"}
-          </button>
+
+          {/* Config — floating overlay anchored to button */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setConfigOpen((o) => !o)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              {configOpen ? "Hide config" : "Show config"}
+            </button>
+            {configOpen && (
+              <div className="absolute right-0 top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-xl divide-y divide-border overflow-hidden text-sm w-72">
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
+                  <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
+                </div>
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
+                  <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
+                </div>
+                <div className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
+                  <span className="font-medium">{campaign.timezone ?? "—"}</span>
+                </div>
+                {activeDays.length > 0 && (
+                  <div className="flex items-center justify-between px-4 py-2.5">
+                    <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
+                    <span className="font-medium">{activeDays.join(", ")}</span>
+                  </div>
+                )}
+                {campaign.instantlyId && (
+                  <div className="px-4 py-2.5">
+                    <a
+                      href={`https://app.instantly.ai/app/campaign/${campaign.instantlyId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm text-primary hover:underline"
+                    >
+                      <ExternalLink className="size-3.5" /> View in Instantly
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -877,7 +864,7 @@ export function CampaignDetail({
                       <p className="text-[10px] text-muted-foreground truncate">{lead?.title || lead?.email}</p>
                     </div>
                     {cl.attachment?.perLead && (
-                      <Paperclip className="size-3 text-blue-400 shrink-0" title={`Custom file: ${cl.attachment.perLead.name}`} />
+                      <Paperclip className="size-3 text-blue-400 shrink-0" aria-label={`Custom file: ${cl.attachment.perLead.name}`} />
                     )}
                     <span className={cn(
                       "text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap",
@@ -900,33 +887,67 @@ export function CampaignDetail({
               <p className="text-sm text-muted-foreground">Select a lead to review and certify their draft.</p>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto px-8 py-6">
-              <div className="max-w-2xl mx-auto space-y-6">
-                {/* Lead header */}
-                <div className="flex items-start gap-3">
-                  <Avatar name={selectedName} size="md" />
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-bold">{selectedName}</h2>
-                    <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                      <p className="text-sm text-muted-foreground">
-                        {selectedLead?.title || selectedLead?.email}
-                        {selectedLead?.country ? ` · ${selectedLead.country}` : ""}
-                      </p>
-                      <DraftStatusBadge
-                        label={getDisplayStatus(selected)}
-                        styleClass={getStatusStyle(selected)}
-                        helpText={
-                          selected.email_drafts?.status
-                            ? (CAMPAIGN_STATUS_HELP[selected.email_drafts.status] ?? CAMPAIGN_STATUS_HELP.none)
-                            : undefined
-                        }
-                      />
+            <>
+              {/* ── Lead name card — fixed, never scrolls ─────────────────── */}
+              <div className="shrink-0 border-b border-border px-8 py-4 bg-card/30">
+                <div className="max-w-2xl mx-auto">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      if (!selectedLead) return;
+                      setDrawerLead({
+                        id: selected.lead_id,
+                        firstName: selectedLead.first_name ?? "",
+                        lastName: selectedLead.last_name ?? "",
+                        email: selectedLead.email ?? "",
+                        company: "", domain: "", phone: "",
+                        jobTitle: selectedLead.title ?? "",
+                        country: selectedLead.country ?? "",
+                        status: "Enriched", score: "—", source: "Apollo",
+                        campaign: "", campaigns: [], createdAt: selected.created_at,
+                        orgId: null, enrichmentStage: null, companyDescription: null,
+                        sellsTo: null, lastError: null, hasScraped: false,
+                        importId: null, batchLabel: null, batchColor: null,
+                      });
+                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.currentTarget.click(); }}
+                    className="w-full flex items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 text-left hover:bg-secondary/40 hover:border-primary/30 transition-all group cursor-pointer"
+                  >
+                    <Avatar name={selectedName} size="md" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-base font-bold group-hover:text-primary transition-colors">{selectedName}</span>
+                        <DraftStatusBadge
+                          label={getDisplayStatus(selected)}
+                          styleClass={getStatusStyle(selected)}
+                          helpText={
+                            selected.email_drafts?.status
+                              ? (CAMPAIGN_STATUS_HELP[selected.email_drafts.status] ?? CAMPAIGN_STATUS_HELP.none)
+                              : undefined
+                          }
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground flex-wrap">
+                        {selectedLead?.title && <span>{selectedLead.title}</span>}
+                        {selectedLead?.title && selectedLead?.country && <span>·</span>}
+                        {selectedLead?.country && <span>{selectedLead.country}</span>}
+                        {selectedLead?.email && (
+                          <>
+                            {(selectedLead.title || selectedLead.country) && <span>·</span>}
+                            <span className="font-mono">{selectedLead.email}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
+                    <ChevronRight className="size-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
                   </div>
-                  {selected.email_drafts?.status === "sent" && (
-                    <CheckCircle2 className="size-5 text-green-400 shrink-0 mt-1" />
-                  )}
                 </div>
+              </div>
+
+              {/* ── Email draft — scrollable ───────────────────────────────── */}
+              <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="max-w-2xl mx-auto space-y-4">
 
                 {selected.email_drafts?.status === "generating" || regenerating ? (
                   <div className="flex flex-col items-center py-20 gap-3 rounded-xl border border-border bg-card">
@@ -946,12 +967,11 @@ export function CampaignDetail({
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Body</Label>
-                      <Textarea
+                      <RichTextEditor
                         value={editBody}
-                        onChange={(e) => setEditBody(e.target.value)}
+                        onChange={setEditBody}
                         disabled={isPreviewingHistory || selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
-                        rows={14}
-                        className="text-sm leading-relaxed resize-none"
+                        minHeight={320}
                       />
                     </div>
 
@@ -1061,7 +1081,9 @@ export function CampaignDetail({
                             <span className="text-sm truncate">{selected.attachment.effective.name}</span>
                             {selected.attachment.effective.size != null && (
                               <span className="text-xs text-muted-foreground shrink-0">
-                                ({(selected.attachment.effective.size / 1024 / 1024).toFixed(1)} MB)
+                                ({selected.attachment.effective.size >= 1024 * 1024
+                                  ? (selected.attachment.effective.size / 1024 / 1024).toFixed(1) + " MB"
+                                  : Math.round(selected.attachment.effective.size / 1024) + " KB"})
                               </span>
                             )}
                             <span className={cn(
@@ -1074,8 +1096,15 @@ export function CampaignDetail({
                             </span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            {selected.attachment.effective.url && (
+                              <button type="button"
+                                      onClick={() => window.open(selected.attachment!.effective!.url!, "_blank")}
+                                      className="text-xs text-blue-400 hover:text-blue-300 border border-blue-500/40 hover:border-blue-400/60 rounded-md px-2.5 py-1 transition-colors">
+                                View
+                              </button>
+                            )}
                             <button type="button" onClick={() => leadFileRef.current?.click()}
-                                    className="text-xs text-muted-foreground hover:text-foreground px-2 py-1">
+                                    className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-border/80 rounded-md px-2.5 py-1 transition-colors">
                               Change
                             </button>
                             {selected.attachment.perLead && (
@@ -1085,7 +1114,7 @@ export function CampaignDetail({
                                 await removeCampaignLeadAttachment(session.access_token, selected.id);
                                 void loadData();
                               }}
-                              className="text-xs text-red-400 hover:text-red-300 px-2 py-1">
+                              className="text-xs text-red-400 hover:text-red-300 border border-red-500/40 hover:border-red-400/60 rounded-md px-2.5 py-1 transition-colors">
                                 Use campaign default
                               </button>
                             )}
@@ -1135,11 +1164,23 @@ export function CampaignDetail({
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
-            </div>
+              </div>
+            </>
           )}
         </div>
       </div>
       )}
+
+      {/* Lead detail drawer — opened when name card is clicked */}
+      <LeadDrawer
+        lead={drawerLead}
+        onClose={() => setDrawerLead(null)}
+        onOrgClick={(id) => { setDrawerLead(null); setDrawerOrgId(id); }}
+      />
+      <OrgDrawer
+        orgId={drawerOrgId}
+        onClose={() => setDrawerOrgId(null)}
+      />
     </div>
   );
 }
