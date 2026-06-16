@@ -554,25 +554,6 @@ export function CampaignDetail({
           </div>
         </div>
 
-        {progress && progress.total > 0 && progressCompleted < progress.total && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="relative inline-flex size-5 items-center justify-center">
-              <Loader2 className="size-5 animate-spin text-primary" />
-            </span>
-            <span className="font-medium text-foreground">
-              {progressCompleted} out of {progress.total}
-            </span>
-            <span>drafts generated</span>
-          </div>
-        )}
-
-        {progress && progress.total > 0 && progressCompleted >= progress.total && (
-          <div className="flex items-center gap-2 text-sm text-green-500">
-            <CheckCircle2 className="size-5" />
-            <span className="font-medium">{progress.total} drafts ready</span>
-          </div>
-        )}
-
         <div className="flex items-center gap-6 flex-wrap">
           <div className="flex items-center gap-6">
             {[
@@ -627,13 +608,6 @@ export function CampaignDetail({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => setConfigOpen((o) => !o)}
-            className="text-xs text-muted-foreground hover:text-foreground ml-auto"
-          >
-            {configOpen ? "Hide config" : "Show config"}
-          </button>
         </div>
 
         {configOpen && (
@@ -673,7 +647,8 @@ export function CampaignDetail({
       </div>
 
       {/* View tabs: List | Kanban | Report */}
-      <div className="border-b border-border px-8 py-2 shrink-0 flex gap-1">
+      <div className="border-b border-border px-8 py-2 shrink-0 flex items-center justify-between">
+        <div className="flex gap-1">
         {([
           { id: "list" as const, label: "Leads", icon: List },
           { id: "kanban" as const, label: "Kanban", icon: LayoutGrid },
@@ -694,6 +669,28 @@ export function CampaignDetail({
             {label}
           </button>
         ))}
+        </div>
+
+        <div className="flex items-center gap-4">
+          {progress && progress.total > 0 && progressCompleted < progress.total && (
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              <span className="font-medium text-foreground">{progressCompleted} out of {progress.total}</span>
+            </span>
+          )}
+          {progress && progress.total > 0 && progressCompleted >= progress.total && (
+            <span className="flex items-center gap-1.5 text-sm text-green-500">
+              <CheckCircle2 className="size-4" /> {progress.total} ready
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setConfigOpen((o) => !o)}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            {configOpen ? "Hide config" : "Show config"}
+          </button>
+        </div>
       </div>
 
       {viewTab === "report" ? (

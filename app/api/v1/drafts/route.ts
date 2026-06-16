@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   let q = db
     .from("email_drafts")
     .select(
-      "*, leads(first_name, last_name, email, title, country, organizations(name, description, primary_products, keywords))",
+      "*, leads(first_name, last_name, email, title, country, organizations(name, company_description, keywords))",
       { count: "exact" }
     );
 

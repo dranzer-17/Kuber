@@ -32,11 +32,12 @@ const NAV_ITEMS: { id: Section; label: string; description: string }[] = [
 const AI_NAV_ITEMS: {
   id: AiSection;
   label: string;
+  icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { id: "context", label: "Company Context"},
-  { id: "drafts", label: "Draft Editor"},
-  { id: "footer", label: "Email Footer"},
-  { id: "knowledge", label: "Knowledge Sources"},
+  { id: "context", label: "Company Context", icon: Bot },
+  { id: "drafts", label: "Draft Editor", icon: Type },
+  { id: "footer", label: "Email Footer", icon: PenLine },
+  { id: "knowledge", label: "Knowledge Sources", icon: Lock },
 ];
 
 type EditorCommand =
@@ -345,7 +346,7 @@ export function SettingsView() {
                     : "text-muted-foreground hover:text-white hover:bg-secondary/50",
                 )}
               >
-                <Icon className="size-4 shrink-0" />
+                {Icon ? <Icon className="size-4 shrink-0" /> : <span className="size-4 shrink-0" />}
                 <span className="truncate">{label}</span>
               </button>
             ))}

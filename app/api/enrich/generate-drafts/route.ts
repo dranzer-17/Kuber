@@ -22,6 +22,9 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
 
+  // Self-heal: reset any stuck drafts/campaigns before proceeding
+  try { await db.rpc("reset_stuck_draft_generation", { stale_minutes: 5 }); } catch { /* non-fatal */ }
+
   const { data: campaign } = await db
     .from("campaigns")
     .select("id, name, human_in_loop, status, ai_prompt_context")

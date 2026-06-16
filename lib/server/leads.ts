@@ -3,7 +3,8 @@ import { mapDbLead, type DbLead } from "@/lib/mappers";
 
 const LEAD_SELECT = `*, organizations(id, name, domain, unsubscribed, has_scraped,
   enrichment_stage, company_description, sells_to, last_error),
-  campaign_leads(crm_status, interest_status, created_at, campaigns(id, name))`;
+  campaign_leads(crm_status, interest_status, created_at, campaigns(id, name)),
+  imports(id, label, color)`;
 
 export async function getLeads(
   db: SupabaseClient,

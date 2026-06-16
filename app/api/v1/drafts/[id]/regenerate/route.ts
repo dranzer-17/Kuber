@@ -47,7 +47,7 @@ export async function POST(
       id, lead_id,
       leads(
         id, first_name, last_name, email, title, headline, seniority, country,
-        organizations(name, domain, company_description, sells_to, description, primary_products, keywords)
+        organizations(name, domain, company_description, sells_to, keywords)
       )
     `)
     .eq("campaign_id", oldDraft.campaign_id)

@@ -11,8 +11,6 @@ type OrgData = {
   domain?: string | null;
   company_description?: string | null;
   sells_to?: string | null;
-  description?: string | null;
-  primary_products?: string[] | null;
   keywords?: string[] | null;
 };
 
@@ -60,9 +58,8 @@ function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?
     `Country: ${lead.country ?? "Unknown"}`,
     `Company: ${org?.name ?? "Unknown"}`,
     `Website: ${org?.domain ? `https://${org.domain}` : "N/A"}`,
-    `What they do: ${org?.company_description ?? org?.description ?? "Not available"}`,
+    `What they do: ${org?.company_description ?? "Not available"}`,
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
-    `Products: ${(org?.primary_products ?? []).join(", ") || "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
     `Kuber context: ${KUBER_CONTEXT}`,
     `Instruction: Write a complete email body. Do NOT use any bracketed placeholders like [Your Name].`,
@@ -210,7 +207,7 @@ export async function fetchDraftTargets(
       id, lead_id,
       leads!inner(
         id, first_name, last_name, email, title, headline, seniority, country,
-        organizations(name, domain, company_description, sells_to, description, primary_products, keywords)
+        organizations(name, domain, company_description, sells_to, keywords)
       )
     `)
     .eq("campaign_id", campaignId)
