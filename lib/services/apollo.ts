@@ -4,7 +4,6 @@ import {
   APOLLO_SENIORITIES,
   CONTACT_EMAIL_STATUSES,
   EMPLOYEE_RANGES,
-  LOCATION_MAP,
 } from "@/lib/constants";
 
 const BASE = "https://api.apollo.io/api/v1";
@@ -54,7 +53,7 @@ export async function searchPeople(opts: {
   };
 
   if (opts.locations.length > 0) {
-    body.person_locations = opts.locations.map((l) => LOCATION_MAP[l] ?? l);
+    body.person_locations = opts.locations;
   }
 
   const res = await fetchWithRetry(

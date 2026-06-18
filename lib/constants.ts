@@ -25,32 +25,243 @@ export const APOLLO_SENIORITIES = [
 export const ALLOWED_KEYWORDS = ["plastics", "polymer", "moulding", "packaging"] as const;
 export type AllowedKeyword = (typeof ALLOWED_KEYWORDS)[number];
 
+export type IndustryKeyword = { label: string; starred?: boolean };
+export type IndustryKeywordCategory = { id: string; label: string; emoji: string; keywords: IndustryKeyword[] };
+
+export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
+  {
+    id: "pet-bottles",
+    label: "PET Bottles & Closures",
+    emoji: "🧴",
+    keywords: [
+      { label: "Beverage Bottles (Water/Juice/CSD)", starred: true },
+      { label: "Cosmetic & Personal Care Bottles", starred: true },
+      { label: "Pharma & Agrochemical Bottles" },
+      { label: "Caps & Closures" },
+    ],
+  },
+  {
+    id: "blown-film",
+    label: "Blown Film & Flexible Packaging",
+    emoji: "📦",
+    keywords: [
+      { label: "Packaging Films (Pouches/Lamination)", starred: true },
+      { label: "Stretch & Cling Films" },
+      { label: "Agricultural Films (Mulch/Silage/Greenhouse)" },
+      { label: "Milk Pouch & Food Films" },
+      { label: "Courier Bags & Industrial Bags" },
+    ],
+  },
+  {
+    id: "blow-molding",
+    label: "Blow Molding",
+    emoji: "🪣",
+    keywords: [
+      { label: "Industrial Drums & IBCs" },
+      { label: "Water Tanks & Storage" },
+      { label: "Automotive Blow Molded Parts" },
+    ],
+  },
+  {
+    id: "injection-molding",
+    label: "Injection Molding",
+    emoji: "🔧",
+    keywords: [
+      { label: "Household Goods & Furniture", starred: true },
+      { label: "Toy Manufacturers" },
+      { label: "Industrial Parts (Crates/Pallets)" },
+    ],
+  },
+  {
+    id: "roto-molding",
+    label: "Roto Molding",
+    emoji: "🔄",
+    keywords: [
+      { label: "Roto Molding Tanks & Equipment" },
+    ],
+  },
+  {
+    id: "compounders",
+    label: "Compounders",
+    emoji: "⚗️",
+    keywords: [
+      { label: "PE/PP Commodity Compounders (PE100)", starred: true },
+      { label: "Engineering Plastic Compounders (ABS/PC/Nylon)", starred: true },
+      { label: "Recycled Plastic Compounders" },
+    ],
+  },
+  {
+    id: "recyclers",
+    label: "Recyclers",
+    emoji: "♻️",
+    keywords: [
+      { label: "PE/PP Recyclers & Reclaimers", starred: true },
+      { label: "PET Recyclers & rPET Processors" },
+    ],
+  },
+  {
+    id: "specialty",
+    label: "Specialty",
+    emoji: "⭐",
+    keywords: [
+      { label: "Mono Concentrate Users (Europe/Americas)", starred: true },
+      { label: "Black Masterbatch Buyers (General)" },
+      { label: "Pipe Manufacturers (HDPE/PPR/PVC)", starred: true },
+      { label: "Masterbatch Distributors" },
+      { label: "Masterbatch Manufacturers" },
+      { label: "Solar Film Manufacturers" },
+      { label: "Textile & Fiber Manufacturers" },
+    ],
+  },
+];
+
+export type LocationCategory = { id: string; label: string; countries: string[] };
+
+export const LOCATION_CATEGORIES: LocationCategory[] = [
+  {
+    id: "south-asia",
+    label: "South Asia",
+    countries: ["India", "Pakistan", "Bangladesh", "Sri Lanka", "Nepal", "Afghanistan", "Bhutan", "Maldives"],
+  },
+  {
+    id: "southeast-asia",
+    label: "Southeast Asia",
+    countries: ["Vietnam", "Thailand", "Indonesia", "Malaysia", "Philippines", "Singapore", "Myanmar", "Cambodia", "Laos", "Brunei", "Timor-Leste"],
+  },
+  {
+    id: "east-asia",
+    label: "East Asia",
+    countries: ["China", "Japan", "South Korea", "Taiwan", "Hong Kong", "Mongolia"],
+  },
+  {
+    id: "central-asia",
+    label: "Central Asia",
+    countries: ["Kazakhstan", "Uzbekistan", "Turkmenistan", "Kyrgyzstan", "Tajikistan"],
+  },
+  {
+    id: "middle-east",
+    label: "Middle East",
+    countries: ["UAE", "Saudi Arabia", "Turkey", "Iran", "Iraq", "Israel", "Jordan", "Kuwait", "Qatar", "Oman", "Bahrain", "Lebanon", "Syria", "Yemen", "Palestine"],
+  },
+  {
+    id: "western-europe",
+    label: "Western Europe",
+    countries: ["Germany", "France", "United Kingdom", "Italy", "Spain", "Netherlands", "Belgium", "Switzerland", "Austria", "Portugal", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Greece", "Luxembourg"],
+  },
+  {
+    id: "eastern-europe",
+    label: "Eastern Europe",
+    countries: ["Poland", "Czech Republic", "Romania", "Hungary", "Ukraine", "Russia", "Bulgaria", "Slovakia", "Croatia", "Serbia", "Belarus", "Slovenia", "Estonia", "Latvia", "Lithuania", "Albania", "Moldova", "Bosnia and Herzegovina", "North Macedonia", "Montenegro"],
+  },
+  {
+    id: "north-america",
+    label: "North America",
+    countries: ["United States", "Canada", "Mexico"],
+  },
+  {
+    id: "central-america-caribbean",
+    label: "Central America & Caribbean",
+    countries: ["Guatemala", "Honduras", "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Cuba", "Dominican Republic", "Jamaica", "Haiti", "Trinidad and Tobago", "Belize"],
+  },
+  {
+    id: "south-america",
+    label: "South America",
+    countries: ["Brazil", "Argentina", "Colombia", "Chile", "Peru", "Venezuela", "Ecuador", "Bolivia", "Paraguay", "Uruguay", "Guyana", "Suriname"],
+  },
+  {
+    id: "north-africa",
+    label: "North Africa",
+    countries: ["Egypt", "Morocco", "Algeria", "Tunisia", "Libya", "Sudan"],
+  },
+  {
+    id: "west-africa",
+    label: "West Africa",
+    countries: ["Nigeria", "Ghana", "Senegal", "Ivory Coast", "Cameroon", "Mali", "Burkina Faso", "Niger", "Guinea", "Benin", "Togo", "Sierra Leone", "Liberia", "Gambia"],
+  },
+  {
+    id: "east-africa",
+    label: "East Africa",
+    countries: ["Kenya", "Ethiopia", "Tanzania", "Uganda", "Rwanda", "Somalia", "Mozambique", "Madagascar", "Zambia", "Zimbabwe", "Malawi", "Botswana", "Namibia"],
+  },
+  {
+    id: "southern-africa",
+    label: "Southern Africa",
+    countries: ["South Africa", "Angola", "Lesotho", "Eswatini"],
+  },
+  {
+    id: "oceania",
+    label: "Oceania",
+    countries: ["Australia", "New Zealand", "Papua New Guinea", "Fiji", "Solomon Islands", "Vanuatu", "Samoa", "Tonga"],
+  },
+];
+
 export const EMPLOYEE_RANGES = ["10,200", "200,1000"];
 
 export const CONTACT_EMAIL_STATUSES = ["verified", "likely to engage"];
 
 /** Maps UI dropdown label → Apollo person_locations[] value */
 export const LOCATION_MAP: Record<string, string> = {
-  India: "India",
-  Bangladesh: "Bangladesh",
-  "Sri Lanka": "Sri Lanka",
-  Pakistan: "Pakistan",
-  "United States": "United States",
-  Poland: "Poland",
-  "Czech Republic": "Czech Republic",
-  Romania: "Romania",
-  UAE: "United Arab Emirates",
-  "Saudi Arabia": "Saudi Arabia",
-  Turkey: "Turkey",
-  Vietnam: "Vietnam",
-  Thailand: "Thailand",
-  Indonesia: "Indonesia",
-  Malaysia: "Malaysia",
-  Egypt: "Egypt",
-  Nigeria: "Nigeria",
-  Kenya: "Kenya",
-  Brazil: "Brazil",
-  Mexico: "Mexico",
+  // South Asia
+  India: "India", Pakistan: "Pakistan", Bangladesh: "Bangladesh", "Sri Lanka": "Sri Lanka",
+  Nepal: "Nepal", Afghanistan: "Afghanistan", Bhutan: "Bhutan", Maldives: "Maldives",
+  // Southeast Asia
+  Vietnam: "Vietnam", Thailand: "Thailand", Indonesia: "Indonesia", Malaysia: "Malaysia",
+  Philippines: "Philippines", Singapore: "Singapore", Myanmar: "Myanmar", Cambodia: "Cambodia",
+  Laos: "Laos", Brunei: "Brunei", "Timor-Leste": "Timor-Leste",
+  // East Asia
+  China: "China", Japan: "Japan", "South Korea": "South Korea", Taiwan: "Taiwan",
+  "Hong Kong": "Hong Kong", Mongolia: "Mongolia",
+  // Central Asia
+  Kazakhstan: "Kazakhstan", Uzbekistan: "Uzbekistan", Turkmenistan: "Turkmenistan",
+  Kyrgyzstan: "Kyrgyzstan", Tajikistan: "Tajikistan",
+  // Middle East
+  UAE: "United Arab Emirates", "Saudi Arabia": "Saudi Arabia", Turkey: "Turkey",
+  Iran: "Iran", Iraq: "Iraq", Israel: "Israel", Jordan: "Jordan", Kuwait: "Kuwait",
+  Qatar: "Qatar", Oman: "Oman", Bahrain: "Bahrain", Lebanon: "Lebanon",
+  Syria: "Syria", Yemen: "Yemen", Palestine: "Palestine",
+  // Western Europe
+  Germany: "Germany", France: "France", "United Kingdom": "United Kingdom", Italy: "Italy",
+  Spain: "Spain", Netherlands: "Netherlands", Belgium: "Belgium", Switzerland: "Switzerland",
+  Austria: "Austria", Portugal: "Portugal", Sweden: "Sweden", Norway: "Norway",
+  Denmark: "Denmark", Finland: "Finland", Ireland: "Ireland", Greece: "Greece",
+  Luxembourg: "Luxembourg",
+  // Eastern Europe
+  Poland: "Poland", "Czech Republic": "Czech Republic", Romania: "Romania", Hungary: "Hungary",
+  Ukraine: "Ukraine", Russia: "Russia", Bulgaria: "Bulgaria", Slovakia: "Slovakia",
+  Croatia: "Croatia", Serbia: "Serbia", Belarus: "Belarus", Slovenia: "Slovenia",
+  Estonia: "Estonia", Latvia: "Latvia", Lithuania: "Lithuania", Albania: "Albania",
+  Moldova: "Moldova", "Bosnia and Herzegovina": "Bosnia and Herzegovina",
+  "North Macedonia": "North Macedonia", Montenegro: "Montenegro",
+  // North America
+  "United States": "United States", Canada: "Canada", Mexico: "Mexico",
+  // Central America & Caribbean
+  Guatemala: "Guatemala", Honduras: "Honduras", "El Salvador": "El Salvador",
+  Nicaragua: "Nicaragua", "Costa Rica": "Costa Rica", Panama: "Panama", Cuba: "Cuba",
+  "Dominican Republic": "Dominican Republic", Jamaica: "Jamaica", Haiti: "Haiti",
+  "Trinidad and Tobago": "Trinidad and Tobago", Belize: "Belize",
+  // South America
+  Brazil: "Brazil", Argentina: "Argentina", Colombia: "Colombia", Chile: "Chile",
+  Peru: "Peru", Venezuela: "Venezuela", Ecuador: "Ecuador", Bolivia: "Bolivia",
+  Paraguay: "Paraguay", Uruguay: "Uruguay", Guyana: "Guyana", Suriname: "Suriname",
+  // North Africa
+  Egypt: "Egypt", Morocco: "Morocco", Algeria: "Algeria", Tunisia: "Tunisia",
+  Libya: "Libya", Sudan: "Sudan",
+  // West Africa
+  Nigeria: "Nigeria", Ghana: "Ghana", Senegal: "Senegal", "Ivory Coast": "Ivory Coast",
+  Cameroon: "Cameroon", Mali: "Mali", "Burkina Faso": "Burkina Faso", Niger: "Niger",
+  Guinea: "Guinea", Benin: "Benin", Togo: "Togo", "Sierra Leone": "Sierra Leone",
+  Liberia: "Liberia", Gambia: "Gambia",
+  // East Africa
+  Kenya: "Kenya", Ethiopia: "Ethiopia", Tanzania: "Tanzania", Uganda: "Uganda",
+  Rwanda: "Rwanda", Somalia: "Somalia", Mozambique: "Mozambique", Madagascar: "Madagascar",
+  Zambia: "Zambia", Zimbabwe: "Zimbabwe", Malawi: "Malawi", Botswana: "Botswana",
+  Namibia: "Namibia",
+  // Southern Africa
+  "South Africa": "South Africa", Angola: "Angola", Lesotho: "Lesotho", Eswatini: "Eswatini",
+  // Oceania
+  Australia: "Australia", "New Zealand": "New Zealand", "Papua New Guinea": "Papua New Guinea",
+  Fiji: "Fiji", "Solomon Islands": "Solomon Islands", Vanuatu: "Vanuatu",
+  Samoa: "Samoa", Tonga: "Tonga",
 };
 
 /** Default timezone per country when lead.time_zone is absent */

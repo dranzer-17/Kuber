@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ALLOWED_KEYWORDS } from "@/lib/constants";
 
 export const CreateLeadSchema = z.object({
   first_name: z.string().optional(),

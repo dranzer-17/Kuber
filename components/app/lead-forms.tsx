@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { AlertCircle, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ALLOWED_KEYWORDS, LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES } from "@/lib/constants";
+import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES } from "@/lib/constants";
 import { apolloPreview, importExcelDirect, createLead, patchLead, patchOrg, type PreviewLead } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
@@ -83,7 +83,7 @@ export function TagInput({
         {required && <span className="text-destructive ml-1">*</span>}
       </Label>
       <div
-        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-transparent px-3 py-2 cursor-text focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-shadow"
+        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-transparent px-3 py-2 cursor-text focus-within:ring-1 focus-within:ring-ring focus-within:border-transparent transition-shadow"
         onClick={() => !maxReached && inputRef.current?.focus()}
       >
         {pills.map((p) => (
@@ -132,26 +132,459 @@ async function getToken(): Promise<string> {
   return data.session?.access_token ?? "";
 }
 
+// ─── IndustryKeywordsDropdown ─────────────────────────────────────────────────
+
+const ALL_INDUSTRY_KEYWORDS = INDUSTRY_KEYWORD_CATEGORIES.flatMap((c) => c.keywords.map((k) => k.label));
+
+function IndustryKeywordsDropdown({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const customInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const customKeywords = selected.filter((kw) => !ALL_INDUSTRY_KEYWORDS.includes(kw));
+
+  const displayCategories: Array<{ id: string; label: string; keywords: { label: string }[] }> = [
+    ...INDUSTRY_KEYWORD_CATEGORIES,
+    ...(customKeywords.length > 0
+      ? [{ id: "custom", label: "Custom Keywords", keywords: customKeywords.map((label) => ({ label })) }]
+      : []),
+  ];
+
+  function toggleKw(label: string) {
+    onChange(selected.includes(label) ? selected.filter((s) => s !== label) : [...selected, label]);
+  }
+
+  function toggleCategoryKws(kws: string[]) {
+    const allSelected = kws.every((k) => selected.includes(k));
+    if (allSelected) {
+      onChange(selected.filter((s) => !kws.includes(s)));
+    } else {
+      onChange([...selected, ...kws.filter((k) => !selected.includes(k))]);
+    }
+  }
+
+  function addCustomKeyword() {
+    const kw = customInput.trim();
+    if (!kw || selected.includes(kw)) return;
+    onChange([...selected, kw]);
+    setCustomInput("");
+    customInputRef.current?.focus();
+  }
+
+  const selectedCount = selected.length;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label>
+          Industry Segments <span className="text-destructive ml-0.5">*</span>
+        </Label>
+        {selectedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear all ({selectedCount})
+          </button>
+        )}
+      </div>
+
+      <div ref={ref} className="relative">
+        {/* Trigger */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left",
+            open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
+            "bg-transparent",
+          )}
+        >
+          <span className={selectedCount === 0 ? "text-muted-foreground/60" : "text-foreground"}>
+            {selectedCount === 0
+              ? "Select industry segments…"
+              : `${selectedCount} segment${selectedCount !== 1 ? "s" : ""} selected`}
+          </span>
+          <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        {/* Panel */}
+        {open && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                {selectedCount > 0 ? `${selectedCount} of ${ALL_INDUSTRY_KEYWORDS.length} selected` : "Select industry segments"}
+              </p>
+              <button
+                type="button"
+                onClick={() => onChange([...ALL_INDUSTRY_KEYWORDS])}
+                className="text-[11px] text-primary hover:underline font-medium"
+              >
+                Select all
+              </button>
+            </div>
+
+            {/* 3-column grid of categories */}
+            <div className="grid grid-cols-3 max-h-72 overflow-y-auto">
+              {(() => {
+                type CatItem = { id: string; label: string; keywords: { label: string }[] };
+                const cols: CatItem[][] = [[], [], []];
+                displayCategories.forEach((cat, i) => cols[i % 3].push(cat));
+                return cols.map((col, ci) => (
+                  <div key={ci} className={cn("flex flex-col", ci < 2 && "border-r border-border")}>
+                    {col.map((cat, catIdx) => {
+                      const catKws = cat.keywords.map((k) => k.label);
+                      const allCatSelected = catKws.every((k) => selected.includes(k));
+                      const someCatSelected = catKws.some((k) => selected.includes(k));
+                      const isCustom = cat.id === "custom";
+                      return (
+                        <div key={cat.id} className={cn("px-3 pt-3 pb-2", catIdx > 0 && "border-t border-border/60", isCustom && "bg-amber-500/5")}>
+                          {/* Category header — centered, bold */}
+                          <button
+                            type="button"
+                            onClick={() => toggleCategoryKws(catKws)}
+                            className="w-full flex flex-col items-center gap-1.5 mb-2 group"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "size-3.5 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                allCatSelected ? "bg-primary ring-primary" : someCatSelected ? "bg-primary/40 ring-primary/60" : "bg-transparent ring-white",
+                              )}>
+                                {(allCatSelected || someCatSelected) && (
+                                  <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />
+                                )}
+                              </span>
+                              <span className={cn(
+                                "text-[11px] font-bold uppercase tracking-wide transition-colors text-center leading-tight",
+                                isCustom ? "text-amber-400 group-hover:text-amber-300" : "text-foreground group-hover:text-primary",
+                              )}>
+                                {cat.label}
+                              </span>
+                            </div>
+                            <div className="w-full h-px bg-border/60" />
+                          </button>
+                          {/* Keywords */}
+                          <div className="space-y-0.5">
+                            {cat.keywords.map((kw) => {
+                              const checked = selected.includes(kw.label);
+                              return (
+                                <div
+                                  key={kw.label}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-2 py-1 rounded transition-colors",
+                                    checked ? "bg-primary/10" : "hover:bg-secondary/60",
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleKw(kw.label)}
+                                    className="flex items-center gap-2 flex-1 text-left min-w-0"
+                                  >
+                                    <span className={cn(
+                                      "size-3 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                      checked ? "bg-primary ring-primary" : "bg-transparent ring-white",
+                                    )}>
+                                      {checked && (
+                                        <Check className="size-2 text-primary-foreground" strokeWidth={3} />
+                                      )}
+                                    </span>
+                                    <span className={cn("text-xs leading-tight truncate", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
+                                      {kw.label}
+                                    </span>
+                                  </button>
+                                  {isCustom && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onChange(selected.filter((s) => s !== kw.label))}
+                                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                                      title="Remove custom keyword"
+                                    >
+                                      <X className="size-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Manual keyword input */}
+            <div className="border-t border-border px-4 py-3 bg-secondary/20">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Add custom keyword</p>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={customInputRef}
+                  type="text"
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); addCustomKeyword(); }
+                    if (e.key === "Escape") setOpen(false);
+                  }}
+                  placeholder="e.g. masterbatch manufacturer…"
+                  className="flex-1 bg-transparent text-xs border border-input rounded-md px-3 py-1.5 outline-none focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomKeyword}
+                  disabled={!customInput.trim() || selected.includes(customInput.trim())}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors shrink-0"
+                >
+                  <Plus className="size-3" /> Add
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-border px-4 py-2 flex items-center justify-end bg-secondary/30">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Selected pills */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {selected.map((kw) => (
+            <span key={kw} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-[10px] font-medium text-primary">
+              {kw}
+              <button type="button" onClick={() => toggleKw(kw)} className="hover:text-destructive transition-colors">
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LocationsDropdown ────────────────────────────────────────────────────────
+
+const ALL_LOCATION_KEYS = Object.keys(LOCATION_MAP);
+
+function LocationsDropdown({
+  selected,
+  onChangeSelected,
+}: {
+  selected: string[];
+  onChangeSelected: (v: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function toggleCountry(country: string) {
+    onChangeSelected(selected.includes(country) ? selected.filter((c) => c !== country) : [...selected, country]);
+  }
+
+  function toggleRegion(countries: string[]) {
+    const allSel = countries.every((c) => selected.includes(c));
+    if (allSel) onChangeSelected(selected.filter((c) => !countries.includes(c)));
+    else onChangeSelected([...selected, ...countries.filter((c) => !selected.includes(c))]);
+  }
+
+  const selectedCount = selected.length;
+  const totalCount = ALL_LOCATION_KEYS.length;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <Label>Locations</Label>
+        {selectedCount > 0 && (
+          <button type="button" onClick={() => onChangeSelected([])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+            Clear ({selectedCount})
+          </button>
+        )}
+      </div>
+
+      <div ref={ref} className="relative">
+        {/* Trigger */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left bg-transparent",
+            open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
+          )}
+        >
+          <span className={selectedCount === 0 ? "text-muted-foreground/60" : "text-foreground"}>
+            {selectedCount === 0
+              ? "Select countries… (empty = worldwide)"
+              : `${selectedCount} countr${selectedCount !== 1 ? "ies" : "y"} selected`}
+          </span>
+          <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        {/* Panel */}
+        {open && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                {selectedCount > 0 ? `${selectedCount} of ${totalCount} selected` : "Select countries by region"}
+              </p>
+              <button type="button" onClick={() => onChangeSelected([...ALL_LOCATION_KEYS])} className="text-[11px] text-primary hover:underline font-medium">
+                Select all
+              </button>
+            </div>
+
+            {/* 5-column grid of regions */}
+            <div className="grid grid-cols-5 max-h-80 overflow-y-auto">
+              {(() => {
+                const cols: (typeof LOCATION_CATEGORIES)[] = [[], [], [], [], []];
+                LOCATION_CATEGORIES.forEach((cat, i) => cols[i % 5].push(cat));
+                return cols.map((col, ci) => (
+                  <div key={ci} className={cn("flex flex-col", ci < 4 && "border-r border-border")}>
+                    {col.map((region, ri) => {
+                      const allSel = region.countries.every((c) => selected.includes(c));
+                      const someSel = region.countries.some((c) => selected.includes(c));
+                      return (
+                        <div key={region.id} className={cn("px-3 pt-3 pb-2", ri > 0 && "border-t border-border/60")}>
+                          {/* Region header */}
+                          <button
+                            type="button"
+                            onClick={() => toggleRegion(region.countries)}
+                            className="w-full flex flex-col items-center gap-1.5 mb-2 group"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "size-3.5 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                allSel ? "bg-primary ring-primary" : someSel ? "bg-primary/40 ring-primary/60" : "bg-transparent ring-white",
+                              )}>
+                                {(allSel || someSel) && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}
+                              </span>
+                              <span className="text-[11px] font-bold uppercase tracking-wide text-foreground group-hover:text-primary transition-colors text-center leading-tight">
+                                {region.label}
+                              </span>
+                            </div>
+                            <div className="w-full h-px bg-border/60" />
+                          </button>
+                          {/* Countries */}
+                          <div className="space-y-0.5">
+                            {region.countries.map((country) => {
+                              const checked = selected.includes(country);
+                              return (
+                                <button
+                                  key={country}
+                                  type="button"
+                                  onClick={() => toggleCountry(country)}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-2 py-1 rounded text-left transition-colors",
+                                    checked ? "bg-primary/10" : "hover:bg-secondary/60",
+                                  )}
+                                >
+                                  <span className={cn(
+                                    "size-3 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                    checked ? "bg-primary ring-primary" : "bg-transparent ring-white",
+                                  )}>
+                                    {checked && <Check className="size-2 text-primary-foreground" strokeWidth={3} />}
+                                  </span>
+                                  <span className={cn("text-xs leading-tight", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
+                                    {country}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-border px-4 py-2.5 flex items-center justify-end bg-secondary/20">
+              <button type="button" onClick={() => setOpen(false)} className="text-xs font-medium text-primary hover:underline">
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Selected pills */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {selected.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-primary/15 border-primary/30 text-[10px] font-medium text-primary">
+              {c}
+              <button type="button" onClick={() => toggleCountry(c)} className="hover:opacity-70 transition-opacity">
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Apollo ───────────────────────────────────────────────────────────────────
 
 export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
-  const [keywords,     setKeywords    ] = useState<string[]>([]);
-  const [positions,    setPositions   ] = useState<string[]>([]);
-  const [seniorities,  setSeniorities ] = useState<string[]>([]);
-  const [locations,    setLocations   ] = useState<string[]>([]);
-  const [maxPages,     setMaxPages    ] = useState(1);
-  const [previewing,   setPreviewing  ] = useState(false);
-  const [confirming,   setConfirming  ] = useState(false);
-  const [progressText, setProgressText] = useState("");
-  const [previewLeads, setPreviewLeads] = useState<PreviewLead[] | null>(null);
-  const [result,       setResult      ] = useState<{ inserted: number; skipped: number } | null>(null);
-  const [error,        setError       ] = useState("");
+  const [keywords,      setKeywords     ] = useState<string[]>([]);
+  const [positions,     setPositions    ] = useState<string[]>([]);
+  const [seniorities,   setSeniorities  ] = useState<string[]>([]);
+  const [locations,     setLocations    ] = useState<string[]>([]);
+  const [maxPages,      setMaxPages     ] = useState(1);
+  const [previewing,    setPreviewing   ] = useState(false);
+  const [confirming,    setConfirming   ] = useState(false);
+  const [progressText,  setProgressText ] = useState("");
+  const [previewLeads,  setPreviewLeads ] = useState<PreviewLead[] | null>(null);
+  const [result,        setResult       ] = useState<{ inserted: number; skipped: number } | null>(null);
+  const [error,         setError        ] = useState("");
 
   function toggleSen(s: string) {
     setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
   }
 
-  async function handlePreview(e: React.FormEvent) {
+  const effectiveLocations = locations.map((l) => LOCATION_MAP[l] ?? l);
+
+  async function handlePreview(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (keywords.length === 0) { setError("Please select an industry keyword."); return; }
     setError("");
@@ -160,7 +593,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
       const token = await getToken();
       const res = await apolloPreview(token, {
         keywords,
-        locations: locations.map((l) => LOCATION_MAP[l] ?? l),
+        locations: effectiveLocations,
         max_pages: maxPages,
         titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
         seniorities: seniorities.length > 0 ? seniorities : undefined,
@@ -187,7 +620,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         },
         body: JSON.stringify({
           keywords,
-          locations: locations.map((l) => LOCATION_MAP[l] ?? l),
+          locations: effectiveLocations,
           max_pages: maxPages,
           titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
           seniorities: seniorities.length > 0 ? seniorities : undefined,
@@ -251,26 +684,17 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         Search Apollo&apos;s database to find plastic &amp; polymer industry leads.
       </p>
       <form onSubmit={handlePreview} className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <TagInput
-            label="Industry Keywords"
-            pills={keywords}
-            suggestions={ALLOWED_KEYWORDS}
-            onChange={setKeywords}
-            placeholder="e.g. plastics, polymer…"
-            required
-          />
-          <div className="space-y-1.5">
-            <Label>Pages to fetch (50 leads/page)</Label>
-            <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {[1,2,3,5,10].map((n) => (
-                  <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <IndustryKeywordsDropdown selected={keywords} onChange={setKeywords} />
+        <div className="space-y-1.5">
+          <Label>Pages to fetch (50 leads/page)</Label>
+          <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {[1,2,3,5,10].map((n) => (
+                <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <TagInput label="Positions / Job Titles" pills={positions} suggestions={APOLLO_TITLES} onChange={setPositions} placeholder="e.g. VP, Plant Manager…" />
@@ -292,29 +716,10 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label>Locations</Label>
-          <Select value="" onValueChange={(v) => { if (v && !locations.includes(v)) setLocations((p) => [...p, v]); }}>
-            <SelectTrigger><SelectValue placeholder="Select a country…" /></SelectTrigger>
-            <SelectContent className="max-h-60 overflow-y-auto">
-              {Object.keys(LOCATION_MAP).filter((loc) => !locations.includes(loc)).map((loc) => (
-                <SelectItem key={loc} value={loc}>{loc}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {locations.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {locations.map((loc) => (
-                <span key={loc} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-xs font-medium text-primary">
-                  {loc}
-                  <button type="button" onClick={() => setLocations((p) => p.filter((l) => l !== loc))} className="hover:text-destructive transition-colors">
-                    <X className="size-2.5" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        <LocationsDropdown
+          selected={locations}
+          onChangeSelected={setLocations}
+        />
 
         <Button type="submit" disabled={previewing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
           <Search className="size-3.5" />
