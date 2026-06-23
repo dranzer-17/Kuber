@@ -9,9 +9,13 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES } from "@/lib/constants";
-import { apolloPreview, importExcelDirect, createLead, patchLead, patchOrg, type PreviewLead } from "@/lib/api-client";
+import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
+import { InfoTip } from "@/components/ui/info-tip";
+import { importExcelDirect, createLead, patchLead, patchOrg, type PreviewLead } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 
@@ -26,6 +30,7 @@ export function TagInput({
   allowCustom = true,
   max,
   required,
+  tip,
 }: {
   label: string;
   pills: string[];
@@ -35,6 +40,7 @@ export function TagInput({
   allowCustom?: boolean;
   max?: number;
   required?: boolean;
+  tip?: string;
 }) {
   const [query,     setQuery] = useState("");
   const [open,      setOpen ] = useState(false);
@@ -78,10 +84,13 @@ export function TagInput({
 
   return (
     <div className="space-y-1.5" ref={containerRef}>
-      <Label>
-        {label}
-        {required && <span className="text-destructive ml-1">*</span>}
-      </Label>
+      <div className="flex items-center gap-1">
+        <Label>
+          {label}
+          {required && <span className="text-destructive ml-1">*</span>}
+        </Label>
+        {tip && <InfoTip text={tip} side="right" />}
+      </div>
       <div
         className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-transparent px-3 py-2 cursor-text focus-within:ring-1 focus-within:ring-ring focus-within:border-transparent transition-shadow"
         onClick={() => !maxReached && inputRef.current?.focus()}
@@ -130,6 +139,102 @@ export function TagInput({
 async function getToken(): Promise<string> {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? "";
+}
+
+// ─── BatchNameField ───────────────────────────────────────────────────────────
+
+function BatchNameField({
+  value,
+  onChange,
+  color,
+  onColorChange,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  color: string;
+  onColorChange: (c: string) => void;
+  error?: boolean;
+}) {
+  const [swatchOpen, setSwatchOpen] = useState(false);
+  const swatchRef = useRef<HTMLDivElement>(null);
+  const c = getBatchColor(color);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (swatchRef.current && !swatchRef.current.contains(e.target as Node)) setSwatchOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Batch</p>
+      <div className="flex items-end gap-3">
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
+            <span className="text-destructive text-xs">*</span>
+            <InfoTip
+              side="right"
+              text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch."
+            />
+            {value.trim() && (
+              <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
+                <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />
+                {value}
+              </span>
+            )}
+          </div>
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="e.g. India Plastics Q3…"
+            className={cn("h-8 text-sm", error && "border-destructive focus-visible:ring-destructive")}
+          />
+          {error && (
+            <p className="text-[10px] text-destructive flex items-center gap-1">
+              <AlertCircle className="size-3 shrink-0" /> Batch name is required
+            </p>
+          )}
+        </div>
+        <div ref={swatchRef} className="relative shrink-0 space-y-1">
+          <span className="text-xs font-medium text-muted-foreground block">Colour</span>
+          <button
+            type="button"
+            onClick={() => setSwatchOpen((o) => !o)}
+            className={cn(
+              "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-transparent text-sm transition-colors hover:bg-secondary",
+              swatchOpen && "ring-2 ring-ring border-transparent",
+            )}
+          >
+            <span className={cn("size-3.5 rounded-full shrink-0", c.bg)} />
+            <span className="capitalize text-xs">{color}</span>
+          </button>
+          {swatchOpen && (
+            <div className="absolute right-0 top-full mt-1.5 z-10 rounded-xl border border-border bg-popover shadow-xl p-3.5 grid grid-cols-4 gap-3.5 w-[188px]">
+              {BATCH_COLORS.map((bc) => (
+                <button
+                  key={bc.name}
+                  type="button"
+                  title={bc.name}
+                  onClick={() => { onColorChange(bc.name); setSwatchOpen(false); }}
+                  className={cn(
+                    "size-8 rounded-full transition-all",
+                    bc.bg,
+                    color === bc.name
+                      ? "ring-2 ring-white ring-offset-2 ring-offset-popover scale-110"
+                      : "hover:scale-110 opacity-80 hover:opacity-100",
+                  )}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── IndustryKeywordsDropdown ─────────────────────────────────────────────────
@@ -191,9 +296,12 @@ function IndustryKeywordsDropdown({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <Label>
-          Industry Segments <span className="text-destructive ml-0.5">*</span>
-        </Label>
+        <div className="flex items-center gap-1">
+          <Label>
+            Industry Segments <span className="text-destructive ml-0.5">*</span>
+          </Label>
+          <InfoTip side="right" text="Keywords filter Apollo's database by industry. Use 'plastics', 'polymer', 'moulding' or 'packaging' to target the right segment. At least one is required." />
+        </div>
         {selectedCount > 0 && (
           <button
             type="button"
@@ -429,7 +537,10 @@ function LocationsDropdown({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <Label>Locations</Label>
+        <div className="flex items-center gap-1">
+          <Label>Locations</Label>
+          <InfoTip side="right" text="No selection = worldwide search. Select specific countries to narrow results, or leave empty to search globally." />
+        </div>
         {selectedCount > 0 && (
           <button type="button" onClick={() => onChangeSelected([])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
             Clear ({selectedCount})
@@ -571,11 +682,10 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [seniorities,   setSeniorities  ] = useState<string[]>([]);
   const [locations,     setLocations    ] = useState<string[]>([]);
   const [maxPages,      setMaxPages     ] = useState(1);
-  const [previewing,    setPreviewing   ] = useState(false);
-  const [confirming,    setConfirming   ] = useState(false);
-  const [progressText,  setProgressText ] = useState("");
-  const [previewLeads,  setPreviewLeads ] = useState<PreviewLead[] | null>(null);
-  const [result,        setResult       ] = useState<{ inserted: number; skipped: number } | null>(null);
+  const [batchName,     setBatchName    ] = useState("");
+  const [color,         setColor        ] = useState("violet");
+  const [batchNameError, setBatchNameError] = useState(false);
+  const [importing,     setImporting    ] = useState(false);
   const [error,         setError        ] = useState("");
 
   function toggleSen(s: string) {
@@ -584,34 +694,18 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
   const effectiveLocations = locations.map((l) => LOCATION_MAP[l] ?? l);
 
-  async function handlePreview(e: React.FormEvent<HTMLFormElement>) {
+  async function handleImport(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     if (keywords.length === 0) { setError("Please select an industry keyword."); return; }
+    if (!batchName.trim()) { setBatchNameError(true); return; }
+    setBatchNameError(false);
     setError("");
-    setPreviewing(true);
+    setImporting(true);
     try {
       const token = await getToken();
-      const res = await apolloPreview(token, {
-        keywords,
-        locations: effectiveLocations,
-        max_pages: maxPages,
-        titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
-        seniorities: seniorities.length > 0 ? seniorities : undefined,
-        batch_name: "_preview_",
-      });
-      setPreviewLeads(res.leads);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPreviewing(false);
-    }
-  }
-
-  async function handleConfirm(batchName: string, color: string) {
-    setConfirming(true);
-    setProgressText("Starting…");
-    try {
-      const token = await getToken();
+      // Await only the response headers — the server returns 200 immediately and
+      // streams progress in the background. We don't need to read the body;
+      // the server-side stream continues even after the client disconnects.
       const response = await fetch("/api/v1/leads/apollo-search", {
         method: "POST",
         headers: {
@@ -628,53 +722,12 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           color,
         }),
       });
-
-      if (!response.ok || !response.body) throw new Error(`Request failed: ${response.status}`);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalResult: { inserted: number; skipped: number } | null = null;
-      let finalError: string | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.phase === "saving") {
-              setProgressText(`Saving ${data.saved} of ${data.total} leads…`);
-            } else if (data.phase === "enriching") {
-              setProgressText(data.enriched === 0
-                ? `Enriching ${data.total} leads…`
-                : `Enriching ${data.enriched} of ${data.total}…`);
-            } else if (data.phase === "done") {
-              finalResult = { inserted: data.result.inserted, skipped: data.result.skipped };
-            } else if (data.phase === "error") {
-              finalError = data.message;
-            }
-          } catch { /* ignore malformed events */ }
-        }
-      }
-
-      setPreviewLeads(null);
-      if (finalError) throw new Error(finalError);
-      if (finalResult) {
-        setResult(finalResult);
-        if (finalResult.inserted > 0) onImport(finalResult.inserted);
-      }
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      // Redirect immediately — import runs in the background
+      onImport(0);
     } catch (e) {
-      setPreviewLeads(null);
       setError((e as Error).message);
-    } finally {
-      setConfirming(false);
-      setProgressText("");
+      setImporting(false);
     }
   }
 
@@ -683,7 +736,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
       <p className="text-sm text-muted-foreground">
         Search Apollo&apos;s database to find plastic &amp; polymer industry leads.
       </p>
-      <form onSubmit={handlePreview} className="space-y-4">
+      <form onSubmit={handleImport} className="space-y-4">
         <IndustryKeywordsDropdown selected={keywords} onChange={setKeywords} />
         <div className="space-y-1.5">
           <Label>Pages to fetch (50 leads/page)</Label>
@@ -697,10 +750,20 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           </Select>
         </div>
 
-        <TagInput label="Positions / Job Titles" pills={positions} suggestions={APOLLO_TITLES} onChange={setPositions} placeholder="e.g. VP, Plant Manager…" />
+        <TagInput
+          label="Positions / Job Titles"
+          pills={positions}
+          suggestions={APOLLO_TITLES}
+          onChange={setPositions}
+          placeholder="e.g. VP, Plant Manager…"
+          tip="Leave empty to use 40+ built-in titles. Add specific titles to narrow results to those roles only."
+        />
 
         <div className="space-y-1.5">
-          <Label>Seniority</Label>
+          <div className="flex items-center gap-1">
+            <Label>Seniority</Label>
+            <InfoTip side="right" text="Filters out junior contacts. Target decision-makers like VP, Director, or C-Suite. Leave unselected to include all levels." />
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {APOLLO_SENIORITIES.map((s) => (
               <button
@@ -721,9 +784,17 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           onChangeSelected={setLocations}
         />
 
-        <Button type="submit" disabled={previewing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
+        <BatchNameField
+          value={batchName}
+          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+          color={color}
+          onColorChange={setColor}
+          error={batchNameError}
+        />
+
+        <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
           <Search className="size-3.5" />
-          {previewing ? "Loading preview…" : "Preview leads"}
+          {importing ? "Starting import…" : "Import leads"}
         </Button>
       </form>
 
@@ -731,24 +802,6 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
           <AlertCircle className="size-3.5 shrink-0" /> {error}
         </div>
-      )}
-      {result !== null && (
-        <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-4 space-y-1">
-          <p className="text-sm font-semibold text-green-400">{result.inserted} leads imported</p>
-          <p className="text-xs text-muted-foreground">{result.skipped} duplicates skipped</p>
-        </div>
-      )}
-
-      {previewLeads !== null && (
-        <BatchConfirmModal
-          source="apollo"
-          leads={previewLeads}
-          totalCount={maxPages * 50}
-          confirming={confirming}
-          progressText={progressText}
-          onConfirm={handleConfirm}
-          onCancel={() => setPreviewLeads(null)}
-        />
       )}
     </div>
   );
@@ -781,10 +834,14 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const [headers,     setHeaders    ] = useState<string[]>([]);
   const [rows,        setRows       ] = useState<Record<string, string>[]>([]);
   const [mapping,     setMapping    ] = useState<Record<string, string>>({});
+  const [batchName,   setBatchName  ] = useState("");
+  const [color,       setColor      ] = useState("violet");
+  const [batchNameError, setBatchNameError] = useState(false);
   const [importing,   setImporting  ] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [result,      setResult     ] = useState<ParseResult | null>(null);
-  const [fileError,   setFileError  ] = useState("");
+  const [showConfirm,     setShowConfirm    ] = useState(false);
+  const [showRawPreview,  setShowRawPreview ] = useState(false);
+  const [result,          setResult         ] = useState<ParseResult | null>(null);
+  const [fileError,       setFileError      ] = useState("");
 
   function tryAutoMap(cols: string[]): Record<string, string> {
     const auto: Record<string, string> = {};
@@ -832,7 +889,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     reader.readAsArrayBuffer(file);
   }
 
-  async function handleConfirm(batchName: string, color: string) {
+  async function handleConfirm() {
     setImporting(true);
     try {
       const token = await getToken();
@@ -851,10 +908,11 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
 
   function reset() {
     setStage("upload"); setFileName(""); setHeaders([]); setRows([]); setMapping({});
+    setBatchName(""); setColor("violet"); setBatchNameError(false);
     setResult(null); setFileError("");
   }
 
-  const previewLeads: PreviewLead[] = rows.slice(0, 5).map((row) => ({
+  const previewLeads: PreviewLead[] = rows.map((row) => ({
     firstName: mapping.first_name           ? String(row[mapping.first_name]           ?? "") : "",
     lastName:  mapping.last_name            ? String(row[mapping.last_name]            ?? "") : "",
     email:     mapping.email                ? String(row[mapping.email]                ?? "") : "",
@@ -902,7 +960,8 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
             <p className="text-sm font-medium truncate">{fileName}</p>
             <p className="text-xs text-muted-foreground">{rows.length} rows · {headers.length} columns detected</p>
           </div>
-          <Button variant="ghost" size="sm" className="shrink-0" onClick={reset}>Change</Button>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => setShowRawPreview(true)}>View</Button>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={reset}>Change</Button>
         </div>
 
         <div className="rounded-xl border border-border overflow-hidden">
@@ -939,11 +998,26 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
           {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
         </div>
 
+        <BatchNameField
+          value={batchName}
+          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+          color={color}
+          onColorChange={setColor}
+          error={batchNameError}
+        />
+
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={reset}>Back</Button>
-            <Button disabled={!emailMapped || !firstNameMapped || !domainMapped || importing} onClick={() => setShowConfirm(true)}>
+            <Button
+              disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}
+              onClick={() => {
+                if (!batchName.trim()) { setBatchNameError(true); return; }
+                setBatchNameError(false);
+                setShowConfirm(true);
+              }}
+            >
               Preview & Import
             </Button>
           </div>
@@ -955,10 +1029,43 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
             leads={previewLeads}
             totalCount={rows.length}
             confirming={importing}
-            onConfirm={handleConfirm}
+            onConfirm={() => { void handleConfirm(); }}
             onCancel={() => setShowConfirm(false)}
           />
         )}
+
+        <Dialog open={showRawPreview} onOpenChange={setShowRawPreview}>
+          <DialogContent className="max-w-5xl w-full p-0 gap-0 flex flex-col max-h-[85vh]">
+            <DialogHeader className="px-5 py-4 border-b border-border shrink-0">
+              <DialogTitle className="text-sm font-semibold">{fileName}</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">{rows.length} rows · {headers.length} columns</p>
+            </DialogHeader>
+            <div className="flex-1 overflow-auto min-h-0">
+              <table className="text-xs border-collapse min-w-max w-full">
+                <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm z-10">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-muted-foreground border-b border-border w-10">#</th>
+                    {headers.map((h) => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground border-b border-border whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                      <td className="px-3 py-2 text-muted-foreground/60 tabular-nums">{i + 1}</td>
+                      {headers.map((h) => (
+                        <td key={h} className="px-3 py-2 text-foreground/80 max-w-[200px] truncate whitespace-nowrap" title={String(row[h] ?? "")}>
+                          {String(row[h] ?? "") || <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -1011,6 +1118,9 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
     country:  prefillOrg?.country  ?? "",
   });
   const [leads,       setLeads      ] = useState<LeadEntry[]>(prefillLeads?.length ? prefillLeads.map((l) => ({ ...l })) : [BLANK_LEAD()]);
+  const [batchName,   setBatchName  ] = useState("");
+  const [color,       setColor      ] = useState("violet");
+  const [batchNameError, setBatchNameError] = useState(false);
   const [saving,      setSaving     ] = useState(false);
   const [saved,       setSaved      ] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -1029,13 +1139,17 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
     }
     setError("");
     if (editMode) {
-      handleSaveAll("edit", "violet");
+      void handleSaveAll();
     } else {
+      if (!batchName.trim()) { setBatchNameError(true); return; }
+      setBatchNameError(false);
       setShowConfirm(true);
     }
   }
 
-  async function handleSaveAll(batchName: string, color: string) {
+  async function handleSaveAll(overrideBatchName?: string, overrideColor?: string) {
+    const resolvedBatchName = overrideBatchName ?? batchName;
+    const resolvedColor = overrideColor ?? color;
     setSaving(true);
     setError("");
     try {
@@ -1065,7 +1179,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
             title:                entry.jobTitle || undefined,
             country:              org.country || undefined,
             // all leads in this batch share one import row
-            ...(sharedImportId ? { import_id: sharedImportId } : { batch_name: batchName, color }),
+            ...(sharedImportId ? { import_id: sharedImportId } : { batch_name: resolvedBatchName, color: resolvedColor }),
           });
           if (!sharedImportId && created.import_id) sharedImportId = created.import_id;
         }
@@ -1078,6 +1192,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       if (!editMode) {
         setOrg({ name: "", industry: "", domain: "", country: "" });
         setLeads([BLANK_LEAD()]);
+        setBatchName(""); setColor("violet");
       }
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
@@ -1156,6 +1271,16 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
         </Button>
       </div>
 
+      {!editMode && (
+        <BatchNameField
+          value={batchName}
+          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+          color={color}
+          onColorChange={setColor}
+          error={batchNameError}
+        />
+      )}
+
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button type="button" disabled={saving} onClick={handleOpenConfirm}>
         {saving ? "Saving…" : editMode ? "Save changes" : "Preview & Save"}
@@ -1168,7 +1293,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
           leads={previewLeads}
           totalCount={leads.length}
           confirming={saving}
-          onConfirm={handleSaveAll}
+          onConfirm={() => { void handleSaveAll(); }}
           onCancel={() => setShowConfirm(false)}
         />
       )}

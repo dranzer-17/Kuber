@@ -36,29 +36,6 @@ function StepGuide({ steps }: { steps: Step[] }) {
   );
 }
 
-const APOLLO_STEPS: Step[] = [
-  {
-    n: 1,
-    title: "Industry keywords",
-    tip: "Keywords filter Apollo's database by industry. Use 'plastics', 'polymer', 'moulding' or 'packaging' to target the right segment. At least one is required.",
-  },
-  {
-    n: 2,
-    title: "Positions & seniority",
-    tip: "Leave titles empty to use 40+ built-in titles. Seniority filters out junior contacts — target decision-makers like VP, Director, or C-Suite.",
-  },
-  {
-    n: 3,
-    title: "Countries",
-    tip: "No selection = worldwide search. Select a few countries to include them, or switch to Exclude mode when you want all countries except a few.",
-  },
-  {
-    n: 4,
-    title: "Preview & confirm",
-    tip: "Preview fetches up to 50 sample leads so you can validate quality. Once confirmed, the full import runs in the background and streams progress.",
-  },
-];
-
 const EXCEL_STEPS: Step[] = [
   {
     n: 1,
@@ -74,24 +51,6 @@ const EXCEL_STEPS: Step[] = [
     n: 3,
     title: "Preview & import",
     tip: "Review a sample of mapped leads before importing. Duplicates are automatically skipped based on email address.",
-  },
-];
-
-const MANUAL_STEPS: Step[] = [
-  {
-    n: 1,
-    title: "Organization",
-    tip: "Enter the company the leads belong to. The domain is used for Firecrawl enrichment — it scrapes the company website for product and industry context.",
-  },
-  {
-    n: 2,
-    title: "People",
-    tip: "Add one or more contacts from this organization. Each person needs a first name and email. You can add as many leads as needed under one org.",
-  },
-  {
-    n: 3,
-    title: "Preview & save",
-    tip: "Review before saving. All leads under one org are grouped into a single import batch, making them easy to filter and manage later.",
   },
 ];
 
@@ -137,7 +96,6 @@ export default function AddLeadsPage() {
             </TabsList>
 
             <TabsContent value="apollo" className="mt-0">
-              <StepGuide steps={APOLLO_STEPS} />
               <ApolloForm onImport={handleImport} />
             </TabsContent>
 
@@ -147,7 +105,6 @@ export default function AddLeadsPage() {
             </TabsContent>
 
             <TabsContent value="manual" className="mt-0">
-              <StepGuide steps={MANUAL_STEPS} />
               <ManualForm onImport={handleImport} />
             </TabsContent>
           </Tabs>
