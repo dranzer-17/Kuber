@@ -722,9 +722,11 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           color,
         }),
       });
-      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-      // Redirect immediately — import runs in the background
-      onImport(0);
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.message ?? `Request failed: ${response.status}`);
+      // Phase 1 complete — leads are in the DB, redirect now.
+      // Email enrichment runs in the background on the server.
+      onImport(json?.data?.inserted ?? 0);
     } catch (e) {
       setError((e as Error).message);
       setImporting(false);
@@ -794,7 +796,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
         <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
           <Search className="size-3.5" />
-          {importing ? "Starting import…" : "Import leads"}
+          {importing ? "Searching & saving leads…" : "Import leads"}
         </Button>
       </form>
 

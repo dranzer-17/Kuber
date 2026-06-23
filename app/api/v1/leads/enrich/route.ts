@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
     const ids = (memberIds ?? []).map((r) => r.lead_id);
     if (ids.length === 0) return ok({ requested: 0, matched: 0, missing_apollo_ids: [], credits_consumed: 0, verified: 0, unverified: 0, remaining: 0 });
     q = q.in("id", ids).limit(parsed.data.limit);
+  } else if ("import_id" in parsed.data) {
+    q = q.eq("import_id", parsed.data.import_id);
   } else {
     q = q.in("id", parsed.data.lead_ids);
   }

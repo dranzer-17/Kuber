@@ -83,4 +83,7 @@ export const EnrichSchema = z.union([
   z.object({
     lead_ids: z.array(z.string().uuid()).min(1).max(200),
   }),
+  z.object({
+    import_id: z.string().uuid(),
+  }),
 ]);
