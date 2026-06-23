@@ -60,8 +60,8 @@ export default function AddLeadsPage() {
   const router = useRouter();
   const { session, loadLeads } = useApp();
 
-  function handleImport() {
-    if (session) void loadLeads(session.access_token);
+  async function handleImport() {
+    if (session) await loadLeads(session.access_token);
     router.push("/leads");
   }
 
