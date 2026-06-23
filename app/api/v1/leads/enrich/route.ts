@@ -48,6 +48,15 @@ export async function POST(req: NextRequest) {
 
   const stats = await enrichLeads(db, targets, 10);
 
+  // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
+  if (stats.enriched_org_ids.length > 0 && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+      method: "POST",
+      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
+    }).catch(() => {});
+  }
+
   const { count: remaining } = await db
     .from("leads").select("id", { count: "exact", head: true })
     .eq("lead_source", "apollo").eq("has_email", true).is("email", null);

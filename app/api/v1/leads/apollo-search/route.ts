@@ -194,13 +194,6 @@ export async function POST(req: NextRequest) {
     }).catch(() => {});
   }
 
-  if (newOrgIds.length > 0 && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {
-    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
-      method: "POST",
-      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
-    }).catch(() => {});
-  }
-
   if (newOrgIds.length > 0) {
     await db.from("enrichment_logs").insert({
       source: "system",
