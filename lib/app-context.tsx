@@ -122,7 +122,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const loadLeads = useCallback(async (token: string) => {
     setLoadingLeads(true);
     try {
-      const { leads } = await fetchLeads(token, { limit: 200 });
+      const { leads } = await fetchLeads(token, { limit: 2000 });
       setLeads(leads);
     } catch { /* silently ignore */ }
     finally { setLoadingLeads(false); }
