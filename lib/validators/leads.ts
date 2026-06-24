@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ALLOWED_KEYWORDS } from "@/lib/constants";
 
 export const CreateLeadSchema = z.object({
   first_name: z.string().optional(),
@@ -44,7 +43,7 @@ export const LeadListQuerySchema = z.object({
   import_id: z.string().uuid().optional(),
   created_after: z.string().datetime().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  limit: z.coerce.number().int().min(1).max(2000).default(50),
 });
 
 export const ApolloSearchSchema = z.object({
@@ -83,5 +82,8 @@ export const EnrichSchema = z.union([
   }),
   z.object({
     lead_ids: z.array(z.string().uuid()).min(1).max(200),
+  }),
+  z.object({
+    import_id: z.string().uuid(),
   }),
 ]);

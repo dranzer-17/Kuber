@@ -91,16 +91,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    async function load() {
-      const { data: { user }, error } = await supabase.auth.getUser();
+
+    // getSession() reads from localStorage — no network round trip.
+    // Use this for the initial fast render; onAuthStateChange handles everything else.
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
       if (!mounted) return;
-      if (error || !user) { setSession(null); setLoadingSession(false); return; }
-      if (!isAdminUser(user)) { await supabase.auth.signOut(); setSession(null); setLoadingSession(false); return; }
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(isValidAdminSession(session) ? session : null);
+      if (s?.user && isAdminUser(s.user) && isValidAdminSession(s)) {
+        setSession(s);
+      } else {
+        if (s?.user && !isAdminUser(s.user)) void supabase.auth.signOut();
+        setSession(null);
+      }
       setLoadingSession(false);
-    }
-    void load();
+    });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, s) => {
       if (!mounted) return;
       if (!s?.user || !isAdminUser(s.user) || !isValidAdminSession(s)) {
@@ -109,6 +113,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       setSession(s); setLoadingSession(false);
     });
+
     return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
@@ -117,7 +122,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const loadLeads = useCallback(async (token: string) => {
     setLoadingLeads(true);
     try {
-      const { leads } = await fetchLeads(token, { limit: 200 });
+      const { leads } = await fetchLeads(token, { limit: 2000 });
       setLeads(leads);
     } catch { /* silently ignore */ }
     finally { setLoadingLeads(false); }

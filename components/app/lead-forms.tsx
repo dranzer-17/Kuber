@@ -2,16 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { AlertCircle, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { ALLOWED_KEYWORDS, LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES } from "@/lib/constants";
-import { apolloPreview, importExcelDirect, createLead, patchLead, patchOrg, type PreviewLead } from "@/lib/api-client";
+import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
+import { InfoTip } from "@/components/ui/info-tip";
+import { importExcelDirect, createLead, patchLead, patchOrg, type PreviewLead } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 
@@ -26,6 +30,7 @@ export function TagInput({
   allowCustom = true,
   max,
   required,
+  tip,
 }: {
   label: string;
   pills: string[];
@@ -35,6 +40,7 @@ export function TagInput({
   allowCustom?: boolean;
   max?: number;
   required?: boolean;
+  tip?: string;
 }) {
   const [query,     setQuery] = useState("");
   const [open,      setOpen ] = useState(false);
@@ -78,12 +84,15 @@ export function TagInput({
 
   return (
     <div className="space-y-1.5" ref={containerRef}>
-      <Label>
-        {label}
-        {required && <span className="text-destructive ml-1">*</span>}
-      </Label>
+      <div className="flex items-center gap-1">
+        <Label>
+          {label}
+          {required && <span className="text-destructive ml-1">*</span>}
+        </Label>
+        {tip && <InfoTip text={tip} side="right" />}
+      </div>
       <div
-        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-transparent px-3 py-2 cursor-text focus-within:ring-2 focus-within:ring-ring focus-within:border-transparent transition-shadow"
+        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-transparent px-3 py-2 cursor-text focus-within:ring-1 focus-within:ring-ring focus-within:border-transparent transition-shadow"
         onClick={() => !maxReached && inputRef.current?.focus()}
       >
         {pills.map((p) => (
@@ -132,53 +141,571 @@ async function getToken(): Promise<string> {
   return data.session?.access_token ?? "";
 }
 
+// ─── BatchNameField ───────────────────────────────────────────────────────────
+
+function BatchNameField({
+  value,
+  onChange,
+  color,
+  onColorChange,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  color: string;
+  onColorChange: (c: string) => void;
+  error?: boolean;
+}) {
+  const [swatchOpen, setSwatchOpen] = useState(false);
+  const swatchRef = useRef<HTMLDivElement>(null);
+  const c = getBatchColor(color);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (swatchRef.current && !swatchRef.current.contains(e.target as Node)) setSwatchOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Batch</p>
+      <div className="flex items-end gap-3">
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
+            <span className="text-destructive text-xs">*</span>
+            <InfoTip
+              side="right"
+              text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch."
+            />
+            {value.trim() && (
+              <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
+                <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />
+                {value}
+              </span>
+            )}
+          </div>
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="e.g. India Plastics Q3…"
+            className={cn("h-8 text-sm", error && "border-destructive focus-visible:ring-destructive")}
+          />
+          {error && (
+            <p className="text-[10px] text-destructive flex items-center gap-1">
+              <AlertCircle className="size-3 shrink-0" /> Batch name is required
+            </p>
+          )}
+        </div>
+        <div ref={swatchRef} className="relative shrink-0 space-y-1">
+          <span className="text-xs font-medium text-muted-foreground block">Colour</span>
+          <button
+            type="button"
+            onClick={() => setSwatchOpen((o) => !o)}
+            className={cn(
+              "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-transparent text-sm transition-colors hover:bg-secondary",
+              swatchOpen && "ring-2 ring-ring border-transparent",
+            )}
+          >
+            <span className={cn("size-3.5 rounded-full shrink-0", c.bg)} />
+            <span className="capitalize text-xs">{color}</span>
+          </button>
+          {swatchOpen && (
+            <div className="absolute right-0 top-full mt-1.5 z-10 rounded-xl border border-border bg-popover shadow-xl p-3.5 grid grid-cols-4 gap-3.5 w-[188px]">
+              {BATCH_COLORS.map((bc) => (
+                <button
+                  key={bc.name}
+                  type="button"
+                  title={bc.name}
+                  onClick={() => { onColorChange(bc.name); setSwatchOpen(false); }}
+                  className={cn(
+                    "size-8 rounded-full transition-all",
+                    bc.bg,
+                    color === bc.name
+                      ? "ring-2 ring-white ring-offset-2 ring-offset-popover scale-110"
+                      : "hover:scale-110 opacity-80 hover:opacity-100",
+                  )}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── IndustryKeywordsDropdown ─────────────────────────────────────────────────
+
+const ALL_INDUSTRY_KEYWORDS = INDUSTRY_KEYWORD_CATEGORIES.flatMap((c) => c.keywords.map((k) => k.label));
+
+function IndustryKeywordsDropdown({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const customInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const customKeywords = selected.filter((kw) => !ALL_INDUSTRY_KEYWORDS.includes(kw));
+
+  const displayCategories: Array<{ id: string; label: string; keywords: { label: string }[] }> = [
+    ...INDUSTRY_KEYWORD_CATEGORIES,
+    ...(customKeywords.length > 0
+      ? [{ id: "custom", label: "Custom Keywords", keywords: customKeywords.map((label) => ({ label })) }]
+      : []),
+  ];
+
+  function toggleKw(label: string) {
+    onChange(selected.includes(label) ? selected.filter((s) => s !== label) : [...selected, label]);
+  }
+
+  function toggleCategoryKws(kws: string[]) {
+    const allSelected = kws.every((k) => selected.includes(k));
+    if (allSelected) {
+      onChange(selected.filter((s) => !kws.includes(s)));
+    } else {
+      onChange([...selected, ...kws.filter((k) => !selected.includes(k))]);
+    }
+  }
+
+  function addCustomKeyword() {
+    const kw = customInput.trim();
+    if (!kw || selected.includes(kw)) return;
+    onChange([...selected, kw]);
+    setCustomInput("");
+    customInputRef.current?.focus();
+  }
+
+  const selectedCount = selected.length;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <Label>
+            Industry Segments <span className="text-destructive ml-0.5">*</span>
+          </Label>
+          <InfoTip side="right" text="Keywords filter Apollo's database by industry. Use 'plastics', 'polymer', 'moulding' or 'packaging' to target the right segment. At least one is required." />
+        </div>
+        {selectedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Clear all ({selectedCount})
+          </button>
+        )}
+      </div>
+
+      <div ref={ref} className="relative">
+        {/* Trigger */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left",
+            open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
+            "bg-transparent",
+          )}
+        >
+          <span className={selectedCount === 0 ? "text-muted-foreground/60" : "text-foreground"}>
+            {selectedCount === 0
+              ? "Select industry segments…"
+              : `${selectedCount} segment${selectedCount !== 1 ? "s" : ""} selected`}
+          </span>
+          <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        {/* Panel */}
+        {open && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                {selectedCount > 0 ? `${selectedCount} of ${ALL_INDUSTRY_KEYWORDS.length} selected` : "Select industry segments"}
+              </p>
+              <button
+                type="button"
+                onClick={() => onChange([...ALL_INDUSTRY_KEYWORDS])}
+                className="text-[11px] text-primary hover:underline font-medium"
+              >
+                Select all
+              </button>
+            </div>
+
+            {/* 3-column grid of categories */}
+            <div className="grid grid-cols-3 max-h-72 overflow-y-auto">
+              {(() => {
+                type CatItem = { id: string; label: string; keywords: { label: string }[] };
+                const cols: CatItem[][] = [[], [], []];
+                displayCategories.forEach((cat, i) => cols[i % 3].push(cat));
+                return cols.map((col, ci) => (
+                  <div key={ci} className={cn("flex flex-col", ci < 2 && "border-r border-border")}>
+                    {col.map((cat, catIdx) => {
+                      const catKws = cat.keywords.map((k) => k.label);
+                      const allCatSelected = catKws.every((k) => selected.includes(k));
+                      const someCatSelected = catKws.some((k) => selected.includes(k));
+                      const isCustom = cat.id === "custom";
+                      return (
+                        <div key={cat.id} className={cn("px-3 pt-3 pb-2", catIdx > 0 && "border-t border-border/60", isCustom && "bg-amber-500/5")}>
+                          {/* Category header — centered, bold */}
+                          <button
+                            type="button"
+                            onClick={() => toggleCategoryKws(catKws)}
+                            className="w-full flex flex-col items-center gap-1.5 mb-2 group"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "size-3.5 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                allCatSelected ? "bg-primary ring-primary" : someCatSelected ? "bg-primary/40 ring-primary/60" : "bg-transparent ring-white",
+                              )}>
+                                {(allCatSelected || someCatSelected) && (
+                                  <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />
+                                )}
+                              </span>
+                              <span className={cn(
+                                "text-[11px] font-bold uppercase tracking-wide transition-colors text-center leading-tight",
+                                isCustom ? "text-amber-400 group-hover:text-amber-300" : "text-foreground group-hover:text-primary",
+                              )}>
+                                {cat.label}
+                              </span>
+                            </div>
+                            <div className="w-full h-px bg-border/60" />
+                          </button>
+                          {/* Keywords */}
+                          <div className="space-y-0.5">
+                            {cat.keywords.map((kw) => {
+                              const checked = selected.includes(kw.label);
+                              return (
+                                <div
+                                  key={kw.label}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-2 py-1 rounded transition-colors",
+                                    checked ? "bg-primary/10" : "hover:bg-secondary/60",
+                                  )}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleKw(kw.label)}
+                                    className="flex items-center gap-2 flex-1 text-left min-w-0"
+                                  >
+                                    <span className={cn(
+                                      "size-3 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                      checked ? "bg-primary ring-primary" : "bg-transparent ring-white",
+                                    )}>
+                                      {checked && (
+                                        <Check className="size-2 text-primary-foreground" strokeWidth={3} />
+                                      )}
+                                    </span>
+                                    <span className={cn("text-xs leading-tight truncate", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
+                                      {kw.label}
+                                    </span>
+                                  </button>
+                                  {isCustom && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onChange(selected.filter((s) => s !== kw.label))}
+                                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                                      title="Remove custom keyword"
+                                    >
+                                      <X className="size-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Manual keyword input */}
+            <div className="border-t border-border px-4 py-3 bg-secondary/20">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Add custom keyword</p>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={customInputRef}
+                  type="text"
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); addCustomKeyword(); }
+                    if (e.key === "Escape") setOpen(false);
+                  }}
+                  placeholder="e.g. masterbatch manufacturer…"
+                  className="flex-1 bg-transparent text-xs border border-input rounded-md px-3 py-1.5 outline-none focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomKeyword}
+                  disabled={!customInput.trim() || selected.includes(customInput.trim())}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors shrink-0"
+                >
+                  <Plus className="size-3" /> Add
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-border px-4 py-2 flex items-center justify-end bg-secondary/30">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Selected pills */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {selected.map((kw) => (
+            <span key={kw} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-[10px] font-medium text-primary">
+              {kw}
+              <button type="button" onClick={() => toggleKw(kw)} className="hover:text-destructive transition-colors">
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LocationsDropdown ────────────────────────────────────────────────────────
+
+const ALL_LOCATION_KEYS = Object.keys(LOCATION_MAP);
+
+function LocationsDropdown({
+  selected,
+  onChangeSelected,
+}: {
+  selected: string[];
+  onChangeSelected: (v: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function toggleCountry(country: string) {
+    onChangeSelected(selected.includes(country) ? selected.filter((c) => c !== country) : [...selected, country]);
+  }
+
+  function toggleRegion(countries: string[]) {
+    const allSel = countries.every((c) => selected.includes(c));
+    if (allSel) onChangeSelected(selected.filter((c) => !countries.includes(c)));
+    else onChangeSelected([...selected, ...countries.filter((c) => !selected.includes(c))]);
+  }
+
+  const selectedCount = selected.length;
+  const totalCount = ALL_LOCATION_KEYS.length;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Label>Locations</Label>
+          <InfoTip side="right" text="No selection = worldwide search. Select specific countries to narrow results, or leave empty to search globally." />
+        </div>
+        {selectedCount > 0 && (
+          <button type="button" onClick={() => onChangeSelected([])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+            Clear ({selectedCount})
+          </button>
+        )}
+      </div>
+
+      <div ref={ref} className="relative">
+        {/* Trigger */}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left bg-transparent",
+            open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
+          )}
+        >
+          <span className={selectedCount === 0 ? "text-muted-foreground/60" : "text-foreground"}>
+            {selectedCount === 0
+              ? "Select countries… (empty = worldwide)"
+              : `${selectedCount} countr${selectedCount !== 1 ? "ies" : "y"} selected`}
+          </span>
+          <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        {/* Panel */}
+        {open && (
+          <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                {selectedCount > 0 ? `${selectedCount} of ${totalCount} selected` : "Select countries by region"}
+              </p>
+              <button type="button" onClick={() => onChangeSelected([...ALL_LOCATION_KEYS])} className="text-[11px] text-primary hover:underline font-medium">
+                Select all
+              </button>
+            </div>
+
+            {/* 5-column grid of regions */}
+            <div className="grid grid-cols-5 max-h-80 overflow-y-auto">
+              {(() => {
+                const cols: (typeof LOCATION_CATEGORIES)[] = [[], [], [], [], []];
+                LOCATION_CATEGORIES.forEach((cat, i) => cols[i % 5].push(cat));
+                return cols.map((col, ci) => (
+                  <div key={ci} className={cn("flex flex-col", ci < 4 && "border-r border-border")}>
+                    {col.map((region, ri) => {
+                      const allSel = region.countries.every((c) => selected.includes(c));
+                      const someSel = region.countries.some((c) => selected.includes(c));
+                      return (
+                        <div key={region.id} className={cn("px-3 pt-3 pb-2", ri > 0 && "border-t border-border/60")}>
+                          {/* Region header */}
+                          <button
+                            type="button"
+                            onClick={() => toggleRegion(region.countries)}
+                            className="w-full flex flex-col items-center gap-1.5 mb-2 group"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "size-3.5 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                allSel ? "bg-primary ring-primary" : someSel ? "bg-primary/40 ring-primary/60" : "bg-transparent ring-white",
+                              )}>
+                                {(allSel || someSel) && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}
+                              </span>
+                              <span className="text-[11px] font-bold uppercase tracking-wide text-foreground group-hover:text-primary transition-colors text-center leading-tight">
+                                {region.label}
+                              </span>
+                            </div>
+                            <div className="w-full h-px bg-border/60" />
+                          </button>
+                          {/* Countries */}
+                          <div className="space-y-0.5">
+                            {region.countries.map((country) => {
+                              const checked = selected.includes(country);
+                              return (
+                                <button
+                                  key={country}
+                                  type="button"
+                                  onClick={() => toggleCountry(country)}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-2 py-1 rounded text-left transition-colors",
+                                    checked ? "bg-primary/10" : "hover:bg-secondary/60",
+                                  )}
+                                >
+                                  <span className={cn(
+                                    "size-3 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
+                                    checked ? "bg-primary ring-primary" : "bg-transparent ring-white",
+                                  )}>
+                                    {checked && <Check className="size-2 text-primary-foreground" strokeWidth={3} />}
+                                  </span>
+                                  <span className={cn("text-xs leading-tight", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
+                                    {country}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="border-t border-border px-4 py-2.5 flex items-center justify-end bg-secondary/20">
+              <button type="button" onClick={() => setOpen(false)} className="text-xs font-medium text-primary hover:underline">
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Selected pills */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-1">
+          {selected.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-primary/15 border-primary/30 text-[10px] font-medium text-primary">
+              {c}
+              <button type="button" onClick={() => toggleCountry(c)} className="hover:opacity-70 transition-opacity">
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Apollo ───────────────────────────────────────────────────────────────────
 
 export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
-  const [keywords,     setKeywords    ] = useState<string[]>([]);
-  const [positions,    setPositions   ] = useState<string[]>([]);
-  const [seniorities,  setSeniorities ] = useState<string[]>([]);
-  const [locations,    setLocations   ] = useState<string[]>([]);
-  const [maxPages,     setMaxPages    ] = useState(1);
-  const [previewing,   setPreviewing  ] = useState(false);
-  const [confirming,   setConfirming  ] = useState(false);
-  const [progressText, setProgressText] = useState("");
-  const [previewLeads, setPreviewLeads] = useState<PreviewLead[] | null>(null);
-  const [result,       setResult      ] = useState<{ inserted: number; skipped: number } | null>(null);
-  const [error,        setError       ] = useState("");
+  const [keywords,      setKeywords     ] = useState<string[]>([]);
+  const [positions,     setPositions    ] = useState<string[]>([]);
+  const [seniorities,   setSeniorities  ] = useState<string[]>([]);
+  const [locations,     setLocations    ] = useState<string[]>([]);
+  const [maxPages,      setMaxPages     ] = useState(1);
+  const [batchName,     setBatchName    ] = useState("");
+  const [color,         setColor        ] = useState("violet");
+  const [batchNameError, setBatchNameError] = useState(false);
+  const [importing,     setImporting    ] = useState(false);
+  const [error,         setError        ] = useState("");
 
   function toggleSen(s: string) {
     setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
   }
 
-  async function handlePreview(e: React.FormEvent) {
+  const effectiveLocations = locations.map((l) => LOCATION_MAP[l] ?? l);
+
+  async function handleImport(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     if (keywords.length === 0) { setError("Please select an industry keyword."); return; }
+    if (!batchName.trim()) { setBatchNameError(true); return; }
+    setBatchNameError(false);
     setError("");
-    setPreviewing(true);
+    setImporting(true);
     try {
       const token = await getToken();
-      const res = await apolloPreview(token, {
-        keywords,
-        locations: locations.map((l) => LOCATION_MAP[l] ?? l),
-        max_pages: maxPages,
-        titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
-        seniorities: seniorities.length > 0 ? seniorities : undefined,
-        batch_name: "_preview_",
-      });
-      setPreviewLeads(res.leads);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPreviewing(false);
-    }
-  }
-
-  async function handleConfirm(batchName: string, color: string) {
-    setConfirming(true);
-    setProgressText("Starting…");
-    try {
-      const token = await getToken();
+      // Await only the response headers — the server returns 200 immediately and
+      // streams progress in the background. We don't need to read the body;
+      // the server-side stream continues even after the client disconnects.
       const response = await fetch("/api/v1/leads/apollo-search", {
         method: "POST",
         headers: {
@@ -187,7 +714,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         },
         body: JSON.stringify({
           keywords,
-          locations: locations.map((l) => LOCATION_MAP[l] ?? l),
+          locations: effectiveLocations,
           max_pages: maxPages,
           titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
           seniorities: seniorities.length > 0 ? seniorities : undefined,
@@ -195,53 +722,14 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           color,
         }),
       });
-
-      if (!response.ok || !response.body) throw new Error(`Request failed: ${response.status}`);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalResult: { inserted: number; skipped: number } | null = null;
-      let finalError: string | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.phase === "saving") {
-              setProgressText(`Saving ${data.saved} of ${data.total} leads…`);
-            } else if (data.phase === "enriching") {
-              setProgressText(data.enriched === 0
-                ? `Enriching ${data.total} leads…`
-                : `Enriching ${data.enriched} of ${data.total}…`);
-            } else if (data.phase === "done") {
-              finalResult = { inserted: data.result.inserted, skipped: data.result.skipped };
-            } else if (data.phase === "error") {
-              finalError = data.message;
-            }
-          } catch { /* ignore malformed events */ }
-        }
-      }
-
-      setPreviewLeads(null);
-      if (finalError) throw new Error(finalError);
-      if (finalResult) {
-        setResult(finalResult);
-        if (finalResult.inserted > 0) onImport(finalResult.inserted);
-      }
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.message ?? `Request failed: ${response.status}`);
+      // Phase 1 complete — leads are in the DB, redirect now.
+      // Email enrichment runs in the background on the server.
+      onImport(json?.data?.inserted ?? 0);
     } catch (e) {
-      setPreviewLeads(null);
       setError((e as Error).message);
-    } finally {
-      setConfirming(false);
-      setProgressText("");
+      setImporting(false);
     }
   }
 
@@ -250,33 +738,34 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
       <p className="text-sm text-muted-foreground">
         Search Apollo&apos;s database to find plastic &amp; polymer industry leads.
       </p>
-      <form onSubmit={handlePreview} className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <TagInput
-            label="Industry Keywords"
-            pills={keywords}
-            suggestions={ALLOWED_KEYWORDS}
-            onChange={setKeywords}
-            placeholder="e.g. plastics, polymer…"
-            required
-          />
-          <div className="space-y-1.5">
-            <Label>Pages to fetch (50 leads/page)</Label>
-            <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {[1,2,3,5,10].map((n) => (
-                  <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      <form onSubmit={handleImport} className="space-y-4">
+        <IndustryKeywordsDropdown selected={keywords} onChange={setKeywords} />
+        <div className="space-y-1.5">
+          <Label>Pages to fetch (50 leads/page)</Label>
+          <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {[1,2,3,5,10].map((n) => (
+                <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        <TagInput label="Positions / Job Titles" pills={positions} suggestions={APOLLO_TITLES} onChange={setPositions} placeholder="e.g. VP, Plant Manager…" />
+        <TagInput
+          label="Positions / Job Titles"
+          pills={positions}
+          suggestions={APOLLO_TITLES}
+          onChange={setPositions}
+          placeholder="e.g. VP, Plant Manager…"
+          tip="Leave empty to use 40+ built-in titles. Add specific titles to narrow results to those roles only."
+        />
 
         <div className="space-y-1.5">
-          <Label>Seniority</Label>
+          <div className="flex items-center gap-1">
+            <Label>Seniority</Label>
+            <InfoTip side="right" text="Filters out junior contacts. Target decision-makers like VP, Director, or C-Suite. Leave unselected to include all levels." />
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {APOLLO_SENIORITIES.map((s) => (
               <button
@@ -292,33 +781,22 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label>Locations</Label>
-          <Select value="" onValueChange={(v) => { if (v && !locations.includes(v)) setLocations((p) => [...p, v]); }}>
-            <SelectTrigger><SelectValue placeholder="Select a country…" /></SelectTrigger>
-            <SelectContent className="max-h-60 overflow-y-auto">
-              {Object.keys(LOCATION_MAP).filter((loc) => !locations.includes(loc)).map((loc) => (
-                <SelectItem key={loc} value={loc}>{loc}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {locations.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {locations.map((loc) => (
-                <span key={loc} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-xs font-medium text-primary">
-                  {loc}
-                  <button type="button" onClick={() => setLocations((p) => p.filter((l) => l !== loc))} className="hover:text-destructive transition-colors">
-                    <X className="size-2.5" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        <LocationsDropdown
+          selected={locations}
+          onChangeSelected={setLocations}
+        />
 
-        <Button type="submit" disabled={previewing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
+        <BatchNameField
+          value={batchName}
+          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+          color={color}
+          onColorChange={setColor}
+          error={batchNameError}
+        />
+
+        <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
           <Search className="size-3.5" />
-          {previewing ? "Loading preview…" : "Preview leads"}
+          {importing ? "Searching & saving leads…" : "Import leads"}
         </Button>
       </form>
 
@@ -326,24 +804,6 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
           <AlertCircle className="size-3.5 shrink-0" /> {error}
         </div>
-      )}
-      {result !== null && (
-        <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-4 space-y-1">
-          <p className="text-sm font-semibold text-green-400">{result.inserted} leads imported</p>
-          <p className="text-xs text-muted-foreground">{result.skipped} duplicates skipped</p>
-        </div>
-      )}
-
-      {previewLeads !== null && (
-        <BatchConfirmModal
-          source="apollo"
-          leads={previewLeads}
-          totalCount={maxPages * 50}
-          confirming={confirming}
-          progressText={progressText}
-          onConfirm={handleConfirm}
-          onCancel={() => setPreviewLeads(null)}
-        />
       )}
     </div>
   );
@@ -376,10 +836,14 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const [headers,     setHeaders    ] = useState<string[]>([]);
   const [rows,        setRows       ] = useState<Record<string, string>[]>([]);
   const [mapping,     setMapping    ] = useState<Record<string, string>>({});
+  const [batchName,   setBatchName  ] = useState("");
+  const [color,       setColor      ] = useState("violet");
+  const [batchNameError, setBatchNameError] = useState(false);
   const [importing,   setImporting  ] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [result,      setResult     ] = useState<ParseResult | null>(null);
-  const [fileError,   setFileError  ] = useState("");
+  const [showConfirm,     setShowConfirm    ] = useState(false);
+  const [showRawPreview,  setShowRawPreview ] = useState(false);
+  const [result,          setResult         ] = useState<ParseResult | null>(null);
+  const [fileError,       setFileError      ] = useState("");
 
   function tryAutoMap(cols: string[]): Record<string, string> {
     const auto: Record<string, string> = {};
@@ -427,7 +891,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     reader.readAsArrayBuffer(file);
   }
 
-  async function handleConfirm(batchName: string, color: string) {
+  async function handleConfirm() {
     setImporting(true);
     try {
       const token = await getToken();
@@ -446,10 +910,11 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
 
   function reset() {
     setStage("upload"); setFileName(""); setHeaders([]); setRows([]); setMapping({});
+    setBatchName(""); setColor("violet"); setBatchNameError(false);
     setResult(null); setFileError("");
   }
 
-  const previewLeads: PreviewLead[] = rows.slice(0, 5).map((row) => ({
+  const previewLeads: PreviewLead[] = rows.map((row) => ({
     firstName: mapping.first_name           ? String(row[mapping.first_name]           ?? "") : "",
     lastName:  mapping.last_name            ? String(row[mapping.last_name]            ?? "") : "",
     email:     mapping.email                ? String(row[mapping.email]                ?? "") : "",
@@ -497,7 +962,8 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
             <p className="text-sm font-medium truncate">{fileName}</p>
             <p className="text-xs text-muted-foreground">{rows.length} rows · {headers.length} columns detected</p>
           </div>
-          <Button variant="ghost" size="sm" className="shrink-0" onClick={reset}>Change</Button>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => setShowRawPreview(true)}>View</Button>
+          <Button variant="outline" size="sm" className="shrink-0" onClick={reset}>Change</Button>
         </div>
 
         <div className="rounded-xl border border-border overflow-hidden">
@@ -534,11 +1000,26 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
           {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
         </div>
 
+        <BatchNameField
+          value={batchName}
+          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+          color={color}
+          onColorChange={setColor}
+          error={batchNameError}
+        />
+
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={reset}>Back</Button>
-            <Button disabled={!emailMapped || !firstNameMapped || !domainMapped || importing} onClick={() => setShowConfirm(true)}>
+            <Button
+              disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}
+              onClick={() => {
+                if (!batchName.trim()) { setBatchNameError(true); return; }
+                setBatchNameError(false);
+                setShowConfirm(true);
+              }}
+            >
               Preview & Import
             </Button>
           </div>
@@ -550,10 +1031,43 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
             leads={previewLeads}
             totalCount={rows.length}
             confirming={importing}
-            onConfirm={handleConfirm}
+            onConfirm={() => { void handleConfirm(); }}
             onCancel={() => setShowConfirm(false)}
           />
         )}
+
+        <Dialog open={showRawPreview} onOpenChange={setShowRawPreview}>
+          <DialogContent className="max-w-5xl w-full p-0 gap-0 flex flex-col max-h-[85vh]">
+            <DialogHeader className="px-5 py-4 border-b border-border shrink-0">
+              <DialogTitle className="text-sm font-semibold">{fileName}</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">{rows.length} rows · {headers.length} columns</p>
+            </DialogHeader>
+            <div className="flex-1 overflow-auto min-h-0">
+              <table className="text-xs border-collapse min-w-max w-full">
+                <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm z-10">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-muted-foreground border-b border-border w-10">#</th>
+                    {headers.map((h) => (
+                      <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground border-b border-border whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                      <td className="px-3 py-2 text-muted-foreground/60 tabular-nums">{i + 1}</td>
+                      {headers.map((h) => (
+                        <td key={h} className="px-3 py-2 text-foreground/80 max-w-[200px] truncate whitespace-nowrap" title={String(row[h] ?? "")}>
+                          {String(row[h] ?? "") || <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -606,6 +1120,9 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
     country:  prefillOrg?.country  ?? "",
   });
   const [leads,       setLeads      ] = useState<LeadEntry[]>(prefillLeads?.length ? prefillLeads.map((l) => ({ ...l })) : [BLANK_LEAD()]);
+  const [batchName,   setBatchName  ] = useState("");
+  const [color,       setColor      ] = useState("violet");
+  const [batchNameError, setBatchNameError] = useState(false);
   const [saving,      setSaving     ] = useState(false);
   const [saved,       setSaved      ] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -624,13 +1141,17 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
     }
     setError("");
     if (editMode) {
-      handleSaveAll("edit", "violet");
+      void handleSaveAll();
     } else {
+      if (!batchName.trim()) { setBatchNameError(true); return; }
+      setBatchNameError(false);
       setShowConfirm(true);
     }
   }
 
-  async function handleSaveAll(batchName: string, color: string) {
+  async function handleSaveAll(overrideBatchName?: string, overrideColor?: string) {
+    const resolvedBatchName = overrideBatchName ?? batchName;
+    const resolvedColor = overrideColor ?? color;
     setSaving(true);
     setError("");
     try {
@@ -660,7 +1181,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
             title:                entry.jobTitle || undefined,
             country:              org.country || undefined,
             // all leads in this batch share one import row
-            ...(sharedImportId ? { import_id: sharedImportId } : { batch_name: batchName, color }),
+            ...(sharedImportId ? { import_id: sharedImportId } : { batch_name: resolvedBatchName, color: resolvedColor }),
           });
           if (!sharedImportId && created.import_id) sharedImportId = created.import_id;
         }
@@ -673,6 +1194,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       if (!editMode) {
         setOrg({ name: "", industry: "", domain: "", country: "" });
         setLeads([BLANK_LEAD()]);
+        setBatchName(""); setColor("violet");
       }
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
@@ -751,6 +1273,16 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
         </Button>
       </div>
 
+      {!editMode && (
+        <BatchNameField
+          value={batchName}
+          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+          color={color}
+          onColorChange={setColor}
+          error={batchNameError}
+        />
+      )}
+
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button type="button" disabled={saving} onClick={handleOpenConfirm}>
         {saving ? "Saving…" : editMode ? "Save changes" : "Preview & Save"}
@@ -763,7 +1295,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
           leads={previewLeads}
           totalCount={leads.length}
           confirming={saving}
-          onConfirm={handleSaveAll}
+          onConfirm={() => { void handleSaveAll(); }}
           onCancel={() => setShowConfirm(false)}
         />
       )}

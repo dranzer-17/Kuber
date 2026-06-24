@@ -31,6 +31,8 @@ export async function POST(req: NextRequest) {
     const ids = (memberIds ?? []).map((r) => r.lead_id);
     if (ids.length === 0) return ok({ requested: 0, matched: 0, missing_apollo_ids: [], credits_consumed: 0, verified: 0, unverified: 0, remaining: 0 });
     q = q.in("id", ids).limit(parsed.data.limit);
+  } else if ("import_id" in parsed.data) {
+    q = q.eq("import_id", parsed.data.import_id);
   } else {
     q = q.in("id", parsed.data.lead_ids);
   }
@@ -45,6 +47,15 @@ export async function POST(req: NextRequest) {
   });
 
   const stats = await enrichLeads(db, targets, 10);
+
+  // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
+  if (stats.enriched_org_ids.length > 0 && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+      method: "POST",
+      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
+    }).catch(() => {});
+  }
 
   const { count: remaining } = await db
     .from("leads").select("id", { count: "exact", head: true })

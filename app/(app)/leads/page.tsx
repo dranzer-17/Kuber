@@ -544,8 +544,6 @@ export default function LeadsPage() {
     setCheckedIds,
     setSelectedLead,
     setSelectedOrgId,
-    setShowAddLeads,
-    setManualPrefill,
     setShowCreateCampaign,
     setDeletingLead,
   } = useApp();
@@ -772,7 +770,7 @@ export default function LeadsPage() {
             <RefreshCw className={cn("size-3.5", loadingLeads && "animate-spin")} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => setShowAddLeads(true)} className="gap-1.5">
+          <Button size="sm" onClick={() => router.push("/leads/add")} className="gap-1.5">
             <Plus className="size-3.5" /> Add leads
           </Button>
         </div>
