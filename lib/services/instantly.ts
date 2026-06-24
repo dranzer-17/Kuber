@@ -8,41 +8,122 @@ function h() {
 }
 
 async function iJson<T>(res: Response): Promise<T> {
-  const data = await res.json();
-  if (!res.ok) throw new Error((data as { message?: string }).message ?? `Instantly ${res.status}`);
+  const data = await res.json().catch(() => ({} as Record<string, unknown>));
+  if (!res.ok) {
+    const d = data as { message?: string; error?: string };
+    throw new Error(`Instantly ${res.status}: ${d.message ?? d.error ?? "request failed"}`);
+  }
   return data as T;
 }
 
-export async function createInstantlyCampaign(name: string, opts: {
+// ─── Day conversion ───────────────────────────────────────────────────────────
+// Our DB/UI stores named keys: { monday: true, ... }
+// Instantly requires numeric string keys: { "1": true, ... }, "0" = Sunday
+const DAY_NAME_TO_NUM: Record<string, string> = {
+  sunday: "0", monday: "1", tuesday: "2", wednesday: "3",
+  thursday: "4", friday: "5", saturday: "6",
+};
+
+export function toInstantlyDays(
+  sendDays: Record<string, boolean> | null | undefined,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(sendDays ?? {})) {
+    const num = DAY_NAME_TO_NUM[k.toLowerCase()] ?? (/^[0-6]$/.test(k) ? k : null);
+    if (num !== null) out[num] = !!v;
+  }
+  // Default Mon-Fri if nothing resolved
+  if (Object.keys(out).length === 0) {
+    return { "1": true, "2": true, "3": true, "4": true, "5": true, "0": false, "6": false };
+  }
+  return out;
+}
+
+// ─── Variable builder ─────────────────────────────────────────────────────────
+// Turns approved drafts (by step) into Instantly custom_variables.
+// step 1 → customSubject / customBody
+// step N>1 → customSubjectN / customBodyN
+// HTML mode: \n → <br> (see §10 for the test you must run before production)
+export function buildCustomVariables(
+  drafts: Array<{ step_number: number; subject: string | null; body: string | null }>,
+  senderName?: string | null,
+): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const d of drafts) {
+    const sfx = d.step_number === 1 ? "" : String(d.step_number);
+    if (d.subject != null) vars[`customSubject${sfx}`] = d.subject;
+    if (d.body != null)    vars[`customBody${sfx}`]    = d.body.replace(/\n/g, "<br>");
+  }
+  if (senderName) vars.senderName = senderName;
+  return vars;
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface InstantlyStep {
+  subject: string;        // empty string on follow-ups = threaded
+  body: string;
+  delay: number;          // wait before NEXT step (not the current one)
+  delayUnit?: "minutes" | "hours" | "days";
+}
+
+export interface InstantlyLeadInput {
+  email: string;
+  firstName: string;
+  lastName: string;
+  customVariables: Record<string, string>;
+}
+
+export interface BulkAddResult {
+  status: string;
+  total_sent: number;
+  leads_uploaded: number;
+  duplicated_leads?: number;
+  duplicate_email_count?: number;
+  invalid_email_count?: number;
+  skipped_count?: number;
+  created_leads?: Array<{ index: number; id: string; email: string }>;
+}
+
+// ─── Campaign CRUD ────────────────────────────────────────────────────────────
+
+export async function createInstantlyCampaign(opts: {
+  name: string;
   dailyLimit: number;
-  windowFrom: string;
-  windowTo: string;
-  timezone: string;
+  windowFrom: string;   // "09:00"
+  windowTo: string;     // "18:00"
+  timezone: string;     // IANA only
   sendDays: Record<string, boolean>;
+  steps: InstantlyStep[];
+  emailList: string[];  // sending-account emails — MUST be non-empty or campaign never sends
 }): Promise<string> {
+  if (opts.emailList.length === 0) {
+    throw new Error("createInstantlyCampaign: emailList is empty — campaign will never send");
+  }
   const res = await fetch(`${BASE}/campaigns`, {
     method: "POST",
     headers: h(),
     body: JSON.stringify({
-      name,
+      name: opts.name,
       campaign_schedule: {
         schedules: [{
           name: "Default",
           timing: { from: opts.windowFrom, to: opts.windowTo },
-          days: opts.sendDays,
+          days: toInstantlyDays(opts.sendDays),
           timezone: opts.timezone,
         }],
       },
       daily_limit: opts.dailyLimit,
+      email_list: opts.emailList,
+      stop_on_reply: true,
+      stop_on_auto_reply: false,
       sequences: [{
-        steps: [{
-          type: "email",
-          delay: 0,
-          variants: [{
-            subject: "{{customSubject}}",
-            body: "{{customBody}}",
-          }],
-        }],
+        steps: opts.steps.map((s) => ({
+          type: "email" as const,
+          delay: s.delay,
+          ...(s.delayUnit ? { delay_unit: s.delayUnit } : {}),
+          variants: [{ subject: s.subject, body: s.body }],
+        })),
       }],
     }),
   });
@@ -50,39 +131,97 @@ export async function createInstantlyCampaign(name: string, opts: {
   return data.id;
 }
 
-export async function addLeadsToInstantly(campaignId: string, leads: Array<{
-  email: string;
-  firstName: string;
-  lastName: string;
-  subject: string;
-  body: string;
-  senderName?: string;
-}>): Promise<void> {
-  const res = await fetch(`${BASE}/campaign-lead`, {
-    method: "POST",
+export async function patchInstantlySequences(
+  instantlyCampaignId: string,
+  steps: InstantlyStep[],
+): Promise<void> {
+  const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}`, {
+    method: "PATCH",
     headers: h(),
     body: JSON.stringify({
-      campaign_id: campaignId,
-      leads: leads.map((l) => ({
-        email: l.email,
-        first_name: l.firstName,
-        last_name: l.lastName,
-        variables: {
-          customSubject: l.subject,
-          customBody: l.body.replace(/\n/g, "<br>"),
-          ...(l.senderName ? { senderName: l.senderName } : {}),
-        },
-      })),
+      sequences: [{
+        steps: steps.map((s) => ({
+          type: "email" as const,
+          delay: s.delay,
+          ...(s.delayUnit ? { delay_unit: s.delayUnit } : {}),
+          variants: [{ subject: s.subject, body: s.body }],
+        })),
+      }],
     }),
   });
   await iJson<unknown>(res);
 }
 
-export async function activateInstantlyCampaign(campaignId: string): Promise<void> {
-  const res = await fetch(`${BASE}/campaigns/${campaignId}/activate`, {
+export async function activateInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
+  // NO BODY — passing {} causes a schema error
+  const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}/activate`, {
     method: "POST",
     headers: h(),
-    body: JSON.stringify({}),
   });
   await iJson<unknown>(res);
+}
+
+export async function pauseInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
+  const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}/pause`, {
+    method: "POST",
+    headers: h(),
+  });
+  await iJson<unknown>(res);
+}
+
+// ─── Leads ────────────────────────────────────────────────────────────────────
+
+export async function addLeadsToInstantly(
+  instantlyCampaignId: string,
+  leads: InstantlyLeadInput[],
+): Promise<BulkAddResult> {
+  const res = await fetch(`${BASE}/leads/add`, {   // CORRECT endpoint (NOT /campaign-lead)
+    method: "POST",
+    headers: h(),
+    body: JSON.stringify({
+      campaign_id: instantlyCampaignId,
+      skip_if_in_workspace: false,
+      leads: leads.map((l) => ({
+        email: l.email,
+        first_name: l.firstName,
+        last_name: l.lastName,
+        custom_variables: l.customVariables,   // CORRECT field (NOT variables)
+      })),
+    }),
+  });
+  return iJson<BulkAddResult>(res);
+}
+
+// ─── Accounts ─────────────────────────────────────────────────────────────────
+
+export async function listInstantlyAccounts(): Promise<
+  Array<{ email: string; status: number; daily_limit?: number }>
+> {
+  const res = await fetch(`${BASE}/accounts?limit=100`, { headers: h() });
+  const data = await iJson<{
+    items?: Array<{ email: string; status: number; daily_limit?: number }>
+  }>(res);
+  return data.items ?? [];
+}
+
+// ─── Webhooks ─────────────────────────────────────────────────────────────────
+
+export async function createInstantlyWebhook(opts: {
+  url: string;
+  eventType: string;       // "all_events" | "reply_received" | ...
+  campaign?: string;       // optional Instantly campaign UUID filter
+  secret?: string;
+}): Promise<string> {
+  const res = await fetch(`${BASE}/webhooks`, {
+    method: "POST",
+    headers: h(),
+    body: JSON.stringify({
+      target_hook_url: opts.url,
+      event_type: opts.eventType,
+      ...(opts.campaign ? { campaign: opts.campaign } : {}),
+      ...(opts.secret ? { headers: { "X-Webhook-Secret": opts.secret } } : {}),
+    }),
+  });
+  const data = await iJson<{ id: string }>(res);
+  return data.id;
 }

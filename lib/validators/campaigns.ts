@@ -12,9 +12,7 @@ export const CreateCampaignSchema = z.object({
   daily_limit: z.number().int().min(1).max(500).default(30),
   ai_prompt_context: z.string().optional(),
   sender_name: z.string().optional(),
-  follow_up_pattern: z
-    .array(z.object({ step: z.number().int(), delay: z.number().int().min(0) }))
-    .optional(),
+
   // Campaign attachment fields (set by upload endpoint)
   attachment_path: z.string().optional(),
   attachment_name: z.string().optional(),
@@ -35,9 +33,7 @@ export const PatchCampaignSchema = z.object({
   send_days: z.record(z.string(), z.boolean()).optional(),
   schedule_timezone: z.string().optional(),
   daily_limit: z.number().int().min(1).max(500).optional(),
-  follow_up_pattern: z
-    .array(z.object({ step: z.number().int(), delay: z.number().int().min(0) }))
-    .optional(),
+
 });
 
 export const AddLeadsToCampaignSchema = z.object({
@@ -55,4 +51,16 @@ export const PatchCampaignLeadSchema = z.object({
   crm_status: z.enum([
     "new", "enriched", "draft", "approved", "sent", "replied", "won", "closed", "failed", "skipped",
   ]),
+});
+
+export const CampaignStepInput = z.object({
+  step_order: z.number().int().min(1),
+  delay: z.number().int().min(0),
+  delay_unit: z.enum(["minutes", "hours", "days"]).default("days"),
+  subject: z.string().default(""),
+  body: z.string().default(""),
+});
+
+export const CampaignStepsSchema = z.object({
+  steps: z.array(CampaignStepInput).min(1).max(10),
 });

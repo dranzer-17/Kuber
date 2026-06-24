@@ -299,11 +299,29 @@ export const COUNTRY_TO_TIMEZONE: Record<string, string> = {
 
 export const KUBER_CONTEXT = `Kuber Polyplast is an Indian masterbatch and specialty compounds manufacturer with 30 years of experience. They are ISO 9001:2015 certified and export to 50+ countries worldwide. Their product range includes colour masterbatches, white masterbatches, black masterbatches, additive masterbatches, and specialty compounds for the plastics processing industry.`;
 
-export const DEFAULT_FOLLOW_UP_PATTERN = [
-  { step: 1, delay: 0 },
-  { step: 2, delay: 30 },
-  { step: 3, delay: 90 },
-];
+export const DEFAULT_CAMPAIGN_STEPS = [
+  {
+    step_order: 1,
+    delay: 0,
+    delay_unit: "days" as const,
+    subject: "{{customSubject}}",
+    body: "{{customBody}}",
+  },
+  {
+    step_order: 2,
+    delay: 30,
+    delay_unit: "days" as const,
+    subject: "",  // empty = Instantly threads it as a reply in the same conversation
+    body: "Hi {{firstName}},\n\nJust following up on my previous note — would love your thoughts.\n\nBest regards",
+  },
+  {
+    step_order: 3,
+    delay: 90,
+    delay_unit: "days" as const,
+    subject: "",  // empty = threaded
+    body: "Hi {{firstName}},\n\nCircling back one final time in case this is useful.\n\nBest regards",
+  },
+] as const;
 
 export const BATCH_COLORS = [
   { name: "violet", bg: "bg-violet-400",  ring: "ring-violet-400",  text: "text-violet-400",  pill: "bg-violet-500/15 border-violet-500/30 text-violet-400"  },
