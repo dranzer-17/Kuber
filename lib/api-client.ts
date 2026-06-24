@@ -87,7 +87,6 @@ export interface DbCampaign {
   sent_count: number;
   replied_count: number;
   created_at: string;
-  instantly_campaign_id: string | null;
   daily_limit: number | null;
   window_from: string | null;
   window_to: string | null;
@@ -147,7 +146,6 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     replied: c.replied_count,
     humanInLoop: c.human_in_loop,
     createdAt: c.created_at.slice(0, 10),
-    instantlyId: c.instantly_campaign_id ?? null,
     dailyLimit: c.daily_limit ?? 30,
     windowFrom: c.window_from ?? "08:00",
     windowTo: c.window_to ?? "18:00",
@@ -317,13 +315,11 @@ export async function restoreDraftVersion(token: string, draftId: string): Promi
   }, token);
 }
 
-export async function sendApprovedLeads(token: string, campaignId: string, leadIds?: string[]): Promise<{
-  instantly_campaign_id: string; sent_count: number; activated: boolean;
-}> {
-  return apiFetch(`/api/v1/campaigns/${campaignId}/send`, {
-    method: "POST",
-    body: JSON.stringify(leadIds?.length ? { lead_ids: leadIds } : {}),
-  }, token);
+export async function sendApprovedLeads(
+  token: string,
+  campaignId: string,
+): Promise<{ buckets: number; sent: number }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/send`, { method: "POST" }, token);
 }
 
 export async function setCampaignLeadStatus(

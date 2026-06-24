@@ -425,14 +425,14 @@ export function CampaignDetail({
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const certifiedLeadIds = campaignLeads
+      const certifiedCount = campaignLeads
         .filter((cl) => cl.crm_status === "approved" || cl.email_drafts?.status === "approved")
-        .map((cl) => cl.lead_id);
-      if (certifiedLeadIds.length === 0) {
+        .length;
+      if (certifiedCount === 0) {
         setError("No certified leads to send.");
         return;
       }
-      await sendApprovedLeads(session.access_token, campaign.id, certifiedLeadIds);
+      await sendApprovedLeads(session.access_token, campaign.id);
       await loadData();
     } catch (e) {
       setError((e as Error).message);
@@ -673,18 +673,6 @@ export function CampaignDetail({
                   <div className="flex items-center justify-between px-4 py-2.5">
                     <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
                     <span className="font-medium">{activeDays.join(", ")}</span>
-                  </div>
-                )}
-                {campaign.instantlyId && (
-                  <div className="px-4 py-2.5">
-                    <a
-                      href={`https://app.instantly.ai/app/campaign/${campaign.instantlyId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-sm text-primary hover:underline"
-                    >
-                      <ExternalLink className="size-3.5" /> View in Instantly
-                    </a>
                   </div>
                 )}
               </div>

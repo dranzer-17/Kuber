@@ -59,7 +59,6 @@ export interface DbCampaign {
   sent_count: number;
   replied_count: number;
   created_at: string;
-  instantly_campaign_id: string | null;
   daily_limit: number | null;
   window_from: string | null;
   window_to: string | null;
@@ -122,7 +121,6 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     replied: c.replied_count,
     humanInLoop: c.human_in_loop,
     createdAt: c.created_at.slice(0, 10),
-    instantlyId: c.instantly_campaign_id ?? null,
     dailyLimit: c.daily_limit ?? 30,
     windowFrom: c.window_from ?? "08:00",
     windowTo: c.window_to ?? "18:00",

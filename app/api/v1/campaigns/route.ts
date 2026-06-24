@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateCampaignSchema } from "@/lib/validators/campaigns";
-import { DEFAULT_FOLLOW_UP_PATTERN } from "@/lib/constants";
+import { DEFAULT_CAMPAIGN_STEPS } from "@/lib/constants";
 
 export async function GET(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -32,8 +32,23 @@ export async function POST(req: NextRequest) {
   const { data, error } = await db
     .from("campaigns")
     .insert({
-      ...parsed.data,
-      follow_up_pattern: parsed.data.follow_up_pattern ?? DEFAULT_FOLLOW_UP_PATTERN,
+      name: parsed.data.name,
+      human_in_loop: parsed.data.human_in_loop,
+      send_mode: parsed.data.send_mode,
+      schedule_start_at: parsed.data.schedule_start_at,
+      window_from: parsed.data.window_from,
+      window_to: parsed.data.window_to,
+      send_days: parsed.data.send_days,
+      schedule_timezone: parsed.data.schedule_timezone,
+      daily_limit: parsed.data.daily_limit,
+      ai_prompt_context: parsed.data.ai_prompt_context,
+      sender_name: parsed.data.sender_name,
+      attachment_path: parsed.data.attachment_path,
+      attachment_name: parsed.data.attachment_name,
+      attachment_mime: parsed.data.attachment_mime,
+      attachment_size: parsed.data.attachment_size,
+      attachment_url: parsed.data.attachment_url,
+      // follow_up_pattern REMOVED — column dropped
       status: "draft",
       created_by: user.id,
       signature_user_id: parsed.data.signature_user_id ?? user.id,
@@ -43,5 +58,15 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
+
+  // Create default sequence steps (campaign_steps table)
+  await db.from("campaign_steps").insert(
+    DEFAULT_CAMPAIGN_STEPS.map((s) => ({
+      ...s,
+      campaign_id: data.id,
+      created_at: new Date().toISOString(),
+    }))
+  );
+
   return ok(data);
 }

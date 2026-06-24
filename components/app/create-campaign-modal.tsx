@@ -29,7 +29,6 @@ export type Campaign = {
   replied: number;
   humanInLoop: boolean;
   createdAt: string;
-  instantlyId?: string | null;
   dailyLimit?: number;
   windowFrom?: string;
   windowTo?: string;
