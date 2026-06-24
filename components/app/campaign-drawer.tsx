@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, Megaphone, Users, Send, MessageSquare, Clock, Gauge,
+  Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown, ChevronRight,
   List, LayoutGrid, BarChart2, Paperclip, FileText, Upload,
 } from "lucide-react";
@@ -502,17 +502,19 @@ export function CampaignDetail({
       <div className="border-b border-border px-8 py-5 shrink-0 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
-            >
-              <ArrowLeft className="size-4" /> All campaigns
-            </button>
-            <div className="h-5 w-px bg-border shrink-0" />
+            <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm shrink-0">
+              <button
+                type="button"
+                onClick={onBack}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Campaigns
+              </button>
+              <ChevronRight className="size-4 text-muted-foreground" />
+            </nav>
             <div className="min-w-0">
-              <h1 className="text-lg font-bold truncate">{campaign.name}</h1>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <h1 className="text-lg font-bold truncate leading-tight">{campaign.name}</h1>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <span className={cn(
                   "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5",
                   STATUS_STYLES[campaign.status] ?? STATUS_STYLES.Draft,
