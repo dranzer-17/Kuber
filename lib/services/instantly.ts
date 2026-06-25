@@ -153,10 +153,12 @@ export async function patchInstantlySequences(
 }
 
 export async function activateInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
-  // NO BODY — passing {} causes a schema error
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}/activate`, {
     method: "POST",
-    headers: h(),
+    headers: {
+      Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
+      // NO Content-Type — there is no body, and declaring JSON with an empty body 400s
+    },
   });
   await iJson<unknown>(res);
 }
@@ -164,7 +166,10 @@ export async function activateInstantlyCampaign(instantlyCampaignId: string): Pr
 export async function pauseInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}/pause`, {
     method: "POST",
-    headers: h(),
+    headers: {
+      Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
+      // NO Content-Type
+    },
   });
   await iJson<unknown>(res);
 }
