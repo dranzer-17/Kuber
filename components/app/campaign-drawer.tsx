@@ -34,6 +34,7 @@ import { CampaignReportView, type CampaignReportData } from "@/components/app/ca
 import { LeadDrawer } from "@/components/app/lead-drawer";
 import { OrgDrawer } from "@/components/app/org-drawer";
 import { supabase } from "@/lib/supabase";
+import { useApp } from "@/lib/app-context";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { Lead } from "@/lib/leads";
@@ -178,6 +179,8 @@ export function CampaignDetail({
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
   const [drawerOrgId, setDrawerOrgId] = useState<string | null>(null);
 
+  const { loadCampaigns } = useApp();
+
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -267,7 +270,8 @@ export function CampaignDetail({
 
   const draftReadyLeads = campaignLeads.filter((cl) => cl.email_drafts?.status === "draft");
   const certifiedCount = campaignLeads.filter((cl) =>
-    cl.email_drafts?.status === "approved" || cl.crm_status === "approved"
+    (cl.email_drafts?.status === "approved" || cl.crm_status === "approved") &&
+    cl.crm_status !== "sent"
   ).length;
   const isGenerating = progress ? (progress.generating + progress.pending) > 0 : false;
   const progressPct = progress && progress.total > 0
@@ -425,15 +429,17 @@ export function CampaignDetail({
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const certifiedCount = campaignLeads
-        .filter((cl) => cl.crm_status === "approved" || cl.email_drafts?.status === "approved")
-        .length;
-      if (certifiedCount === 0) {
+      const toSend = campaignLeads.filter((cl) =>
+        (cl.crm_status === "approved" || cl.email_drafts?.status === "approved") &&
+        cl.crm_status !== "sent"
+      ).length;
+      if (toSend === 0) {
         setError("No certified leads to send.");
         return;
       }
       await sendApprovedLeads(session.access_token, campaign.id);
-      await loadData();
+      await loadData();                                   // refresh this view's leads/drafts
+      await loadCampaigns(session.access_token);          // refresh header stats + status badge
     } catch (e) {
       setError((e as Error).message);
     } finally {
