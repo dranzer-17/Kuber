@@ -427,7 +427,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   <div className="text-sm leading-relaxed mt-1.5">
                     <p className="font-medium">{display.company}</p>
                     {display.domain && (
-                      <p className="text-xs text-blue-400 mt-0.5">{display.domain}</p>
+                      <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 mt-0.5 hover:underline block">{display.domain}</a>
                     )}
                   </div>
                 </button>

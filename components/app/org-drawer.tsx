@@ -51,12 +51,20 @@ type OrgForm = {
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
-function Field({ label, value }: { label: string; value: string | null | undefined }) {
+function toUrl(val: string) {
+  return /^https?:\/\//i.test(val) ? val : `https://${val}`;
+}
+
+function Field({ label, value, link }: { label: string; value: string | null | undefined; link?: boolean }) {
   if (!value) return null;
   return (
     <div>
       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
-      <p className="text-sm">{value}</p>
+      {link ? (
+        <a href={toUrl(value)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:underline truncate block">{value}</a>
+      ) : (
+        <p className="text-sm">{value}</p>
+      )}
     </div>
   );
 }
@@ -203,7 +211,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
               {org?.name ?? (loading ? "Loading…" : "Organization")}
             </h2>
             {org?.domain && (
-              <p className="text-xs text-blue-400 truncate">{org.domain}</p>
+              <a href={toUrl(org.domain)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 truncate hover:underline">{org.domain}</a>
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -338,8 +346,8 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
 
                   <Section icon={Building2} label="Details">
                     <Field label="Name"     value={org.name} />
-                    <Field label="Domain"   value={org.domain} />
-                    <Field label="Website"  value={org.website} />
+                    <Field label="Domain"   value={org.domain}  link />
+                    <Field label="Website"  value={org.website} link />
                     <Field label="Industry" value={org.industry} />
                   </Section>
 
