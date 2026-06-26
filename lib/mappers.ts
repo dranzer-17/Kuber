@@ -67,6 +67,8 @@ export interface DbCampaign {
   ai_prompt_context: string | null;
   sender_name: string | null;
   attachment_name: string | null;
+  hot_count: number;
+  cold_count: number;
 }
 
 // ─── Mapper functions ─────────────────────────────────────────────────────────
@@ -129,5 +131,7 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     aiPromptContext: c.ai_prompt_context ?? undefined,
     senderName: c.sender_name ?? undefined,
     attachmentName: c.attachment_name ?? undefined,
+    hot: c.hot_count ?? 0,
+    cold: c.cold_count ?? 0,
   };
 }

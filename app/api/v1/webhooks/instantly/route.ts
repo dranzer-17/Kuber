@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
+import { internalAppBaseUrl } from "@/lib/internal-url";
+import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 
 const CRM_BY_EVENT: Record<string, string | undefined> = {
   reply_received:    "replied",
@@ -103,11 +105,18 @@ export async function POST(req: NextRequest) {
     { onConflict: "event_uid", ignoreDuplicates: true },
   );
 
-  // 6) Update campaign_leads state
+  // 6) Update campaign_leads state (with lead_temperature for interest events)
   if (campaignLeadId) {
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (CRM_BY_EVENT[p.event_type])                          patch.crm_status = CRM_BY_EVENT[p.event_type];
-    if (INTEREST_BY_EVENT[p.event_type] !== undefined)       patch.interest_status = INTEREST_BY_EVENT[p.event_type];
+    if (CRM_BY_EVENT[p.event_type])                    patch.crm_status = CRM_BY_EVENT[p.event_type];
+    const interest = INTEREST_BY_EVENT[p.event_type];
+    if (interest !== undefined) {
+      patch.interest_status = interest;
+      // keep our temperature in sync when Instantly's own AI fires a lead_* event
+      const temp = INTEREST_TO_TEMPERATURE[interest as number];
+      if (temp) patch.lead_temperature = temp;
+    }
+    if (p.event_type === "lead_unsubscribed") patch.lead_temperature = "unsubscribed";
     if (p.event_type === "reply_received") {
       patch.last_reply_at   = receivedAt;
       patch.last_reply_body = replyBody;
@@ -129,6 +138,36 @@ export async function POST(req: NextRequest) {
         .from("organizations")
         .update({ unsubscribed: true })
         .eq("id", lead.organization_id);
+    }
+  }
+
+  // 8) On a real prospect reply, classify + draft an AI reply (async, fire-and-forget)
+  if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET) {
+    // we need the reply_events row id we just upserted
+    const { data: ev } = await db
+      .from("reply_events")
+      .select("id")
+      .eq("event_uid", eventUid)
+      .maybeSingle();
+
+    if (ev?.id) {
+      const baseUrl = internalAppBaseUrl(req);
+      fetch(`${baseUrl}/api/internal/process-reply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": process.env.INTERNAL_SECRET,
+        },
+        body: JSON.stringify({
+          reply_event_id: ev.id,
+          reply_text: p.reply_text ?? p.reply_text_snippet ?? "",
+          reply_subject: p.reply_subject ?? null,
+          email_id: p.email_id ?? null,
+          campaign_lead_id: campaignLeadId,
+          master_campaign_id: masterId,
+          lead_email: p.lead_email ?? null,
+        }),
+      }).catch(() => {});
     }
   }
 

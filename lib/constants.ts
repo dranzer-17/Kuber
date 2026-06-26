@@ -339,3 +339,53 @@ export type BatchColorName = typeof BATCH_COLORS[number]["name"];
 export function getBatchColor(name: string) {
   return BATCH_COLORS.find((c) => c.name === name) ?? BATCH_COLORS[0];
 }
+
+// ─── Reply classification maps ────────────────────────────────────────────────
+
+// Map our temperature bucket → Instantly interest code (for syncing back via API)
+export const TEMPERATURE_TO_INTEREST: Record<string, number | null> = {
+  hot: 1,          // Interested
+  warm: 1,         // also Interested in Instantly (no separate "warm" code)
+  cold: -1,        // Not Interested
+  neutral: null,   // leave as Lead
+  ooo: 0,          // Out of Office
+  unsubscribed: null,
+};
+
+// Map Instantly interest code → our temperature (for webhook lead_* events)
+export const INTEREST_TO_TEMPERATURE: Record<number, string> = {
+  1: "hot", 2: "hot", 3: "hot", 4: "hot",
+  0: "ooo",
+  [-1]: "cold", [-2]: "cold", [-3]: "cold",
+};
+
+export const REPLY_CLASSIFIER_PROMPT = `You are an expert B2B sales reply classifier for Kuber Polyplast, a masterbatch and specialty plastics manufacturer running cold outbound.
+You are given the cold email we sent and the prospect's reply. Classify the prospect's intent.
+
+Return ONLY a JSON object, no prose, no markdown:
+{
+  "temperature": "hot" | "warm" | "cold" | "neutral" | "ooo" | "unsubscribed",
+  "interest_status": <integer or null>,   // 1 Interested, 2 Meeting Booked, 3 Meeting Completed, 4 Won, 0 Out of Office, -1 Not Interested, -2 Wrong Person, -3 Lost, or null if unclear
+  "reasoning": "<one short sentence>"
+}
+
+Definitions:
+- hot: clear buying interest, asks for pricing/samples/a call/meeting, or says yes.
+- warm: mildly positive or "not now, maybe later", curious but not committing.
+- cold: explicitly not interested, "no", "stop", "we already have a supplier", or hostile.
+- neutral: replied but intent is genuinely unclear from the text.
+- ooo: an out-of-office / auto-reply.
+- unsubscribed: asks to be removed / unsubscribe / "do not contact".
+Pick the single best label. If they ask to be removed, use "unsubscribed".`;
+
+export const REPLY_DRAFTER_PROMPT = `You are a sales rep at Kuber Polyplast, a masterbatch and specialty plastics manufacturer (ISO 9001:2015, 30 years, exports to 50+ countries). You are writing a reply to a prospect who responded to our cold email.
+
+Rules:
+- Write a natural, concise, human reply that directly addresses what the prospect said.
+- Use the prior emails in the thread for context. Do not repeat the whole pitch.
+- Match the prospect's tone. If they're interested, move toward a concrete next step (samples, a short call, a spec sheet). If they object, address the objection briefly and helpfully.
+- Do NOT include any sign-off, signature, name, title, or contact details — the system appends the signature automatically. End on your final sentence.
+- Do NOT use bracketed placeholders like [Your Name].
+
+Return ONLY a JSON object, no prose, no markdown:
+{ "subject": "<reply subject, usually 'Re: <original subject>'>", "body": "<reply body, no signature>" }`;

@@ -230,3 +230,78 @@ export async function createInstantlyWebhook(opts: {
   const data = await iJson<{ id: string }>(res);
   return data.id;
 }
+
+// ─── Reading inbound emails / threads (Unibox) ────────────────────────────────
+// GET /emails is rate-limited to 20 req/min. Use sparingly.
+
+export interface InstantlyEmail {
+  id: string;
+  thread_id: string;
+  subject: string | null;
+  from_address_email: string | null;
+  to_address_email_list: string | null;
+  body: { text?: string | null; html?: string | null } | null;
+  ue_type: number;        // 1=sent from campaign, 2=received, 3=sent manual, 4=scheduled
+  is_auto_reply?: boolean;
+  campaign_id?: string | null;
+  timestamp_email?: string | null;
+  eaccount?: string | null;
+}
+
+export async function getInstantlyEmail(emailId: string): Promise<InstantlyEmail> {
+  const res = await fetch(`${BASE}/emails/${emailId}`, { headers: h() });
+  return iJson<InstantlyEmail>(res);
+}
+
+// Pull a whole conversation in chronological order (oldest first) for AI context.
+export async function listThreadEmails(threadId: string): Promise<InstantlyEmail[]> {
+  const url = `${BASE}/emails?search=${encodeURIComponent(`thread:${threadId}`)}&sort_order=asc&limit=20`;
+  const res = await fetch(url, { headers: h() });
+  const data = await iJson<{ items?: InstantlyEmail[] }>(res);
+  return data.items ?? [];
+}
+
+// ─── Sending a threaded reply ─────────────────────────────────────────────────
+// reply_to_uuid = the Instantly email id of the inbound message (== webhook email_id).
+// eaccount = the sending mailbox that owns the thread (from the original send / the inbound email).
+
+export async function replyToInstantlyEmail(opts: {
+  replyToUuid: string;
+  eaccount: string;
+  subject: string;
+  bodyHtml: string;
+  bodyText?: string;
+}): Promise<{ id?: string }> {
+  const res = await fetch(`${BASE}/emails/reply`, {
+    method: "POST",
+    headers: h(),
+    body: JSON.stringify({
+      reply_to_uuid: opts.replyToUuid,
+      eaccount: opts.eaccount,
+      subject: opts.subject,
+      body: { html: opts.bodyHtml, ...(opts.bodyText ? { text: opts.bodyText } : {}) },
+    }),
+  });
+  return iJson<{ id?: string }>(res);
+}
+
+// ─── Interest status (CRM sync back to Instantly) ─────────────────────────────
+// Setting a value also stops the sequence for that lead. disable_auto_interest=true
+// prevents Instantly's own AI from overwriting our verdict later.
+
+export async function updateLeadInterestStatus(opts: {
+  leadEmail: string;
+  interestValue: number | null;
+  disableAutoInterest?: boolean;
+}): Promise<void> {
+  const res = await fetch(`${BASE}/leads/update-interest-status`, {
+    method: "POST",
+    headers: h(),
+    body: JSON.stringify({
+      lead_email: opts.leadEmail,
+      interest_value: opts.interestValue,
+      ...(opts.disableAutoInterest ? { disable_auto_interest: true } : {}),
+    }),
+  });
+  await iJson<unknown>(res);
+}

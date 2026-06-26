@@ -94,6 +94,8 @@ export interface DbCampaign {
   send_days: Record<string, boolean> | null;
   ai_prompt_context: string | null;
   sender_name: string | null;
+  hot_count: number;
+  cold_count: number;
 }
 
 export function mapDbLead(l: DbLead): Lead {
@@ -153,6 +155,8 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     sendDays: c.send_days ?? {},
     aiPromptContext: c.ai_prompt_context ?? undefined,
     senderName: c.sender_name ?? undefined,
+    hot: c.hot_count ?? 0,
+    cold: c.cold_count ?? 0,
   };
 }
 
@@ -520,4 +524,58 @@ export async function removeCampaignLeadAttachment(
   campaignLeadId: string,
 ): Promise<{ cleared: boolean }> {
   return apiFetch(`/api/v1/campaign-leads/${campaignLeadId}/attachment`, { method: "DELETE" }, token);
+}
+
+// ─── Reply drafts ────────────────────────────────────────────────────────────
+
+export interface ReplyDraft {
+  id: string;
+  reply_event_id: string;
+  campaign_lead_id: string | null;
+  campaign_id: string | null;
+  subject: string | null;
+  body: string | null;
+  status: "generating" | "draft" | "approved" | "sent" | "failed" | "rejected";
+  reply_to_uuid: string | null;
+  eaccount: string | null;
+  version: number;
+  sent_at: string | null;
+  error: string | null;
+}
+
+export interface CampaignReply {
+  id: string;
+  event_type: string;
+  reply_body: string | null;
+  intent_classified: string | null;
+  received_at: string;
+  lead_email: string | null;
+  campaign_lead_id: string | null;
+  campaign_leads: {
+    id: string;
+    lead_temperature: string | null;
+    interest_status: number | null;
+    crm_status: string;
+    leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null } | null;
+  } | null;
+  reply_draft: ReplyDraft | null;
+}
+
+export async function fetchCampaignReplies(token: string, campaignId: string): Promise<{ replies: CampaignReply[] }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/replies`, {}, token);
+}
+export async function editReplyDraft(token: string, id: string, subject: string, body: string): Promise<ReplyDraft> {
+  return apiFetch(`/api/v1/reply-drafts/${id}`, { method: "PATCH", body: JSON.stringify({ action: "edit", subject, body }) }, token);
+}
+export async function approveReplyDraft(token: string, id: string, subject?: string, body?: string): Promise<ReplyDraft> {
+  return apiFetch(`/api/v1/reply-drafts/${id}`, { method: "PATCH", body: JSON.stringify({ action: "approve", subject, body }) }, token);
+}
+export async function rejectReplyDraft(token: string, id: string, reason?: string): Promise<ReplyDraft> {
+  return apiFetch(`/api/v1/reply-drafts/${id}`, { method: "PATCH", body: JSON.stringify({ action: "reject", rejection_reason: reason }) }, token);
+}
+export async function sendReplyDraft(token: string, id: string): Promise<{ sent: boolean }> {
+  return apiFetch(`/api/v1/reply-drafts/${id}/send`, { method: "POST" }, token);
+}
+export async function regenerateReplyDraft(token: string, id: string, instruction?: string): Promise<ReplyDraft> {
+  return apiFetch(`/api/v1/reply-drafts/${id}/regenerate`, { method: "POST", body: JSON.stringify({ instruction }) }, token);
 }
