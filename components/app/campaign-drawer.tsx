@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown, ChevronRight,
-  List, LayoutGrid, BarChart2, Paperclip, FileText, Upload,
+  List, LayoutGrid, BarChart2, Paperclip, FileText, Upload, Reply, Flame, Snowflake, ThumbsDown, X,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,14 @@ import {
   retryFailedDrafts,
   uploadCampaignLeadAttachment,
   removeCampaignLeadAttachment,
+  fetchCampaignReplies,
+  editReplyDraft,
+  approveReplyDraft,
+  rejectReplyDraft,
+  sendReplyDraft,
+  regenerateReplyDraft,
+  type CampaignReply,
+  type ReplyDraft,
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
@@ -117,7 +125,7 @@ function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
   return "—";
 }
 
-type CampaignViewTab = "list" | "kanban" | "report";
+type CampaignViewTab = "list" | "kanban" | "report" | "replies";
 
 function DraftStatusBadge({
   label,
@@ -178,6 +186,15 @@ export function CampaignDetail({
   const [uploadingLeadAtt, setUploadingLeadAtt] = useState(false);
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
   const [drawerOrgId, setDrawerOrgId] = useState<string | null>(null);
+  const [replies, setReplies] = useState<CampaignReply[]>([]);
+  const [selectedReplyId, setSelectedReplyId] = useState<string | null>(null);
+  const [replyEditSubject, setReplyEditSubject] = useState("");
+  const [replyEditBody, setReplyEditBody] = useState("");
+  const [replySaving, setReplySaving] = useState(false);
+  const [replyRegenOpen, setReplyRegenOpen] = useState(false);
+  const [replyRegenQuery, setReplyRegenQuery] = useState("");
+  const [replyRegenerating, setReplyRegenerating] = useState(false);
+  const [replySending, setReplySending] = useState(false);
 
   const { loadCampaigns } = useApp();
 
@@ -195,8 +212,16 @@ export function CampaignDetail({
     return leads;
   }, [campaign.id]);
 
+  const loadReplies = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const { replies: r } = await fetchCampaignReplies(session.access_token, campaign.id);
+    setReplies(r);
+  }, [campaign.id]);
+
   useEffect(() => {
     setLoading(true);
+    void loadReplies();
     loadData()
       .then((leads) => {
         if (leads && leads.length === 1) {
@@ -502,6 +527,28 @@ export function CampaignDetail({
     ? [selectedLead.first_name, selectedLead.last_name].filter(Boolean).join(" ") || "Unknown"
     : "";
 
+  const selectedReply = replies.find((r) => r.id === selectedReplyId) ?? null;
+  const selectedReplyLead = selectedReply?.campaign_leads?.leads;
+  const selectedReplyName = selectedReplyLead
+    ? [selectedReplyLead.first_name, selectedReplyLead.last_name].filter(Boolean).join(" ") || selectedReply?.lead_email || "Unknown"
+    : selectedReply?.lead_email || "Unknown";
+
+  useEffect(() => {
+    if (selectedReply?.reply_draft) {
+      setReplyEditSubject(selectedReply.reply_draft.subject ?? "");
+      setReplyEditBody(selectedReply.reply_draft.body ?? "");
+    }
+  }, [selectedReply?.reply_draft?.id]);
+
+  const TEMP_BADGE: Record<string, { label: string; cls: string; icon?: React.ReactNode }> = {
+    hot:          { label: "HOT",          cls: "bg-red-500/15 text-red-400 border-red-500/30",     icon: <Flame className="size-3" /> },
+    warm:         { label: "WARM",         cls: "bg-orange-500/15 text-orange-400 border-orange-500/30" },
+    cold:         { label: "COLD",         cls: "bg-sky-500/15 text-sky-400 border-sky-500/30",     icon: <Snowflake className="size-3" /> },
+    neutral:      { label: "NEUTRAL",      cls: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
+    ooo:          { label: "OUT OF OFFICE",cls: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
+    unsubscribed: { label: "UNSUBSCRIBED", cls: "bg-zinc-700/40 text-zinc-500 border-zinc-600/30" },
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -571,6 +618,18 @@ export function CampaignDetail({
                 <span className="font-semibold text-foreground tabular-nums">{value}</span> {label}
               </span>
             ))}
+            {(campaign.hot ?? 0) > 0 && (
+              <span className="text-muted-foreground inline-flex items-center gap-1">
+                <Flame className="size-3.5 text-red-400" />
+                <span className="font-semibold text-red-400 tabular-nums">{campaign.hot}</span> Hot
+              </span>
+            )}
+            {(campaign.cold ?? 0) > 0 && (
+              <span className="text-muted-foreground inline-flex items-center gap-1">
+                <Snowflake className="size-3.5 text-sky-400" />
+                <span className="font-semibold text-sky-400 tabular-nums">{campaign.cold}</span> Cold
+              </span>
+            )}
           </div>
 
           {progress && (
@@ -622,6 +681,7 @@ export function CampaignDetail({
           { id: "list" as const, label: "Leads" },
           { id: "kanban" as const, label: "Kanban" },
           { id: "report" as const, label: "Report" },
+          { id: "replies" as const, label: `Replies${replies.length ? ` (${replies.length})` : ""}` },
         ]).map(({ id, label }) => (
           <button
             key={id}
@@ -687,7 +747,272 @@ export function CampaignDetail({
         </div>
       </div>
 
-      {viewTab === "report" ? (
+      {viewTab === "replies" ? (
+        <div className="flex flex-1 min-h-0">
+          {/* Left: reply list */}
+          <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/50">
+            <div className="px-4 py-3 border-b border-border shrink-0">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground inline-flex items-center gap-1">
+                <Reply className="size-3" /> Inbound Replies ({replies.length})
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {replies.length === 0 ? (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  No replies received yet.
+                </div>
+              ) : replies.map((r) => {
+                const lead = r.campaign_leads?.leads;
+                const name = lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") || r.lead_email : r.lead_email;
+                const temp = r.intent_classified ?? r.campaign_leads?.lead_temperature ?? "neutral";
+                const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
+                const draftStatus = r.reply_draft?.status;
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => setSelectedReplyId(r.id)}
+                    className={cn(
+                      "w-full text-left px-4 py-3 border-b border-border/50 transition-colors",
+                      selectedReplyId === r.id ? "bg-secondary/80" : "hover:bg-secondary/40",
+                    )}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Avatar name={name ?? ""} size="sm" />
+                      <span className="text-sm font-medium truncate flex-1">{name}</span>
+                      <span className={cn("text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full border inline-flex items-center gap-0.5", badge.cls)}>
+                        {badge.icon}{badge.label}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-1">{r.reply_body}</p>
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                      <span>{r.received_at ? format(new Date(r.received_at), "MMM d, h:mm a") : ""}</span>
+                      {draftStatus && (
+                        <span className={cn("px-1.5 py-0.5 rounded-full", DRAFT_STATUS_STYLE[draftStatus] ?? "")}>
+                          {draftStatus === "generating" ? "Drafting…" : draftStatus === "draft" ? "Draft ready" : draftStatus === "approved" ? "Approved" : draftStatus === "sent" ? "Sent ✓" : draftStatus}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right: reply detail */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {!selectedReply ? (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                Select a reply to view details
+              </div>
+            ) : (
+              <>
+                {/* Inbound reply card */}
+                <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar name={selectedReplyName} size="md" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold">{selectedReplyName}</p>
+                      <p className="text-xs text-muted-foreground">{selectedReply.lead_email}</p>
+                    </div>
+                    {(() => {
+                      const temp = selectedReply.intent_classified ?? selectedReply.campaign_leads?.lead_temperature ?? "neutral";
+                      const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
+                      return (
+                        <span className={cn("text-xs font-semibold uppercase px-2.5 py-1 rounded-full border inline-flex items-center gap-1", badge.cls)}>
+                          {badge.icon}{badge.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="rounded-lg bg-secondary/30 border border-border p-4">
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{selectedReply.reply_body}</p>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Received {selectedReply.received_at ? format(new Date(selectedReply.received_at), "MMM d, yyyy 'at' h:mm a") : ""}
+                  </p>
+                </div>
+
+                {/* AI Reply Draft card */}
+                <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Reply className="size-4 text-muted-foreground" />
+                    <span className="text-sm font-semibold">AI Reply Draft</span>
+                    {selectedReply.reply_draft && (
+                      <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ml-auto",
+                        DRAFT_STATUS_STYLE[selectedReply.reply_draft.status] ?? ""
+                      )}>
+                        {selectedReply.reply_draft.status === "generating" ? "Generating…" : selectedReply.reply_draft.status}
+                      </span>
+                    )}
+                  </div>
+
+                  {!selectedReply.reply_draft ? (
+                    <p className="text-sm text-muted-foreground">No reply draft generated yet.</p>
+                  ) : selectedReply.reply_draft.status === "generating" ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                      <Loader2 className="size-4 animate-spin" /> Generating reply draft…
+                    </div>
+                  ) : selectedReply.reply_draft.status === "sent" ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-green-400 text-sm">
+                        <CheckCircle2 className="size-4" /> Reply sent successfully
+                      </div>
+                      <div className="rounded-lg bg-secondary/30 border border-border p-4">
+                        <p className="text-xs text-muted-foreground mb-1">{selectedReply.reply_draft.subject}</p>
+                        <p className="text-sm whitespace-pre-wrap">{selectedReply.reply_draft.body}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <Input
+                        value={replyEditSubject}
+                        onChange={(e) => setReplyEditSubject(e.target.value)}
+                        placeholder="Subject"
+                        className="text-sm"
+                      />
+                      <RichTextEditor
+                        value={replyEditBody}
+                        onChange={setReplyEditBody}
+                      />
+                      {error && <p className="text-sm text-destructive">{error}</p>}
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Save edits */}
+                        <Button size="sm" variant="outline" disabled={replySaving}
+                          onClick={async () => {
+                            if (!selectedReply.reply_draft) return;
+                            setReplySaving(true); setError("");
+                            try {
+                              const { data: { session } } = await supabase.auth.getSession();
+                              if (!session) return;
+                              await editReplyDraft(session.access_token, selectedReply.reply_draft.id, replyEditSubject, replyEditBody);
+                              await loadReplies();
+                            } catch (e) { setError((e as Error).message); }
+                            finally { setReplySaving(false); }
+                          }}
+                          className="gap-1.5">
+                          <Save className="size-3.5" /> Save edits
+                        </Button>
+
+                        {/* Approve */}
+                        {selectedReply.reply_draft.status !== "approved" && (
+                          <Button size="sm" disabled={replySaving}
+                            onClick={async () => {
+                              if (!selectedReply.reply_draft) return;
+                              setReplySaving(true); setError("");
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                if (!session) return;
+                                await approveReplyDraft(session.access_token, selectedReply.reply_draft.id, replyEditSubject, replyEditBody);
+                                await loadReplies();
+                              } catch (e) { setError((e as Error).message); }
+                              finally { setReplySaving(false); }
+                            }}
+                            className="gap-1.5">
+                            <Check className="size-3.5" /> Approve
+                          </Button>
+                        )}
+
+                        {/* Send */}
+                        {selectedReply.reply_draft.status === "approved" && (
+                          <Button size="sm" disabled={replySending}
+                            onClick={async () => {
+                              if (!selectedReply.reply_draft) return;
+                              setReplySending(true); setError("");
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                if (!session) return;
+                                await sendReplyDraft(session.access_token, selectedReply.reply_draft.id);
+                                await loadReplies();
+                              } catch (e) { setError((e as Error).message); }
+                              finally { setReplySending(false); }
+                            }}
+                            className="gap-1.5 bg-green-600 hover:bg-green-700">
+                            {replySending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                            Send reply
+                          </Button>
+                        )}
+
+                        {/* Reject */}
+                        {selectedReply.reply_draft.status === "draft" && (
+                          <Button size="sm" variant="outline" disabled={replySaving}
+                            onClick={async () => {
+                              if (!selectedReply.reply_draft) return;
+                              setReplySaving(true); setError("");
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                if (!session) return;
+                                await rejectReplyDraft(session.access_token, selectedReply.reply_draft.id);
+                                await loadReplies();
+                              } catch (e) { setError((e as Error).message); }
+                              finally { setReplySaving(false); }
+                            }}
+                            className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
+                            <ThumbsDown className="size-3.5" /> Reject
+                          </Button>
+                        )}
+
+                        {/* Regenerate toggle */}
+                        <Button size="sm" variant="outline"
+                          onClick={() => setReplyRegenOpen((o) => !o)}
+                          className="gap-1.5">
+                          <RotateCcw className="size-3.5" /> Regenerate
+                        </Button>
+                      </div>
+
+                      {/* Regenerate panel */}
+                      {replyRegenOpen && (
+                        <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
+                          <Input
+                            value={replyRegenQuery}
+                            onChange={(e) => setReplyRegenQuery(e.target.value)}
+                            placeholder="Optional instruction, e.g. Make it shorter…"
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" || !selectedReply.reply_draft) return;
+                              (async () => {
+                                setReplyRegenerating(true); setError("");
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  if (!session) return;
+                                  await regenerateReplyDraft(session.access_token, selectedReply.reply_draft!.id, replyRegenQuery || undefined);
+                                  setReplyRegenOpen(false); setReplyRegenQuery("");
+                                  await loadReplies();
+                                } catch (e) { setError((e as Error).message); }
+                                finally { setReplyRegenerating(false); }
+                              })();
+                            }}
+                          />
+                          <Button size="sm" disabled={replyRegenerating}
+                            onClick={async () => {
+                              if (!selectedReply.reply_draft) return;
+                              setReplyRegenerating(true); setError("");
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                if (!session) return;
+                                await regenerateReplyDraft(session.access_token, selectedReply.reply_draft.id, replyRegenQuery || undefined);
+                                setReplyRegenOpen(false); setReplyRegenQuery("");
+                                await loadReplies();
+                              } catch (e) { setError((e as Error).message); }
+                              finally { setReplyRegenerating(false); }
+                            }}
+                            className="gap-1.5">
+                            <RotateCcw className="size-3.5" /> Regenerate
+                          </Button>
+                        </div>
+                      )}
+
+                      {selectedReply.reply_draft.status === "failed" && selectedReply.reply_draft.error && (
+                        <p className="text-xs text-red-400">Error: {selectedReply.reply_draft.error}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : viewTab === "report" ? (
         reportLoading ? (
           <div className="flex-1 p-6 space-y-4 animate-pulse">
             <div className="grid grid-cols-3 gap-4">
