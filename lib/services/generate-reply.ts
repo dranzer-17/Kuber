@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
-import { REPLY_DRAFTER_PROMPT, KUBER_CONTEXT } from "@/lib/constants";
-import { resolveCampaignSignature } from "@/lib/services/settings";
+import { KUBER_CONTEXT } from "@/lib/constants";
+import { resolveCampaignSignature, getReplyPrompts } from "@/lib/services/settings";
 import { listThreadEmails, type InstantlyEmail } from "@/lib/services/instantly";
 
 const ReplySchema = z.object({ subject: z.string(), body: z.string() });
@@ -59,7 +59,8 @@ export async function generateReplyDraft(
       }
     }
 
-    const system = REPLY_DRAFTER_PROMPT
+    const { drafter } = await getReplyPrompts(db);
+    const system = drafter
       + `\n\nKuber context: ${KUBER_CONTEXT}`
       + (args.aiPromptContext ? `\n\nCampaign context: ${args.aiPromptContext}` : "");
 

@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
-import { REPLY_CLASSIFIER_PROMPT, TEMPERATURE_TO_INTEREST } from "@/lib/constants";
+import { TEMPERATURE_TO_INTEREST } from "@/lib/constants";
+import { getReplyPrompts } from "@/lib/services/settings";
 import { updateLeadInterestStatus } from "@/lib/services/instantly";
 
 const ClassificationSchema = z.object({
@@ -16,7 +17,7 @@ interface ClassifyArgs {
   replyText: string;
 }
 
-export async function classifyReply(args: ClassifyArgs): Promise<ReplyClassification> {
+export async function classifyReply(db: SupabaseClient, args: ClassifyArgs): Promise<ReplyClassification> {
   const user = [
     `--- OUR COLD EMAIL ---`,
     args.originalEmailText ?? "(not available)",
@@ -26,8 +27,9 @@ export async function classifyReply(args: ClassifyArgs): Promise<ReplyClassifica
   ].join("\n");
 
   try {
+    const { classifier } = await getReplyPrompts(db);
     const { json } = await complete<ReplyClassification>({
-      system: REPLY_CLASSIFIER_PROMPT,
+      system: classifier,
       user,
     });
     const parsed = ClassificationSchema.safeParse(json);

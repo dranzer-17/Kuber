@@ -1,8 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildDraftSystem, DRAFT_JSON_SUFFIX } from "@/lib/services/llm";
+import {
+  DEFAULT_EMAIL_INTRO,
+  DEFAULT_EMAIL_OFFERINGS,
+  DEFAULT_EMAIL_CLOSING_WITH_ATTACHMENT,
+  DEFAULT_EMAIL_CLOSING_NO_ATTACHMENT,
+  DEFAULT_PRODUCT_SECTIONS,
+  DEFAULT_PRODUCT_HINTS,
+  DEFAULT_REPLY_CLASSIFIER_PROMPT,
+  DEFAULT_REPLY_DRAFTER_PROMPT,
+  type KuberProductMatch,
+} from "@/lib/constants";
 
 let cachedPrompt: { value: string; expiresAt: number } | null = null;
 let cachedClient: { value: ClientContext; expiresAt: number } | null = null;
+let cachedEmailTemplate: { value: EmailTemplate; expiresAt: number } | null = null;
+let cachedProductSections: { value: ProductSections; expiresAt: number } | null = null;
+let cachedReplyPrompts: { value: ReplyPrompts; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
 
 export type ClientContext = {
@@ -71,7 +85,7 @@ function buildClientContextBlock(client: ClientContext): string {
 export async function getDraftSystemPrompt(db: SupabaseClient): Promise<string> {
   const base = await getSystemPrompt(db);
   const withJson =
-    /["']subject["']/.test(base) && /["']body["']/.test(base)
+    /["']subject["']/.test(base) && /["']opening["']/.test(base) && /["']product_match["']/.test(base)
       ? base
       : `${base.trimEnd()}${DRAFT_JSON_SUFFIX}`;
   const client = await getClientContext(db);
@@ -174,8 +188,101 @@ export async function resolveCampaignSignature(
   return sig.contact;
 }
 
+// ── Cold outreach template (intro/offerings/closing) ────────────────────────
+
+export type EmailTemplate = {
+  intro: string;
+  offerings: string;
+  closingWithAttachment: string;
+  closingNoAttachment: string;
+};
+
+const EMAIL_TEMPLATE_KEYS = [
+  "email_template_intro",
+  "email_template_offerings",
+  "email_template_closing_with_attachment",
+  "email_template_closing_no_attachment",
+] as const;
+
+export async function getEmailTemplate(db: SupabaseClient): Promise<EmailTemplate> {
+  const now = Date.now();
+  if (cachedEmailTemplate && cachedEmailTemplate.expiresAt > now) return cachedEmailTemplate.value;
+
+  const { data: rows } = await db
+    .from("settings")
+    .select("key, value")
+    .in("key", [...EMAIL_TEMPLATE_KEYS]);
+
+  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
+
+  const value: EmailTemplate = {
+    intro: map.email_template_intro?.trim() || DEFAULT_EMAIL_INTRO,
+    offerings: map.email_template_offerings?.trim() || DEFAULT_EMAIL_OFFERINGS,
+    closingWithAttachment: map.email_template_closing_with_attachment?.trim() || DEFAULT_EMAIL_CLOSING_WITH_ATTACHMENT,
+    closingNoAttachment: map.email_template_closing_no_attachment?.trim() || DEFAULT_EMAIL_CLOSING_NO_ATTACHMENT,
+  };
+
+  cachedEmailTemplate = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
+}
+
+// ── Per-product addenda + AI fit hints ───────────────────────────────────────
+
+export type ProductSections = Record<Exclude<KuberProductMatch, "none">, { section: string; hint: string }>;
+
+const PRODUCT_TYPES = ["black", "white", "color", "additive"] as const;
+
+export async function getProductSections(db: SupabaseClient): Promise<ProductSections> {
+  const now = Date.now();
+  if (cachedProductSections && cachedProductSections.expiresAt > now) return cachedProductSections.value;
+
+  const keys = PRODUCT_TYPES.flatMap((t) => [`product_${t}_section`, `product_${t}_hint`]);
+  const { data: rows } = await db.from("settings").select("key, value").in("key", keys);
+  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
+
+  const value = Object.fromEntries(
+    PRODUCT_TYPES.map((t) => [
+      t,
+      {
+        section: map[`product_${t}_section`]?.trim() || DEFAULT_PRODUCT_SECTIONS[t],
+        hint: map[`product_${t}_hint`]?.trim() || DEFAULT_PRODUCT_HINTS[t],
+      },
+    ]),
+  ) as ProductSections;
+
+  cachedProductSections = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
+}
+
+// ── Reply classification & drafting prompts ──────────────────────────────────
+
+export type ReplyPrompts = { classifier: string; drafter: string };
+
+export async function getReplyPrompts(db: SupabaseClient): Promise<ReplyPrompts> {
+  const now = Date.now();
+  if (cachedReplyPrompts && cachedReplyPrompts.expiresAt > now) return cachedReplyPrompts.value;
+
+  const { data: rows } = await db
+    .from("settings")
+    .select("key, value")
+    .in("key", ["reply_classifier_prompt", "reply_drafter_prompt"]);
+
+  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
+
+  const value: ReplyPrompts = {
+    classifier: map.reply_classifier_prompt?.trim() || DEFAULT_REPLY_CLASSIFIER_PROMPT,
+    drafter: map.reply_drafter_prompt?.trim() || DEFAULT_REPLY_DRAFTER_PROMPT,
+  };
+
+  cachedReplyPrompts = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
+}
+
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;
+  cachedEmailTemplate = null;
+  cachedProductSections = null;
+  cachedReplyPrompts = null;
 }
 

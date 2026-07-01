@@ -169,15 +169,10 @@ export interface ExtractionOutput {
   primary_products: string[];
 }
 
-export interface DraftOutput {
-  subject: string;
-  body: string;
-}
-
 export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Return ONLY valid JSON, no markdown fences: { "description": string (2-3 sentences: what they manufacture and who they sell to), "primary_products": string[] }`;
 
 export const DRAFT_JSON_SUFFIX =
-  '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string}. The body field is the full email text.';
+  '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "opening": string, "product_match": "black" | "white" | "color" | "additive" | "none"}.';
 
 export function buildDraftSystem(): string {
   return `You are an export sales writer for Kuber Polyplast — an ISO 9001:2015 certified Indian masterbatch and specialty-compound manufacturer with 30 years of experience, ~18,000 MT/year capacity, exporting to 50+ countries. You write one cold outreach email per prospect.

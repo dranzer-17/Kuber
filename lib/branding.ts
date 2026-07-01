@@ -1,0 +1,137 @@
+// App branding: product identity (name/logo/copy) + color theme + light/dark
+// mode. Every surface — page background, sidebar, cards, inputs, borders — is
+// generated from a hue + mode pair, so each color has both a dark and a light
+// variant (dark base + light accent shade in dark mode; light base + the same
+// accent shade in light mode).
+
+export const APP_NAME = "Kuber";
+export const APP_LOGO_INITIAL = "K";
+export const APP_TITLE = "Kuber Admin";
+export const APP_DESCRIPTION = "Kuber demo admin workspace";
+export const APP_TAGLINE = "Access the lead command center.";
+
+export type ThemeId = "monochrome" | "blue" | "green" | "purple" | "orange" | "rose";
+export type ThemeMode = "dark" | "light";
+
+const CSS_VARS = [
+  "--background", "--foreground",
+  "--card", "--card-foreground",
+  "--popover", "--popover-foreground",
+  "--primary", "--primary-foreground",
+  "--secondary", "--secondary-foreground",
+  "--muted", "--muted-foreground",
+  "--accent", "--accent-foreground",
+  "--border", "--input", "--ring",
+] as const;
+
+type CssVar = (typeof CSS_VARS)[number];
+type Palette = Record<CssVar, string>;
+
+interface ColorDefinition {
+  id: ThemeId;
+  label: string;
+  /** Hex color used for the swatch dot in the theme picker UI. */
+  swatch: string;
+  /** Hue in degrees, or null for the grayscale monochrome theme. */
+  hue: number | null;
+  accentSat: number;
+  accentLight: number;
+}
+
+export const COLORS: ColorDefinition[] = [
+  { id: "monochrome", label: "Monochrome",    swatch: "#fafafa", hue: null, accentSat: 0,  accentLight: 98 },
+  { id: "blue",       label: "Ocean Blue",     swatch: "#3b82f6", hue: 217,  accentSat: 91, accentLight: 60 },
+  { id: "green",      label: "Forest Green",   swatch: "#22c55e", hue: 142,  accentSat: 71, accentLight: 45 },
+  { id: "purple",     label: "Royal Purple",   swatch: "#a855f7", hue: 271,  accentSat: 81, accentLight: 65 },
+  { id: "orange",     label: "Sunset Orange",  swatch: "#f97316", hue: 25,   accentSat: 95, accentLight: 53 },
+  { id: "rose",       label: "Rose",           swatch: "#f43f5e", hue: 350,  accentSat: 89, accentLight: 60 },
+];
+
+/** Builds a full dark-mode palette: near-black tinted background, progressively
+ *  lighter tinted panels, and a saturated accent color (primary/ring). */
+function buildDarkPalette(c: ColorDefinition): Palette {
+  const mono = c.hue === null;
+  const h = c.hue ?? 0;
+  const s = mono ? 0 : 22;
+  const fgS = mono ? 0 : 15;
+  return {
+    "--background":           `hsl(${h} ${mono ? 0 : 30}% 3.9%)`,
+    "--foreground":           `hsl(${h} ${fgS}% 98%)`,
+    "--card":                 `hsl(${h} ${mono ? 0 : 26}% 7%)`,
+    "--card-foreground":      `hsl(${h} ${fgS}% 98%)`,
+    "--popover":              `hsl(${h} ${mono ? 0 : 26}% 7%)`,
+    "--popover-foreground":   `hsl(${h} ${fgS}% 98%)`,
+    "--primary":              `hsl(${h} ${c.accentSat}% ${c.accentLight}%)`,
+    "--primary-foreground":   mono ? "hsl(0 0% 9%)" : "hsl(0 0% 100%)",
+    "--secondary":            `hsl(${h} ${s}% 14.9%)`,
+    "--secondary-foreground": `hsl(${h} ${fgS}% 98%)`,
+    "--muted":                `hsl(${h} ${s}% 14.9%)`,
+    "--muted-foreground":     `hsl(${h} ${fgS}% 63.9%)`,
+    "--accent":               `hsl(${h} ${s}% 16.9%)`,
+    "--accent-foreground":    `hsl(${h} ${fgS}% 98%)`,
+    "--border":                `hsl(${h} ${s}% 14.9%)`,
+    "--input":                `hsl(${h} ${s}% 14.9%)`,
+    "--ring":                 `hsl(${h} ${c.accentSat}% ${c.accentLight}%)`,
+  };
+}
+
+/** Builds a full light-mode palette: near-white tinted background, light gray
+ *  tinted panels, dark text, and the same saturated accent color. */
+function buildLightPalette(c: ColorDefinition): Palette {
+  const mono = c.hue === null;
+  const h = c.hue ?? 0;
+  const s = mono ? 0 : 20;
+  const fgS = mono ? 0 : 10;
+  return {
+    "--background":           `hsl(${h} ${mono ? 0 : 25}% 97%)`,
+    "--foreground":           `hsl(${h} ${fgS}% 9%)`,
+    "--card":                 `hsl(${h} ${mono ? 0 : 15}% 100%)`,
+    "--card-foreground":      `hsl(${h} ${fgS}% 9%)`,
+    "--popover":              `hsl(${h} ${mono ? 0 : 15}% 100%)`,
+    "--popover-foreground":   `hsl(${h} ${fgS}% 9%)`,
+    "--primary":              mono ? "hsl(0 0% 9%)" : `hsl(${h} ${c.accentSat}% ${c.accentLight}%)`,
+    "--primary-foreground":   mono ? "hsl(0 0% 98%)" : "hsl(0 0% 100%)",
+    "--secondary":            `hsl(${h} ${s}% 95.1%)`,
+    "--secondary-foreground": `hsl(${h} ${fgS}% 9%)`,
+    "--muted":                `hsl(${h} ${s}% 95.1%)`,
+    "--muted-foreground":     `hsl(${h} ${fgS}% 45.1%)`,
+    "--accent":               `hsl(${h} ${s}% 93.1%)`,
+    "--accent-foreground":    `hsl(${h} ${fgS}% 9%)`,
+    "--border":                `hsl(${h} ${s}% 89.1%)`,
+    "--input":                `hsl(${h} ${s}% 89.1%)`,
+    "--ring":                 mono ? "hsl(0 0% 3.9%)" : `hsl(${h} ${c.accentSat}% ${c.accentLight}%)`,
+  };
+}
+
+export const DEFAULT_THEME_ID: ThemeId = "monochrome";
+export const DEFAULT_THEME_MODE: ThemeMode = "dark";
+
+export function isThemeId(value: string | null | undefined): value is ThemeId {
+  return !!value && COLORS.some((c) => c.id === value);
+}
+
+export function isThemeMode(value: string | null | undefined): value is ThemeMode {
+  return value === "dark" || value === "light";
+}
+
+function getColor(id: string | null | undefined): ColorDefinition {
+  return COLORS.find((c) => c.id === id) ?? COLORS[0];
+}
+
+export function getPalette(id: string | null | undefined, mode: ThemeMode): Palette {
+  const color = getColor(id);
+  return mode === "light" ? buildLightPalette(color) : buildDarkPalette(color);
+}
+
+export const THEME_STORAGE_KEY = "kuber-theme";
+export const THEME_MODE_STORAGE_KEY = "kuber-theme-mode";
+
+/** Applies a theme + mode's CSS custom properties to the document root. Safe to call before mount. */
+export function applyTheme(id: string | null | undefined, mode: ThemeMode) {
+  if (typeof document === "undefined") return;
+  const palette = getPalette(id, mode);
+  const root = document.documentElement;
+  for (const cssVar of CSS_VARS) root.style.setProperty(cssVar, palette[cssVar]);
+  root.dataset.theme = getColor(id).id;
+  root.dataset.mode = mode;
+}

@@ -28,7 +28,7 @@ function StepGuide({ steps }: { steps: Step[] }) {
             <InfoTip text={s.tip} side="bottom" />
           </div>
           {i < steps.length - 1 && (
-            <span className="text-white text-[11px] px-1 shrink-0">→</span>
+            <span className="text-muted-foreground text-[11px] px-1 shrink-0">→</span>
           )}
         </div>
       ))}

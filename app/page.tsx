@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { APP_LOGO_INITIAL, APP_NAME, APP_TAGLINE } from "@/lib/branding";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -43,12 +44,12 @@ export default function LoginPage() {
         <div className="px-6 py-6 border-b border-border">
           <div className="flex items-center gap-2.5 mb-5">
             <div className="size-8 bg-foreground rounded-lg flex items-center justify-center">
-              <span className="text-background text-sm font-black">K</span>
+              <span className="text-background text-sm font-black">{APP_LOGO_INITIAL}</span>
             </div>
-            <span className="font-bold text-lg">Kuber</span>
+            <span className="font-bold text-lg">{APP_NAME}</span>
           </div>
           <h1 className="text-2xl font-bold">Sign in</h1>
-          <p className="text-sm text-muted-foreground mt-1">Access the lead command center.</p>
+          <p className="text-sm text-muted-foreground mt-1">{APP_TAGLINE}</p>
         </div>
         <form onSubmit={handleLogin} className="px-6 py-5 space-y-4">
           <div className="space-y-1.5">

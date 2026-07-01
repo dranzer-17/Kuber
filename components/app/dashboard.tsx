@@ -17,8 +17,8 @@ import type { ImportBatch } from "@/lib/api-client";
 
 // ─── Chart helpers ────────────────────────────────────────────────────────────
 
-const GRID_COLOR = "rgba(255,255,255,0.06)";
-const TICK_COLOR = "rgba(255,255,255,0.35)";
+const GRID_COLOR = "var(--border)";
+const TICK_COLOR = "var(--muted-foreground)";
 
 function ChartTooltip({ active, payload, label }: {
   active?: boolean;
@@ -31,7 +31,7 @@ function ChartTooltip({ active, payload, label }: {
       {label && <p className="font-medium text-muted-foreground mb-1">{label}</p>}
       {payload.map((p) => (
         <div key={p.name} className="flex items-center gap-2">
-          <span className="size-1.5 rounded-full shrink-0 bg-blue-500" />
+          <span className="size-1.5 rounded-full shrink-0 bg-primary" />
           <span className="text-muted-foreground">{p.name}:</span>
           <span className="font-semibold text-foreground tabular-nums">{p.value}</span>
         </div>
@@ -49,22 +49,22 @@ function StatCard({
 }) {
   return (
     <div className={cn(
-      "rounded-xl border p-5 transition-all hover:border-blue-500/30",
-      highlight ? "bg-blue-600 border-blue-500" : "bg-card border-border",
+      "rounded-xl border p-5 transition-all hover:border-primary/30",
+      highlight ? "bg-primary border-primary" : "bg-card border-border",
     )}>
       <div className={cn(
         "w-fit p-2 rounded-lg mb-4 border",
-        highlight ? "bg-blue-500/30 border-blue-400/30" : "bg-secondary border-border",
+        highlight ? "bg-primary-foreground/20 border-primary-foreground/20" : "bg-secondary border-border",
       )}>
-        <Icon className={cn("size-4", highlight ? "text-white" : "text-muted-foreground")} />
+        <Icon className={cn("size-4", highlight ? "text-primary-foreground" : "text-muted-foreground")} />
       </div>
-      <div className={cn("text-3xl font-bold mb-1 tabular-nums", highlight ? "text-white" : "text-foreground")}>
+      <div className={cn("text-3xl font-bold mb-1 tabular-nums", highlight ? "text-primary-foreground" : "text-foreground")}>
         {value}
       </div>
-      <div className={cn("text-sm font-medium mb-0.5", highlight ? "text-white/80" : "text-foreground/80")}>
+      <div className={cn("text-sm font-medium mb-0.5", highlight ? "text-primary-foreground/80" : "text-foreground/80")}>
         {title}
       </div>
-      <div className={cn("text-xs", highlight ? "text-white/50" : "text-muted-foreground")}>
+      <div className={cn("text-xs", highlight ? "text-primary-foreground/50" : "text-muted-foreground")}>
         {trend}
       </div>
     </div>
@@ -168,20 +168,20 @@ export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectB
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={pipelineGrowth} margin={{ left: -10, right: 4, top: 4, bottom: 0 }}>
               <defs>
-                <linearGradient id="areaBlue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%"   stopColor="#3b82f6" stopOpacity={0.25} />
-                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.01} />
+                <linearGradient id="areaPrimary" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"   stopColor="var(--primary)" stopOpacity={0.25} />
+                  <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.01} />
                 </linearGradient>
               </defs>
               <CartesianGrid stroke={GRID_COLOR} strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="month" tick={{ fill: TICK_COLOR, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: TICK_COLOR, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "rgba(59,130,246,0.3)", strokeWidth: 1.5 }} />
+              <Tooltip content={<ChartTooltip />} cursor={{ stroke: "var(--primary)", strokeWidth: 1.5, strokeOpacity: 0.3 }} />
               <Area
-                type="natural" dataKey="leads" name="Leads" stroke="#3b82f6" strokeWidth={2.5}
-                fill="url(#areaBlue)"
-                dot={{ fill: "#3b82f6", r: 3.5, strokeWidth: 2, stroke: "#0f172a" }}
-                activeDot={{ r: 5, fill: "#3b82f6", strokeWidth: 0 }}
+                type="natural" dataKey="leads" name="Leads" stroke="var(--primary)" strokeWidth={2.5}
+                fill="url(#areaPrimary)"
+                dot={{ fill: "var(--primary)", r: 3.5, strokeWidth: 2, stroke: "var(--background)" }}
+                activeDot={{ r: 5, fill: "var(--primary)", strokeWidth: 0 }}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -282,10 +282,10 @@ export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectB
         {/* Right column */}
         <div className="space-y-4">
 
-          <div className="bg-blue-600 border border-blue-500 rounded-xl p-5">
-            <Award className="size-7 text-white/80 mb-3" />
-            <h3 className="text-sm font-semibold text-white mb-1">Pipeline overview</h3>
-            <p className="text-xs text-white/60 leading-relaxed">
+          <div className="bg-primary border border-primary rounded-xl p-5">
+            <Award className="size-7 text-primary-foreground/80 mb-3" />
+            <h3 className="text-sm font-semibold text-primary-foreground mb-1">Pipeline overview</h3>
+            <p className="text-xs text-primary-foreground/60 leading-relaxed">
               {hotLeads} hot leads · {totalSent} emails sent · {replyRate}% reply rate.
               Keep enriching and following up to close your pipeline.
             </p>
@@ -305,7 +305,7 @@ export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectB
                 </div>
                 <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-blue-500 transition-all"
+                    className="h-full rounded-full bg-primary transition-all"
                     style={{ width: `${Math.min(Math.round(item.current / item.goal * 100), 100)}%` }}
                   />
                 </div>
@@ -330,7 +330,7 @@ export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectB
                   onClick={s.action}
                   className="flex items-center gap-2 cursor-pointer hover:text-foreground transition-colors"
                 >
-                  <span className="size-1.5 rounded-full shrink-0 bg-blue-500" />
+                  <span className="size-1.5 rounded-full shrink-0 bg-primary" />
                   {s.text}
                 </li>
               ))}

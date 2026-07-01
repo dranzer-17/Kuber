@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
 
   // --- 1) classify ---
-  const classification = await classifyReply({
+  const classification = await classifyReply(db, {
     originalEmailText,
     replyText: b.reply_text,
   });

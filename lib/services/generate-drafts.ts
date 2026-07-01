@@ -1,10 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { complete, type DraftOutput } from "@/lib/services/llm";
-import { getDraftSystemPrompt, resolveCampaignSignature } from "@/lib/services/settings";
-import { KUBER_CONTEXT } from "@/lib/constants";
+import { complete } from "@/lib/services/llm";
+import {
+  getDraftSystemPrompt,
+  resolveCampaignSignature,
+  getEmailTemplate,
+  getProductSections,
+} from "@/lib/services/settings";
+import { KUBER_CONTEXT, type KuberProductMatch } from "@/lib/constants";
 
-const DraftSchema = z.object({ subject: z.string(), body: z.string() });
+const DraftSchema = z.object({
+  subject: z.string(),
+  opening: z.string(),
+  product_match: z.enum(["black", "white", "color", "additive", "none"]),
+});
+
+type DraftLLMOutput = z.infer<typeof DraftSchema>;
 
 type OrgData = {
   name?: string | null;
@@ -43,11 +54,27 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
-// Approach A: instruct the LLM to NOT add a sign-off — we append it deterministically.
-const SIGNATURE_INSTRUCTION =
-  "\n\nIMPORTANT: Do NOT include any sign-off, signature, name, title, position, or " +
-  "contact details at the end. End the email body with your final sentence only. " +
-  "The signature is appended automatically by the system.";
+// The base company intro, offerings, and closing are a client-approved fixed template
+// (editable in Settings, stored in the `settings` table) — the LLM only personalizes
+// the opening line and picks the best-fit product addendum, it does not write the
+// full email body.
+function buildTemplateInstruction(productSections: Awaited<ReturnType<typeof getProductSections>>): string {
+  return (
+    "\n\nIMPORTANT — this is NOT a freeform email. You are writing two small pieces that slot into a " +
+    "fixed, client-approved template:\n" +
+    '1. "subject": a short, personalized subject line referencing the lead\'s company.\n' +
+    '2. "opening": 2-4 sentences ONLY. Address the lead by first name if given, otherwise "there". ' +
+    "Reference something specific about their company (what they make/sell, from the facts given) and " +
+    "naturally bridge into why Kuber Polyplast's masterbatches are relevant to them. " +
+    "Do NOT restate Kuber's company info, certifications, production capacity, or client list — that is " +
+    "appended automatically. Do NOT include a greeting line like 'Dear X' (added automatically). " +
+    "Do NOT include a sign-off, signature, or any bracketed placeholders like [Your Name].\n" +
+    '3. "product_match": pick exactly one of "black", "white", "color", "additive", or "none" — ' +
+    "whichever masterbatch type best fits this company's business, based on the facts given. " +
+    "Use \"none\" only if there is no reasonable fit.\n" +
+    `Fit guide:\n- black: ${productSections.black.hint}\n- white: ${productSections.white.hint}\n- color: ${productSections.color.hint}\n- additive: ${productSections.additive.hint}`
+  );
+}
 
 function buildUserPrompt(
   lead: LeadRow,
@@ -70,7 +97,6 @@ function buildUserPrompt(
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
     `Kuber context: ${KUBER_CONTEXT}`,
-    `Instruction: Write a complete email body. Do NOT use any bracketed placeholders like [Your Name].`,
   ];
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
   if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
@@ -103,15 +129,9 @@ export async function generateOneDraft(
 
   const signatureBlock = await resolveCampaignSignature(db, campaign ?? {});
 
-  // Per-lead attachment overrides campaign default
+  // Per-lead attachment overrides campaign default. The brochure-attachment sentence
+  // lives in the fixed closing template (lib/constants.ts), not something the LLM writes.
   const effectiveAttachmentName = target.attachment_name ?? campaign?.attachment_name ?? null;
-
-  const attachmentInstruction = effectiveAttachmentName
-    ? `\n\nIMPORTANT: A file named "${effectiveAttachmentName}" is attached to this email. ` +
-      `You MUST reference it naturally in ONE sentence near the end (before the closing line), ` +
-      `e.g. "I've attached our company brochure for your reference." ` +
-      `Do not invent details about the file beyond that it is attached.`
-    : "";
 
   // --- Draft row (insert or reuse) ---
   let draftId = existingDraftId;
@@ -138,15 +158,18 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const baseSystemPrompt = await getDraftSystemPrompt(db);
-    // Assemble full system prompt with campaign context + attachment + signature instructions
+    const [baseSystemPrompt, emailTemplate, productSections] = await Promise.all([
+      getDraftSystemPrompt(db),
+      getEmailTemplate(db),
+      getProductSections(db),
+    ]);
+    // Assemble full system prompt with campaign context + fixed-template instructions
     const systemPrompt =
       baseSystemPrompt
       + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
-      + attachmentInstruction
-      + SIGNATURE_INSTRUCTION;
+      + buildTemplateInstruction(productSections);
 
-    const { json } = await complete<DraftOutput>({
+    const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
       user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext, stepNumber),
     });
@@ -155,19 +178,39 @@ export async function generateOneDraft(
     if (!validated.success) throw new Error("Draft shape mismatch");
 
     // Approach B safety net — remove any placeholder the LLM emitted anyway:
-    let finalBody = validated.data.body.trim();
-    finalBody = finalBody
+    let opening = validated.data.opening.trim();
+    opening = opening
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
       .replace(/\[Your Contact Information\]/gi, "")
       .replace(/\[Your Company\]/gi, "")
-      // Strip trailing sign-off the LLM adds despite SIGNATURE_INSTRUCTION
+      .replace(/^dear[^,\n]*,?\s*/i, "")
+      // Strip trailing sign-off the LLM adds despite instructions
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
-    // Append the resolved signature:
-    finalBody = `${finalBody}\n\n${signatureBlock}`;
+    const greetingName = lead.first_name?.trim();
+    const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
+
+    const productMatch = validated.data.product_match as KuberProductMatch;
+    const productSection = productMatch !== "none" ? productSections[productMatch].section : null;
+
+    const closing = effectiveAttachmentName
+      ? emailTemplate.closingWithAttachment
+      : emailTemplate.closingNoAttachment;
+
+    const bodyParts = [
+      greeting,
+      opening,
+      emailTemplate.intro,
+      emailTemplate.offerings,
+      ...(productSection ? [productSection] : []),
+      closing,
+      signatureBlock,
+    ];
+
+    const finalBody = bodyParts.join("\n\n");
 
     const finalStatus = humanInLoop ? "draft" : "approved";
     const now = new Date().toISOString();

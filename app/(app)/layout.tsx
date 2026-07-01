@@ -8,6 +8,8 @@ import {
   RefreshCw, Trash2, AlertTriangle,
 } from "lucide-react";
 import { AppProvider, useApp } from "@/lib/app-context";
+import { ThemeProvider } from "@/lib/theme-context";
+import { APP_LOGO_INITIAL, APP_NAME } from "@/lib/branding";
 import { isCampaignEligible, type Lead } from "@/lib/leads";
 import { deleteLead, fetchLogo } from "@/lib/api-client";
 import { CreateCampaignModal } from "@/components/app/create-campaign-modal";
@@ -175,10 +177,10 @@ function AppShell({ children }: { children: React.ReactNode }) {
               />
             ) : (
               <div className="size-8 bg-foreground rounded-lg flex items-center justify-center">
-                <span className="text-background text-sm font-black">K</span>
+                <span className="text-background text-sm font-black">{APP_LOGO_INITIAL}</span>
               </div>
             )}
-            <span className="font-bold">Kuber</span>
+            <span className="font-bold">{APP_NAME}</span>
           </div>
           <nav className="flex-1 p-2 space-y-0.5">
             {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
@@ -191,8 +193,8 @@ function AppShell({ children }: { children: React.ReactNode }) {
                   className={cn(
                     "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                     active
-                      ? "bg-secondary text-white font-semibold"
-                      : "text-muted-foreground hover:bg-secondary/50 hover:text-white",
+                      ? "bg-primary/15 text-primary font-semibold"
+                      : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
                   )}
                 >
                   <Icon className="size-4 shrink-0" />
@@ -300,10 +302,19 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
 // ── Layout export (wraps with provider) ──────────────────────────────────────
 
+function ThemedAppShell({ children }: { children: React.ReactNode }) {
+  const { session } = useApp();
+  return (
+    <ThemeProvider session={session}>
+      <AppShell>{children}</AppShell>
+    </ThemeProvider>
+  );
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppProvider>
-      <AppShell>{children}</AppShell>
+      <ThemedAppShell>{children}</ThemedAppShell>
     </AppProvider>
   );
 }

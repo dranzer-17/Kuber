@@ -5,28 +5,39 @@ import { useEffect, useRef, useState } from "react";
 import {
   Lock, User, Bot, LogOut,
   ChevronRight, Sparkles, PenLine, Bold, Italic, Underline,
-  List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type,
+  List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type, Palette, Check, Sun, Moon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { TagInput } from "@/components/app/lead-forms";
 import { fetchLogo, fetchSettings, patchSettings, removeLogo, uploadLogo } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { COLORS } from "@/lib/branding";
+import { useTheme } from "@/lib/theme-context";
 
 const PRODUCT_SUGGESTIONS = [
   "Masterbatch", "Color Concentrates", "White Masterbatch", "Black Masterbatch",
   "Additive Masterbatch", "Filler Masterbatch",
 ];
 
-type Section = "profile" | "ai" | "account";
-type AiSection = "context" | "drafts" | "footer" | "knowledge";
+type Section = "profile" | "ai" | "appearance" | "account";
+type AiSection = "context" | "drafts" | "template" | "products" | "replies" | "footer" | "knowledge";
+
+const PRODUCT_TYPES = [
+  { id: "black",    label: "Black Masterbatch" },
+  { id: "white",    label: "White Masterbatch" },
+  { id: "color",    label: "Color Masterbatch" },
+  { id: "additive", label: "Additive Masterbatch" },
+] as const;
 
 const NAV_ITEMS: { id: Section; label: string; description: string }[] = [
-  { id: "profile", label: "My Profile",    description: "Admin account details" },
-  { id: "ai",      label: "AI & Outreach", description: "Email AI configuration" },
-  { id: "account", label: "Account",       description: "Sign out & security" },
+  { id: "profile",    label: "My Profile",    description: "Admin account details" },
+  { id: "ai",         label: "AI & Outreach", description: "Email AI configuration" },
+  { id: "appearance", label: "Appearance",    description: "Color theme" },
+  { id: "account",    label: "Account",       description: "Sign out & security" },
 ];
 
 const AI_NAV_ITEMS: {
@@ -36,6 +47,9 @@ const AI_NAV_ITEMS: {
 }[] = [
   { id: "context", label: "Company Context", icon: Bot },
   { id: "drafts", label: "Draft Editor", icon: Type },
+  { id: "template", label: "Cold Email Template", icon: PenLine },
+  { id: "products", label: "Product Sections", icon: Sparkles },
+  { id: "replies", label: "Reply AI", icon: Bot },
   { id: "footer", label: "Email Footer", icon: PenLine },
   { id: "knowledge", label: "Knowledge Sources", icon: Lock },
 ];
@@ -177,6 +191,7 @@ function RichTextEditor({
 }
 
 export function SettingsView() {
+  const { theme, mode, setTheme, setMode, savingTheme } = useTheme();
   const [section, setSection] = useState<Section>("profile");
   const [aiSection, setAiSection] = useState<AiSection>("context");
 
@@ -194,6 +209,21 @@ export function SettingsView() {
   const [sigName,    setSigName   ] = useState("");
   const [sigTitle,   setSigTitle  ] = useState("");
   const [sigContact, setSigContact] = useState("");
+
+  // Cold email template (fixed body the AI personalizes around)
+  const [emailIntro,           setEmailIntro          ] = useState("");
+  const [emailOfferings,       setEmailOfferings      ] = useState("");
+  const [closingWithAttachment, setClosingWithAttachment] = useState("");
+  const [closingNoAttachment,   setClosingNoAttachment  ] = useState("");
+
+  // Per-product addenda + AI fit hints
+  const [productSections, setProductSections] = useState<Record<string, { section: string; hint: string }>>(
+    Object.fromEntries(PRODUCT_TYPES.map((p) => [p.id, { section: "", hint: "" }])),
+  );
+
+  // Reply handling prompts
+  const [replyClassifierPrompt, setReplyClassifierPrompt] = useState("");
+  const [replyDrafterPrompt,    setReplyDrafterPrompt   ] = useState("");
 
   // Auth
   const [userEmail, setUserEmail] = useState("");
@@ -224,6 +254,19 @@ export function SettingsView() {
         setSigName(s.signature_name ?? "");
         setSigTitle(s.signature_title ?? "");
         setSigContact(s.signature_contact ?? "");
+
+        setEmailIntro(s.email_template_intro ?? "");
+        setEmailOfferings(s.email_template_offerings ?? "");
+        setClosingWithAttachment(s.email_template_closing_with_attachment ?? "");
+        setClosingNoAttachment(s.email_template_closing_no_attachment ?? "");
+        setProductSections(Object.fromEntries(
+          PRODUCT_TYPES.map((p) => [
+            p.id,
+            { section: s[`product_${p.id}_section`] ?? "", hint: s[`product_${p.id}_hint`] ?? "" },
+          ]),
+        ));
+        setReplyClassifierPrompt(s.reply_classifier_prompt ?? "");
+        setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
 
         const l = await fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
         setLogoPath(l.logo_path);
@@ -279,6 +322,12 @@ export function SettingsView() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token ?? "";
+      const productPatch = Object.fromEntries(
+        PRODUCT_TYPES.flatMap((p) => [
+          [`product_${p.id}_section`, productSections[p.id]?.section ?? ""],
+          [`product_${p.id}_hint`, productSections[p.id]?.hint ?? ""],
+        ]),
+      );
       await patchSettings(token, {
         default_sender_name: senderName,
         client_industry:     clientIndustry,
@@ -288,6 +337,13 @@ export function SettingsView() {
         signature_name:      sigName,
         signature_title:     sigTitle,
         signature_contact:   sigContact,
+        email_template_intro: emailIntro,
+        email_template_offerings: emailOfferings,
+        email_template_closing_with_attachment: closingWithAttachment,
+        email_template_closing_no_attachment: closingNoAttachment,
+        reply_classifier_prompt: replyClassifierPrompt,
+        reply_drafter_prompt: replyDrafterPrompt,
+        ...productPatch,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -364,8 +420,8 @@ export function SettingsView() {
               className={cn(
                 "px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full",
                 section === id
-                  ? "bg-white text-black font-semibold"
-                  : "text-muted-foreground hover:text-white hover:bg-secondary/50",
+                  ? "bg-primary text-primary-foreground font-semibold"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
               )}
             >
               {label}
@@ -384,8 +440,8 @@ export function SettingsView() {
                 className={cn(
                   "px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
                   aiSection === id
-                    ? "bg-white text-black font-semibold"
-                    : "text-muted-foreground hover:text-white hover:bg-secondary/50",
+                    ? "bg-primary text-primary-foreground font-semibold"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
                 )}
               >
                 {Icon ? <Icon className="size-4 shrink-0" /> : <span className="size-4 shrink-0" />}
@@ -565,6 +621,131 @@ export function SettingsView() {
                       </section>
                     )}
 
+                    {aiSection === "template" && (
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <PenLine className="size-4 text-muted-foreground" />
+                              <h3 className="text-sm font-semibold">Cold Email Template</h3>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              This client-approved copy is sent as-is on every cold email. The AI only
+                              writes a short personalized opening line and picks the matching product
+                              section &mdash; it never rewrites this text.
+                            </p>
+                          </div>
+                        </div>
+                        <RichTextEditor
+                          label="Company intro"
+                          value={emailIntro}
+                          onChange={setEmailIntro}
+                          minHeight={120}
+                          helper="Appears right after the AI-personalized opening line."
+                        />
+                        <RichTextEditor
+                          label="Offerings & key strengths"
+                          value={emailOfferings}
+                          onChange={setEmailOfferings}
+                          minHeight={260}
+                        />
+                        <RichTextEditor
+                          label="Closing (with brochure attached)"
+                          value={closingWithAttachment}
+                          onChange={setClosingWithAttachment}
+                          minHeight={100}
+                          helper="Used when the campaign or lead has an attachment configured."
+                        />
+                        <RichTextEditor
+                          label="Closing (no attachment)"
+                          value={closingNoAttachment}
+                          onChange={setClosingNoAttachment}
+                          minHeight={100}
+                          helper="Used when there is no attachment for this email."
+                        />
+                      </section>
+                    )}
+
+                    {aiSection === "products" && (
+                      <div className="space-y-4">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="size-4 text-muted-foreground" />
+                            <h3 className="text-sm font-semibold">Product Sections</h3>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            For each masterbatch type, the AI reads the &quot;fit hint&quot; to decide whether
+                            it matches a lead&apos;s company, then appends the section copy verbatim if it does.
+                          </p>
+                        </div>
+                        {PRODUCT_TYPES.map(({ id, label }) => (
+                          <section key={id} className="rounded-xl border border-border bg-card p-6 space-y-4">
+                            <h4 className="text-sm font-semibold">{label}</h4>
+                            <div className="space-y-1.5">
+                              <Label>AI fit hint</Label>
+                              <Textarea
+                                value={productSections[id]?.hint ?? ""}
+                                onChange={(e) =>
+                                  setProductSections((prev) => ({
+                                    ...prev,
+                                    [id]: { ...prev[id], hint: e.target.value },
+                                  }))
+                                }
+                                placeholder="When does this product fit a lead's company? e.g. buys/uses carbon black, needs UV protection..."
+                                className="min-h-16"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Short description of the kind of company this product fits &mdash; used by the AI to match leads, not shown in the email.
+                              </p>
+                            </div>
+                            <RichTextEditor
+                              label="Section copy"
+                              value={productSections[id]?.section ?? ""}
+                              onChange={(value) =>
+                                setProductSections((prev) => ({
+                                  ...prev,
+                                  [id]: { ...prev[id], section: value },
+                                }))
+                              }
+                              minHeight={220}
+                              helper="Appended to the email verbatim when this product is matched."
+                            />
+                          </section>
+                        ))}
+                      </div>
+                    )}
+
+                    {aiSection === "replies" && (
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-5">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Bot className="size-4 text-muted-foreground" />
+                              <h3 className="text-sm font-semibold">Reply AI</h3>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Controls how inbound replies are classified (hot/warm/cold/etc.) and how
+                              follow-up replies are drafted.
+                            </p>
+                          </div>
+                        </div>
+                        <RichTextEditor
+                          label="Reply classifier prompt"
+                          value={replyClassifierPrompt}
+                          onChange={setReplyClassifierPrompt}
+                          minHeight={280}
+                          helper="Must return JSON with temperature, interest_status, and reasoning — see existing prompt for the exact shape."
+                        />
+                        <RichTextEditor
+                          label="Reply drafter prompt"
+                          value={replyDrafterPrompt}
+                          onChange={setReplyDrafterPrompt}
+                          minHeight={220}
+                          helper="Must return JSON with subject and body."
+                        />
+                      </section>
+                    )}
+
                     {aiSection === "footer" && (
                       <section className="rounded-xl border border-border bg-card p-6 space-y-5">
                         <div className="flex items-start justify-between gap-4">
@@ -610,6 +791,81 @@ export function SettingsView() {
                 {error && <p className="text-xs text-destructive">{error}</p>}
                 {saved && <p className="text-sm text-green-400">Settings saved.</p>}
 
+              </>
+            )}
+
+            {/* ── Appearance ── */}
+            {section === "appearance" && (
+              <>
+                <div className="rounded-xl border border-border bg-card p-6 space-y-5">
+                  <div className="flex items-center gap-2">
+                    {mode === "light" ? <Sun className="size-4 text-muted-foreground" /> : <Moon className="size-4 text-muted-foreground" />}
+                    <h3 className="text-sm font-semibold">Appearance mode</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground -mt-3">
+                    Switch between a dark or light workspace background.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 max-w-sm">
+                    {(["dark", "light"] as const).map((m) => {
+                      const active = mode === m;
+                      const Icon = m === "dark" ? Moon : Sun;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => void setMode(m)}
+                          disabled={savingTheme}
+                          className={cn(
+                            "flex items-center gap-2.5 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
+                            active
+                              ? "border-primary bg-primary/10"
+                              : "border-border hover:border-muted-foreground",
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="flex-1 text-sm font-medium capitalize">{m}</span>
+                          {active && <Check className="size-4 text-primary shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-border bg-card p-6 space-y-5">
+                  <div className="flex items-center gap-2">
+                    <Palette className="size-4 text-muted-foreground" />
+                    <h3 className="text-sm font-semibold">Color theme</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground -mt-3">
+                    Choose an accent color for the background, sidebar, cards, and highlights across the workspace.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {COLORS.map((t) => {
+                      const active = theme === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => void setTheme(t.id)}
+                          disabled={savingTheme}
+                          className={cn(
+                            "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
+                            active
+                              ? "border-primary bg-primary/10"
+                              : "border-border hover:border-muted-foreground",
+                          )}
+                        >
+                          <span
+                            className="size-7 shrink-0 rounded-full border border-border"
+                            style={{ backgroundColor: t.swatch }}
+                          />
+                          <span className="flex-1 text-sm font-medium">{t.label}</span>
+                          {active && <Check className="size-4 text-primary shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </>
             )}
 

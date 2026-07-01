@@ -17,11 +17,14 @@ function normalizeToHtml(raw: string): string {
   if (!raw) return "";
   // Already HTML — has at least one tag
   if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
-  // Plain text: convert double-newlines to paragraphs, single newlines to <br>
-  return raw
-    .split(/\n{2,}/)
-    .map((para) => `<p>${para.replace(/\n/g, "<br>")}</p>`)
-    .join("");
+  // Plain text: match Gmail's plain-text rendering exactly.
+  // \n\n (or more) → <br><br> (blank line), \n → <br> (line break).
+  // All in one <p> so TipTap adds no extra block margin between sections.
+  const escaped = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return "<p>" + escaped.replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>") + "</p>";
 }
 
 interface RichTextEditorProps {
@@ -206,7 +209,7 @@ export function RichTextEditor({
           "px-4 py-3 text-sm leading-relaxed",
           "[&_.ProseMirror]:outline-none",
           "[&_.ProseMirror]:min-h-[inherit]",
-          "[&_.ProseMirror_p]:my-1",
+          "[&_.ProseMirror_p]:mt-0 [&_.ProseMirror_p]:mb-[1em]",
           "[&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-bold [&_.ProseMirror_h2]:mt-3 [&_.ProseMirror_h2]:mb-1",
           "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-5 [&_.ProseMirror_ul]:my-1",
           "[&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-5 [&_.ProseMirror_ol]:my-1",
