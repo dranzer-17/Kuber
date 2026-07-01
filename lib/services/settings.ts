@@ -99,6 +99,8 @@ const SIGNATURE_KEYS = [
 const SIGNATURE_DEFAULTS = {
   name:    "Kuber Polyplast Sales Team",
   title:   "Business Development",
+  // TODO: Replace +91-XXXXXXXXXX with the real phone number before sending live campaigns.
+  // Also run: UPDATE settings SET value='Kuber Polyplast\n+91-<REAL_NUMBER>\nsales@kuberpolyplast.com' WHERE key='signature_contact';
   contact: "Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com",
   company: "Kuber Polyplast",
 };

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { classifyReply, applyClassification } from "@/lib/services/classify-reply";
 import { generateReplyDraft } from "@/lib/services/generate-reply";
-import { getInstantlyEmail } from "@/lib/services/instantly";
+import { getInstantlyEmail, listThreadEmails } from "@/lib/services/instantly";
 
 export const maxDuration = 55;
 
@@ -26,6 +26,9 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
 
+  // Self-heal: mark reply drafts stuck in 'generating' for >5 minutes as failed
+  try { await db.rpc("reset_stuck_reply_drafts", { stale_minutes: 5 }); } catch { /* non-fatal */ }
+
   // --- gather context: our original email + thread + eaccount (best-effort) ---
   let originalEmailText: string | null = null;
   let threadId: string | null = null;
@@ -35,7 +38,18 @@ export async function POST(req: NextRequest) {
       const inbound = await getInstantlyEmail(b.email_id);
       threadId = inbound.thread_id ?? null;
       eaccount = inbound.eaccount ?? null;
-    } catch { /* non-fatal */ }
+
+      // Pull the thread and find our first outbound email as originalEmailText
+      // so the classifier and drafter have the full context they need.
+      if (threadId) {
+        const threadEmails = await listThreadEmails(threadId);
+        // ue_type 2 = received (prospect). Everything else is us. Take the earliest non-received email.
+        const ourFirst = threadEmails.find((e) => e.ue_type !== 2);
+        if (ourFirst?.body?.text) {
+          originalEmailText = ourFirst.body.text.trim() || null;
+        }
+      }
+    } catch { /* non-fatal — classifier has safe defaults */ }
   }
 
   // resolve campaign name + ai context

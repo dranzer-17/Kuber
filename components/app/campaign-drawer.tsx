@@ -182,6 +182,7 @@ export function CampaignDetail({
   const [reportLoading, setReportLoading] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingAll, setRetryingAll] = useState(false);
+  const [generatingFollowUp, setGeneratingFollowUp] = useState(false);
   const leadFileRef = useRef<HTMLInputElement>(null);
   const [uploadingLeadAtt, setUploadingLeadAtt] = useState(false);
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
@@ -674,6 +675,56 @@ export function CampaignDetail({
         </div>
       </div>
 
+      {/* Follow-up draft generation — only shown for campaigns that have sent emails */}
+      {campaign.sent > 0 && (
+        <div className="border-b border-border px-8 py-3 shrink-0">
+          <div className="border border-border rounded-lg p-3 space-y-2 bg-secondary/10">
+            <p className="text-xs font-semibold text-foreground">Follow-up Drafts</p>
+            <p className="text-xs text-muted-foreground">
+              Generate personalised AI drafts for Step 2 (30-day) and Step 3 (90-day) follow-ups for leads who haven&apos;t replied.
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={generatingFollowUp}
+                onClick={async () => {
+                  setGeneratingFollowUp(true);
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) return;
+                    await fetch(`/api/v1/campaigns/${campaign.id}/generate-followups`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+                      body: JSON.stringify({ step_number: 2 }),
+                    });
+                    setTimeout(() => void loadData(), 3000);
+                  } catch (e) { console.error(e); }
+                  finally { setGeneratingFollowUp(false); }
+                }}>
+                {generatingFollowUp ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                Generate Step 2 Drafts
+              </Button>
+              <Button size="sm" variant="outline" disabled={generatingFollowUp}
+                onClick={async () => {
+                  setGeneratingFollowUp(true);
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) return;
+                    await fetch(`/api/v1/campaigns/${campaign.id}/generate-followups`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+                      body: JSON.stringify({ step_number: 3 }),
+                    });
+                    setTimeout(() => void loadData(), 3000);
+                  } catch (e) { console.error(e); }
+                  finally { setGeneratingFollowUp(false); }
+                }}>
+                {generatingFollowUp ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                Generate Step 3 Drafts
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* View tabs: List | Kanban | Report */}
       <div className="border-b border-border px-8 py-2 shrink-0 flex items-center justify-between">
         <div className="flex gap-1">
@@ -681,22 +732,33 @@ export function CampaignDetail({
           { id: "list" as const, label: "Leads" },
           { id: "kanban" as const, label: "Kanban" },
           { id: "report" as const, label: "Report" },
-          { id: "replies" as const, label: `Replies${replies.length ? ` (${replies.length})` : ""}` },
-        ]).map(({ id, label }) => (
+          { id: "replies" as const, label: "replies" },
+        ]).map(({ id, label }) => {
+          const pendingCount = label === "replies" ? replies.filter(r => r.reply_draft?.status === "draft").length : 0;
+          const displayLabel = label === "replies"
+            ? `Replies${replies.length ? ` (${replies.length})` : ""}`
+            : label.charAt(0).toUpperCase() + label.slice(1);
+          return (
           <button
             key={id}
             type="button"
             onClick={() => setViewTab(id)}
             className={cn(
-              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors inline-flex items-center gap-1",
               viewTab === id
                 ? "bg-secondary text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
             )}
           >
-            {label}
+            {displayLabel}
+            {pendingCount > 0 && (
+              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-400 rounded-full">
+                {pendingCount}
+              </span>
+            )}
           </button>
-        ))}
+          );
+        })}
         </div>
 
         <div className="flex items-center gap-4">
@@ -925,7 +987,14 @@ export function CampaignDetail({
                                 if (!session) return;
                                 await sendReplyDraft(session.access_token, selectedReply.reply_draft.id);
                                 await loadReplies();
-                              } catch (e) { setError((e as Error).message); }
+                              } catch (e) {
+                                const msg = (e as Error).message ?? "Failed to send reply";
+                                if (msg.includes("MISSING_THREAD")) {
+                                  setError("Cannot send: the original email reference has expired in Instantly. Regenerate the reply to get a fresh thread reference.");
+                                } else {
+                                  setError(msg);
+                                }
+                              }
                               finally { setReplySending(false); }
                             }}
                             className="gap-1.5 bg-green-600 hover:bg-green-700">

@@ -190,15 +190,17 @@ async function processOneOrg(
 
   try {
     const { json: extracted } = await complete<{ company_description: string | null; sells_to: string | null }>({
-      system: `You are extracting company profile data for a B2B sales team at Kuber Polyplast, a masterbatch and specialty plastics manufacturer.
-From the website content below, extract only:
-1. company_description: 2-3 sentences on what this company does and manufactures
-2. sells_to: who their end customers or industries are (e.g. "packaging manufacturers, automotive OEMs, FMCG brands")
+      system: `You are a company profile extractor. From the website content provided, extract facts about THIS specific company only.
 
-Return ONLY a valid JSON object with no markdown, no preamble, no explanation:
-{ "company_description": "...", "sells_to": "..." }
-If you cannot determine a field, return null for that field.`,
-      user: markdown.slice(0, 8000),
+Return ONLY valid JSON with no markdown, no preamble:
+{ "company_description": string | null, "sells_to": string | null }
+
+Rules:
+- company_description: 2-3 sentences describing what THIS company manufactures or produces and what industry it operates in. If the company is a software firm, a clinic, a consultancy, or anything unrelated to manufacturing/physical goods, return null.
+- sells_to: who their end customers or industries are in plain terms (e.g. "automotive OEMs", "food packaging brands", "retail chains"). Return null if unclear or if the company does not sell physical goods or materials.
+- If you cannot find real evidence for a field in the provided content, return null for that field. Never invent facts. Never describe yourself or any third party — only describe the company whose website you are reading.
+- If the website content is about a masterbatch, color concentrate, or plastic additive manufacturer itself, return null for both fields (this would be a competitor, not a prospect).`,
+      user: `Company name: ${org.name}\nWebsite domain: ${org.domain ?? "unknown"}\n\nWebsite content:\n${markdown.slice(0, 8000)}`,
     });
 
     const llmDuration = Date.now() - llmStart;
@@ -231,6 +233,7 @@ If you cannot determine a field, return null for that field.`,
     await db.from("organizations").update({
       company_description: extracted.company_description,
       sells_to: extracted?.sells_to ?? null,
+      has_scraped: true,
       enrichment_stage: "done",
       enrichment_status: "ENRICHMENT_COMPLETE",
       enrichment_done_at: new Date().toISOString(),

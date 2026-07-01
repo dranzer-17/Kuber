@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
       step:                   p.step ?? null,
       variant:                p.variant ?? null,
       reply_body:             replyBody,
+      reply_subject:          p.reply_subject ?? null,
       received_at:            receivedAt,
       created_at:             new Date().toISOString(),
     },
@@ -141,7 +142,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 8) On a real prospect reply, classify + draft an AI reply (async, fire-and-forget)
+  // 8) On a real prospect reply, classify + draft an AI reply (async, fire-and-forget).
+  // Only genuine replies trigger AI drafting. auto_reply_received (OOO autoresponders)
+  // still get logged in reply_events (above) but we deliberately do NOT draft a response.
   if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET) {
     // we need the reply_events row id we just upserted
     const { data: ev } = await db

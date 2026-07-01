@@ -49,10 +49,17 @@ const SIGNATURE_INSTRUCTION =
   "contact details at the end. End the email body with your final sentence only. " +
   "The signature is appended automatically by the system.";
 
-function buildUserPrompt(lead: LeadRow, campaignName: string, customInstruction?: string, aiPromptContext?: string): string {
+function buildUserPrompt(
+  lead: LeadRow,
+  campaignName: string,
+  customInstruction?: string,
+  aiPromptContext?: string,
+  stepNumber = 1,
+): string {
   const org = unwrapOrg(lead.organizations);
   const lines = [
     `Campaign: "${campaignName}"`,
+    `Email step: ${stepNumber} of 3${stepNumber > 1 ? ` — this is a follow-up to a previous cold email the prospect did not reply to` : ""}`,
     `Name: ${[lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unknown"}`,
     `Title: ${lead.title ?? lead.headline ?? "Unknown"}`,
     `Seniority: ${lead.seniority ?? "Unknown"}`,
@@ -81,6 +88,7 @@ export async function generateOneDraft(
   customInstruction?: string,
   aiPromptContext?: string,
   existingDraftId?: string,
+  stepNumber = 1,
 ): Promise<{ ok: true; draftId: string; status: string } | { ok: false; reason: string }> {
   const lead = unwrapLead(target.leads);
   if (!lead) return { ok: false, reason: "Lead not found" };
@@ -114,6 +122,7 @@ export async function generateOneDraft(
       .insert({
         lead_id: lead.id,
         campaign_id: campaignId,
+        step_number: stepNumber,
         status: "generating",
         created_at: new Date().toISOString(),
       })
@@ -139,7 +148,7 @@ export async function generateOneDraft(
 
     const { json } = await complete<DraftOutput>({
       system: systemPrompt,
-      user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext),
+      user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext, stepNumber),
     });
 
     const validated = DraftSchema.safeParse(json);
@@ -198,6 +207,7 @@ export async function fetchDraftTargets(
   db: SupabaseClient,
   campaignId: string,
   limit = 10,
+  stepNumber = 1,
 ): Promise<CampaignLeadTarget[]> {
   const { data: generatingDrafts } = await db
     .from("email_drafts")

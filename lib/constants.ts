@@ -297,7 +297,7 @@ export const COUNTRY_TO_TIMEZONE: Record<string, string> = {
   Singapore: "Asia/Singapore",
 };
 
-export const KUBER_CONTEXT = `Kuber Polyplast is an Indian masterbatch and specialty compounds manufacturer with 30 years of experience. They are ISO 9001:2015 certified and export to 50+ countries worldwide. Their product range includes colour masterbatches, white masterbatches, black masterbatches, additive masterbatches, and specialty compounds for the plastics processing industry.`;
+export const KUBER_CONTEXT = `Kuber Polyplast is an ISO 9001:2015 certified Indian masterbatch and specialty-compound manufacturer. 30 years of experience, ~18,000 MT/year production capacity, exporting to 50+ countries. Product range: Black Masterbatch (carbon black up to 55%, UV/weather resistant, <50 PPM grit, PE/PP/PET/Nylon/PMMA/HIPS), White Masterbatch (TiO₂ up to 85%, food-contact compliant, milk pouch and packaging grade), Colour Masterbatch (RoHS & REACH compliant, pearlescent/marble/fluorescent effects, heavy-metal-free, 0.2% micro-granule dosage option), Additive Masterbatch (UV stabiliser, anti-block, slip, anti-static, flame retardant, anti-fog, oxo-biodegradable, silicon for HDPE pipes), Filler Masterbatch. Compatible across PE, PP, PET, PS, ABS, EVA, PBT, PC, Nylon, PMMA, GPPS, HIPS. Processing: film extrusion, injection/blow/roto molding, sheet extrusion.`;
 
 export const DEFAULT_CAMPAIGN_STEPS = [
   {

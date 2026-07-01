@@ -14,8 +14,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await req.json().catch(() => ({})) as { campaign_id?: string };
+  const body = await req.json().catch(() => ({})) as { campaign_id?: string; step_number?: number };
   const campaignId = body.campaign_id;
+  const stepNumber = body.step_number ?? 1;
   if (!campaignId) {
     return Response.json({ error: "campaign_id required" }, { status: 400 });
   }
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
 
-  const targets = await fetchDraftTargets(db, campaignId, 10);
+  const targets = await fetchDraftTargets(db, campaignId, 10, stepNumber);
 
   if (targets.length === 0) {
     const pending = await countPendingDrafts(db, campaignId);
@@ -66,6 +67,8 @@ export async function POST(req: NextRequest) {
       undefined,
       undefined,
       campaign.ai_prompt_context ?? undefined,
+      undefined,
+      stepNumber,
     );
     if (result.ok) succeeded++;
     else failed++;
@@ -81,7 +84,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         "x-internal-secret": process.env.INTERNAL_SECRET!,
       },
-      body: JSON.stringify({ campaign_id: campaignId }),
+      body: JSON.stringify({ campaign_id: campaignId, step_number: stepNumber }),
     }).catch(() => {});
   } else {
     await db.from("campaigns").update({
