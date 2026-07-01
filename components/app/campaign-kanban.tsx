@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, RotateCcw } from "lucide-react";
+import { Flame, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 export type CampaignKanbanLead = {
   id: string;
   crm_status: string;
+  lead_temperature: string | null;
   leads: {
     first_name: string | null;
     last_name: string | null;
@@ -95,6 +96,11 @@ export function CampaignKanban({
                             {lead?.title || lead?.email}
                           </p>
                         </div>
+                        {cl.crm_status === "replied" && cl.lead_temperature === "hot" && (
+                          <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-400 bg-red-500/10 border border-red-500/25 rounded-full px-1.5 py-0.5">
+                            <Flame className="size-2.5" /> HOT
+                          </span>
+                        )}
                       </div>
                       {isFailed && onRetry && cl.email_drafts?.id && (
                         <div className="mt-2" onClick={(e) => e.stopPropagation()}>

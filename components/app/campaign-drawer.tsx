@@ -53,6 +53,26 @@ import {
   type CampaignLeadsSort,
 } from "@/lib/leads";
 
+/**
+ * Strips quoted-reply lines from a stored email plain-text body for display.
+ * Handles both "> quoted" lines and "On [date]... wrote:" attribution lines.
+ * Applied on the display side so it works for both old stored data (before the
+ * webhook-side strip was added) and future data.
+ */
+function stripQuotedLines(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(">")) break;
+    if (/^On .+wrote:\s*$/.test(trimmed)) break;
+    if (trimmed === "--" || trimmed === "\u2014") break;
+    kept.push(line);
+  }
+  return kept.join("\n").trim() || null;
+}
+
 const STATUS_STYLES: Record<string, string> = {
   Draft:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
   Live:      "bg-green-500/15 text-green-400 border-green-500/25",
@@ -88,6 +108,7 @@ type CampaignLead = {
   id: string;
   lead_id: string;
   crm_status: string;
+  lead_temperature: string | null;
   created_at: string;
   leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
   email_drafts: { id: string; subject: string | null; body: string | null; status: string } | null;
@@ -849,7 +870,7 @@ export function CampaignDetail({
                         {badge.icon}{badge.label}
                       </span>
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-1">{r.reply_body}</p>
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-1">{stripQuotedLines(r.reply_body)}</p>
                     <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                       <span>{r.received_at ? format(new Date(r.received_at), "MMM d, h:mm a") : ""}</span>
                       {draftStatus && (
@@ -891,7 +912,9 @@ export function CampaignDetail({
                     })()}
                   </div>
                   <div className="rounded-lg bg-secondary/30 border border-border p-4">
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{selectedReply.reply_body}</p>
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                      {stripQuotedLines(selectedReply.reply_body)}
+                    </p>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
                     Received {selectedReply.received_at ? format(new Date(selectedReply.received_at), "MMM d, yyyy 'at' h:mm a") : ""}
