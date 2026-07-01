@@ -11,7 +11,7 @@ import { KUBER_CONTEXT, type KuberProductMatch } from "@/lib/constants";
 
 const DraftSchema = z.object({
   subject: z.string(),
-  opening: z.string(),
+  body: z.string(),
   product_match: z.enum(["black", "white", "color", "additive", "none"]),
 });
 
@@ -58,22 +58,43 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
 // (editable in Settings, stored in the `settings` table) — the LLM only personalizes
 // the opening line and picks the best-fit product addendum, it does not write the
 // full email body.
-function buildTemplateInstruction(productSections: Awaited<ReturnType<typeof getProductSections>>): string {
+
+// Converts assembled plain-text body (with **bold** markers and \n newlines) to HTML
+// so the DB stores a renderable email and Instantly sends proper bold formatting.
+function plainToHtml(plain: string): string {
+  const escaped = plain
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
   return (
-    "\n\nIMPORTANT — this is NOT a freeform email. You are writing two small pieces that slot into a " +
-    "fixed, client-approved template:\n" +
-    '1. "subject": a short, personalized subject line referencing the lead\'s company.\n' +
-    '2. "opening": 2-4 sentences ONLY. Address the lead by first name if given, otherwise "there". ' +
-    "Reference something specific about their company (what they make/sell, from the facts given) and " +
-    "naturally bridge into why Kuber Polyplast's masterbatches are relevant to them. " +
-    "Do NOT restate Kuber's company info, certifications, production capacity, or client list — that is " +
-    "appended automatically. Do NOT include a greeting line like 'Dear X' (added automatically). " +
-    "Do NOT include a sign-off, signature, or any bracketed placeholders like [Your Name].\n" +
-    '3. "product_match": pick exactly one of "black", "white", "color", "additive", or "none" — ' +
-    "whichever masterbatch type best fits this company's business, based on the facts given. " +
-    "Use \"none\" only if there is no reasonable fit.\n" +
-    `Fit guide:\n- black: ${productSections.black.hint}\n- white: ${productSections.white.hint}\n- color: ${productSections.color.hint}\n- additive: ${productSections.additive.hint}`
+    "<p>" +
+    escaped
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n{2,}/g, "<br><br>")
+      .replace(/\n/g, "<br>") +
+    "</p>"
   );
+}
+function buildTemplateInstruction(
+  emailTemplate: Awaited<ReturnType<typeof getEmailTemplate>>,
+  productSections: Awaited<ReturnType<typeof getProductSections>>,
+  hasAttachment: boolean,
+): string {
+  const closing = hasAttachment ? emailTemplate.closingWithAttachment : emailTemplate.closingNoAttachment;
+  return [
+    "\n\nEMAIL BODY STRUCTURE — write all five sections in order as one cohesive body:",
+    "1. PERSONALISED OPENING (2-4 sentences): Address the lead specifically. Reference what their company does and bridge naturally to Kuber's relevance. Do NOT restate Kuber's credentials here — that comes next.",
+    "2. COMPANY INTRODUCTION — include this text verbatim (or very close):\n" + emailTemplate.intro,
+    "3. OFFERINGS & KEY STRENGTHS — include this text verbatim (or very close):\n" + emailTemplate.offerings,
+    "4. PRODUCT RECOMMENDATION (1 short paragraph, naturally written — do NOT copy-paste verbatim): Highlight 2-3 specific benefits from the matched product that are most relevant to this lead's business.",
+    "5. CLOSING — include this text verbatim:\n" + closing,
+    "",
+    "PRODUCT REFERENCE LIBRARY — pick ONE and use it to write section 4:",
+    `BLACK MASTERBATCH (fits: ${productSections.black.hint})\n${productSections.black.section}`,
+    `WHITE MASTERBATCH (fits: ${productSections.white.hint})\n${productSections.white.section}`,
+    `COLOUR MASTERBATCH (fits: ${productSections.color.hint})\n${productSections.color.section}`,
+    `ADDITIVE MASTERBATCH (fits: ${productSections.additive.hint})\n${productSections.additive.section}`,
+  ].join("\n\n");
 }
 
 function buildUserPrompt(
@@ -163,11 +184,11 @@ export async function generateOneDraft(
       getEmailTemplate(db),
       getProductSections(db),
     ]);
-    // Assemble full system prompt with campaign context + fixed-template instructions
+    // Assemble full system prompt with campaign context + template/product context
     const systemPrompt =
       baseSystemPrompt
       + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
-      + buildTemplateInstruction(productSections);
+      + buildTemplateInstruction(emailTemplate, productSections, !!effectiveAttachmentName);
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
@@ -177,15 +198,14 @@ export async function generateOneDraft(
     const validated = DraftSchema.safeParse(json);
     if (!validated.success) throw new Error("Draft shape mismatch");
 
-    // Approach B safety net — remove any placeholder the LLM emitted anyway:
-    let opening = validated.data.opening.trim();
-    opening = opening
+    // Strip any greeting/sign-off the LLM emitted despite instructions
+    const aiBody = validated.data.body
+      .trim()
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
       .replace(/\[Your Contact Information\]/gi, "")
       .replace(/\[Your Company\]/gi, "")
       .replace(/^dear[^,\n]*,?\s*/i, "")
-      // Strip trailing sign-off the LLM adds despite instructions
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -193,24 +213,7 @@ export async function generateOneDraft(
     const greetingName = lead.first_name?.trim();
     const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
 
-    const productMatch = validated.data.product_match as KuberProductMatch;
-    const productSection = productMatch !== "none" ? productSections[productMatch].section : null;
-
-    const closing = effectiveAttachmentName
-      ? emailTemplate.closingWithAttachment
-      : emailTemplate.closingNoAttachment;
-
-    const bodyParts = [
-      greeting,
-      opening,
-      emailTemplate.intro,
-      emailTemplate.offerings,
-      ...(productSection ? [productSection] : []),
-      closing,
-      signatureBlock,
-    ];
-
-    const finalBody = bodyParts.join("\n\n");
+    const finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
 
     const finalStatus = humanInLoop ? "draft" : "approved";
     const now = new Date().toISOString();

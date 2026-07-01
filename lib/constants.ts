@@ -303,17 +303,17 @@ export const KUBER_CONTEXT = `Kuber Polyplast is an ISO 9001:2015 certified Indi
 
 export const DEFAULT_EMAIL_INTRO = `It is my pleasure to introduce Kuber Polyplast, a trusted name in the masterbatch industry with over 30 years of experience. As an ISO 9001:2015 certified company based in Delhi, we specialize in delivering top-quality products tailored to meet your needs.`;
 
-export const DEFAULT_EMAIL_OFFERINGS = `Our Offerings:
+export const DEFAULT_EMAIL_OFFERINGS = `**Our Offerings:**
 - Masterbatches: Black, White, Colour and Additive Masterbatches
 - Application Suitability: Tested for film extrusion, sheet extrusion, injection molding, blow molding, and roto molding
 
-Key Strengths:
+**Key Strengths:**
 - Annual Production Capacity: 18,000 MT
 - Global Presence: Serving 6670+ clients across 40+ countries
 - Proven Expertise: Over 57,000 unique masterbatches developed with 1,042,440 hours of experience
 - Impressive Revenue: $2.4 billion (₹20,360 crore) client revenue achieved to date
 
-Accolades & Clients:
+**Accolades & Clients:**
 - Awards: Udaan Award (Rising Star in Masterbatch)
 - Trusted Partners: APL Apollo, UFlex, Wipro, Phillips, BSNL, and more`;
 
@@ -324,7 +324,7 @@ export const DEFAULT_EMAIL_CLOSING_NO_ATTACHMENT = `If you have any questions or
 export type KuberProductMatch = "black" | "white" | "color" | "additive" | "none";
 
 export const DEFAULT_PRODUCT_SECTIONS: Record<Exclude<KuberProductMatch, "none">, string> = {
-  black: `Why Choose Our Black Masterbatch?
+  black: `**Why Choose Our Black Masterbatch?**
 ✔️ Strong Jet Black Appearance
 ✔️ Excellent UV & Weather Resistance
 ✔️ High Carbon Black Loading (Up to 55%)
@@ -333,16 +333,16 @@ export const DEFAULT_PRODUCT_SECTIONS: Record<Exclude<KuberProductMatch, "none">
 ✔️ Particle Size Range: 18–65 nm
 ✔️ Suitable for PE, PP, PET, PBT, PC, Nylon, PMMA, GPPS, and HIPS applications
 
-We offer both:
+**We offer both:**
 - General Purpose Black Masterbatch using SRF/HAF/ISAF Carbon Black
 - High-Performance Black Masterbatch using Premium P-Type Carbon Black with antioxidants and processing aids for demanding applications
 
-Global Impact of Our Black Masterbatch
+**Global Impact of Our Black Masterbatch**
 ✔️ 500 Million meters of film strengthened and UV-protected, helping farmers safeguard crops.
 ✔️ 800 Million+ people receive clean and safe water through UV-stable pipes and water storage systems.
 ✔️ 7,000 tons of crops protected annually, supporting agricultural productivity and global food security.`,
 
-  white: `Why Choose Our White Masterbatch?
+  white: `**Why Choose Our White Masterbatch?**
 ✔️ High Opacity & Brilliant Whiteness
 ✔️ Superior Dispersion & Smooth Processing
 ✔️ UV & Weather Resistant
@@ -350,21 +350,21 @@ Global Impact of Our Black Masterbatch
 ✔️ TiO₂ Content up to 85%
 ✔️ Suitable for PE, PP, PS, PET, ABS & EVA Applications
 
-Ideal For: Packaging Films, Injection & Blow Molding, Pipes & Fittings, Woven Sacks, Household Products, Electrical Components, and Food Packaging.
+**Ideal For:** Packaging Films, Injection & Blow Molding, Pipes & Fittings, Woven Sacks, Household Products, Electrical Components, and Food Packaging.
 
-Key Benefits
+**Key Benefits**
 ✔️ Enhanced Brightness & Coverage
 ✔️ Consistent Color Quality
 ✔️ Excellent Processing Performance
 ✔️ Reliable Outdoor Durability
 ✔️ Outstanding Dispersion in Polymers
 
-Global Impact of Our White Masterbatch
+**Global Impact of Our White Masterbatch**
 ✔️ 50 Billion+ milk pouches whitened annually, helping deliver fresh and hygienic dairy products worldwide.
 ✔️ 72 Million+ air coolers and air conditioners manufactured every year using high-performance White Masterbatch.
 ✔️ 31 Million+ households illuminated with durable, aesthetic, and high-quality lighting solutions.`,
 
-  color: `Why Choose Our Color Masterbatch?
+  color: `**Why Choose Our Color Masterbatch?**
 ✔️ Vibrant & Consistent Colors
 ✔️ Enhanced Durability & Weather Resistance
 ✔️ Excellent Dispersion & Process Efficiency
@@ -375,7 +375,7 @@ Global Impact of Our White Masterbatch
 ✔️ FPV: <1 in 10 Micron | Thermal Stability: Up to 280–320°C
 ✔️ Heavy Metal Content: <100 ppm
 
-Special Product Range
+**Special Product Range**
 - Pearlescent Masterbatch
 - Marble Effect Masterbatch
 - Fluorescent Masterbatch
@@ -384,12 +384,12 @@ Special Product Range
 - Micro-Granule Masterbatch (Dosage @ 0.2%)
 - Mono Concentrates for PE / PP / PA / PET
 
-Global Impact of Our Color Masterbatch
+**Global Impact of Our Color Masterbatch**
 ✔️ 120 Million+ consumer products made vibrant every day, bringing lasting colors to homes worldwide.
 ✔️ 80 Million+ toys and consumer goods colored safely, delivering attractive and compliant products.
 ✔️ 500 Billion+ packaging solutions enhanced with durable and appealing colors, protecting essential products used every day.`,
 
-  additive: `Why Choose Our Additive Masterbatch?
+  additive: `**Why Choose Our Additive Masterbatch?**
 ✔️ Eco-Friendly Performance Enhancement
 ✔️ Excellent UV & Weather Protection
 ✔️ Superior Slip & Anti-Block Properties
@@ -398,7 +398,7 @@ Global Impact of Our Color Masterbatch
 ✔️ Additive Content: 5%–40% | MFI: 5–25 g/10 min
 ✔️ Moisture Content: <0.15% | Thermal Stability: Up to 280–320°C
 
-Range of Additive Masterbatch
+**Range of Additive Masterbatch**
 - Anti-Blocking, Slip, Anti-Fog, Anti-Static & Desiccant Masterbatches
 - UV Stabilizer, Heat Stabilizer, Anti-Oxidant, Flame Retardant & VCI Masterbatches
 - Anti-Microbial, Anti-Rodent, Anti-Termite & Odor Absorber Masterbatches
@@ -406,7 +406,7 @@ Range of Additive Masterbatch
 - PIB, PPA, Foaming Agent, Purging Compound & OXO-Biodegradable Masterbatches
 - Fragrance, Glow-in-the-Dark, Impact Modifier & Silicon Masterbatch for HDPE Pipes/Ducts
 
-Global Impact of Our Additive Masterbatch
+**Global Impact of Our Additive Masterbatch**
 ✔️ 200 Million+ Plastic Items Protected with UV stabilizers, ensuring products last longer in daily use.
 ✔️ 1 Billion+ Packaging Films Enhanced with Slip & Anti-Block additives, delivering smooth processing and reliable performance.
 ✔️ 72 Lakhs+ Electronics & Appliances Protected with Flame Retardant additives, helping improve safety for homes and industries.`,

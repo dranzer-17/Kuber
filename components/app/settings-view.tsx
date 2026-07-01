@@ -675,7 +675,7 @@ export function SettingsView() {
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
                             For each masterbatch type, the AI reads the &quot;fit hint&quot; to decide whether
-                            it matches a lead&apos;s company, then appends the section copy verbatim if it does.
+                            it matches a lead&apos;s company, then passes the section details to the AI as context to write a natural product recommendation.
                           </p>
                         </div>
                         {PRODUCT_TYPES.map(({ id, label }) => (
@@ -708,7 +708,7 @@ export function SettingsView() {
                                 }))
                               }
                               minHeight={220}
-                              helper="Appended to the email verbatim when this product is matched."
+                              helper="Provided to the AI as context when this product is matched — not copy-pasted verbatim."
                             />
                           </section>
                         ))}

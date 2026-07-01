@@ -15,16 +15,22 @@ import {
 
 function normalizeToHtml(raw: string): string {
   if (!raw) return "";
-  // Already HTML — has at least one tag
-  if (/<[a-z][\s\S]*>/i.test(raw)) return raw;
-  // Plain text: match Gmail's plain-text rendering exactly.
-  // \n\n (or more) → <br><br> (blank line), \n → <br> (line break).
-  // All in one <p> so TipTap adds no extra block margin between sections.
+  // Already block-level HTML (saved by TipTap on a previous edit) — return as-is.
+  if (/^\s*<(p|div|ul|ol|h[1-6])\b/i.test(raw)) return raw;
+  // Plain text (possibly with **bold** markers): match Gmail's rendering exactly.
+  // Escape entities first, then convert **bold** → <strong>, then newlines → <br>.
   const escaped = raw
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-  return "<p>" + escaped.replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>") + "</p>";
+  return (
+    "<p>" +
+    escaped
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\n{2,}/g, "<br><br>")
+      .replace(/\n/g, "<br>") +
+    "</p>"
+  );
 }
 
 interface RichTextEditorProps {
