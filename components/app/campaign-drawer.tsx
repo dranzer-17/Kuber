@@ -290,9 +290,12 @@ export function CampaignDetail({
     void loadHistory();
   }, [selected?.email_drafts?.id]);
 
-  const activeDays = Object.entries(campaign.sendDays ?? {})
-    .filter(([, v]) => v)
-    .map(([k]) => DAY_SHORT[k] ?? k);
+  // Sort days in calendar order (Mon–Sun) before display.
+  // Object.entries() returns JSON key insertion order which is arbitrary.
+  const DAY_ORDER = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+  const activeDays = DAY_ORDER
+    .filter((k) => campaign.sendDays?.[k])
+    .map((k) => DAY_SHORT[k] ?? k);
 
   const draftReadyLeads = campaignLeads.filter((cl) => cl.email_drafts?.status === "draft");
   const certifiedCount = campaignLeads.filter((cl) =>

@@ -44,6 +44,7 @@ export async function GET(
     draft: 0,
     approved: 0,
     sent: 0,
+    replied: 0,
   };
 
   let draftsGenerated = 0;

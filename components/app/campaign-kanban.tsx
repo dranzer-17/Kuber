@@ -132,6 +132,7 @@ export function countByBucket(leads: CampaignKanbanLead[]): Record<CampaignKanba
     draft: 0,
     approved: 0,
     sent: 0,
+    replied: 0,
   };
   for (const cl of leads) counts[campaignBucket(cl)]++;
   return counts;

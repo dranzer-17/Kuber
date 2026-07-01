@@ -4,7 +4,8 @@ export type CampaignKanbanBucket =
   | "pending"
   | "draft"
   | "approved"
-  | "sent";
+  | "sent"
+  | "replied";
 
 export type CampaignLeadLike = {
   crm_status: string;
@@ -20,6 +21,9 @@ function unwrapDraft(
 
 /** Kanban / journey stages — failed and in-progress drafts count as Pending. */
 export function campaignBucket(cl: CampaignLeadLike): CampaignKanbanBucket {
+  // Check crm_status FIRST — a replied lead stays in "Replied"
+  // regardless of what the email_drafts.status says.
+  if (cl.crm_status === "replied") return "replied";
   const ds = unwrapDraft(cl.email_drafts)?.status;
   if (ds === "approved") return "approved";
   if (ds === "sent") return "sent";
@@ -37,15 +41,17 @@ export const CAMPAIGN_KANBAN_COLS: {
   dot: string;
   header: string;
 }[] = [
-  { id: "pending", label: "Pending", dot: "bg-zinc-400", header: "border-zinc-500/30" },
-  { id: "draft", label: "Draft Ready", dot: "bg-blue-400", header: "border-blue-500/30" },
-  { id: "approved", label: "Certified", dot: "bg-cyan-400", header: "border-cyan-500/30" },
-  { id: "sent", label: "Sent", dot: "bg-teal-400", header: "border-teal-500/30" },
+  { id: "pending",  label: "Pending",    dot: "bg-zinc-400",   header: "border-zinc-500/30"  },
+  { id: "draft",    label: "Draft Ready",dot: "bg-blue-400",   header: "border-blue-500/30"  },
+  { id: "approved", label: "Certified",  dot: "bg-cyan-400",   header: "border-cyan-500/30"  },
+  { id: "sent",     label: "Sent",       dot: "bg-teal-400",   header: "border-teal-500/30"  },
+  { id: "replied",  label: "Replied",    dot: "bg-violet-400", header: "border-violet-500/30" },
 ];
 
 export const CAMPAIGN_BUCKET_LABELS: Record<CampaignKanbanBucket, string> = {
-  pending: "Pending",
-  draft: "Draft Ready",
+  pending:  "Pending",
+  draft:    "Draft Ready",
   approved: "Certified",
-  sent: "Sent",
+  sent:     "Sent",
+  replied:  "Replied",
 };

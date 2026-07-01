@@ -35,6 +35,25 @@ interface InstantlyWebhookPayload {
   reply_subject?: string;
 }
 
+/**
+ * Strips quoted-reply lines from an email plain-text body so only
+ * the new content written by the sender is kept for display.
+ * Stops at the first ">" line, "On ... wrote:" attribution, or "--" separator.
+ */
+function stripQuotedText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith(">")) break;
+    if (/^On .+wrote:\s*$/.test(trimmed)) break;
+    if (trimmed === "--" || trimmed === "\u2014") break;
+    kept.push(line);
+  }
+  return kept.join("\n").trim() || null;
+}
+
 export async function POST(req: NextRequest) {
   // 1) Verify shared secret
   const secret = req.headers.get("x-webhook-secret");
@@ -47,7 +66,9 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
   const receivedAt = p.timestamp ?? new Date().toISOString();
-  const replyBody = p.reply_text ?? p.reply_text_snippet ?? null;
+  // replyBody: stripped version for display in the Replies UI (no quoted chain).
+  // The full p.reply_text is passed separately to process-reply for AI context.
+  const replyBody = stripQuotedText(p.reply_text) ?? p.reply_text_snippet ?? null;
 
   // 2) Idempotency key (sha256 of timestamp+email+event+email_id)
   const eventUid = createHash("sha256")
@@ -124,6 +145,18 @@ export async function POST(req: NextRequest) {
     }
     if (Object.keys(patch).length > 1) {
       await db.from("campaign_leads").update(patch).eq("id", campaignLeadId);
+    }
+
+    // Increment campaign-level replied_count so the header stat stays accurate.
+    // This is separate from hot_count/cold_count (incremented by classify-reply.ts
+    // after the AI classifier runs). replied_count increments immediately on any reply.
+    if (p.event_type === "reply_received" && masterId) {
+      try {
+        await db.rpc("increment_campaign_counter", {
+          p_campaign_id: masterId,
+          p_column: "replied_count",
+        });
+      } catch { /* non-fatal — stat is cosmetic */ }
     }
   }
 
