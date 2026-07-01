@@ -9,8 +9,23 @@
  *   NEXT_PUBLIC_APP_URL  (e.g. https://kuber.vercel.app)
  */
 
-import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.local" });
+import { readFileSync } from "fs";
+import { resolve } from "path";
+
+// Manually parse .env.local (dotenv may not be importable as ESM in this project)
+try {
+  const envPath = resolve(process.cwd(), ".env.local");
+  const lines = readFileSync(envPath, "utf-8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    if (!process.env[key]) process.env[key] = val;
+  }
+} catch { /* env file not found — rely on shell env */ }
 
 const BASE = "https://api.instantly.ai/api/v2";
 
