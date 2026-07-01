@@ -722,7 +722,7 @@ export default function LeadsPage() {
               type="button" onClick={() => setLeadsEntityMode("individual")}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                leadsEntityMode === "individual" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                leadsEntityMode === "individual" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Users className="size-3.5" /> Individual
@@ -731,7 +731,7 @@ export default function LeadsPage() {
               type="button" onClick={() => setLeadsEntityMode("orgs")}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                leadsEntityMode === "orgs" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                leadsEntityMode === "orgs" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Building2 className="size-3.5" /> Organization
@@ -746,7 +746,7 @@ export default function LeadsPage() {
                 type="button" onClick={() => setLeadsViewMode("list")}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                  leadsViewMode === "list" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                  leadsViewMode === "list" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 <List className="size-3.5" /> List
@@ -755,7 +755,7 @@ export default function LeadsPage() {
                 type="button" onClick={() => setLeadsViewMode("kanban")}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                  leadsViewMode === "kanban" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+                  leadsViewMode === "kanban" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 <Kanban className="size-3.5" /> Kanban

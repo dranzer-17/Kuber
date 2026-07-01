@@ -136,7 +136,7 @@ export default function CampaignsPage() {
                 "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
                 statusFilter === s
                   ? s === "All"
-                    ? "bg-foreground text-background border-foreground"
+                    ? "bg-primary text-primary-foreground border-primary"
                     : cn(CAMPAIGN_STATUS_STYLES[s]?.badge, "border-current")
                   : "bg-transparent text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
               )}

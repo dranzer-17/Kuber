@@ -1,16 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { buildDraftSystem, DRAFT_JSON_SUFFIX } from "@/lib/services/llm";
-import {
-  DEFAULT_EMAIL_INTRO,
-  DEFAULT_EMAIL_OFFERINGS,
-  DEFAULT_EMAIL_CLOSING_WITH_ATTACHMENT,
-  DEFAULT_EMAIL_CLOSING_NO_ATTACHMENT,
-  DEFAULT_PRODUCT_SECTIONS,
-  DEFAULT_PRODUCT_HINTS,
-  DEFAULT_REPLY_CLASSIFIER_PROMPT,
-  DEFAULT_REPLY_DRAFTER_PROMPT,
-  type KuberProductMatch,
-} from "@/lib/constants";
+import { type KuberProductMatch } from "@/lib/constants";
 
 let cachedPrompt: { value: string; expiresAt: number } | null = null;
 let cachedClient: { value: ClientContext; expiresAt: number } | null = null;
@@ -85,7 +75,7 @@ function buildClientContextBlock(client: ClientContext): string {
 export async function getDraftSystemPrompt(db: SupabaseClient): Promise<string> {
   const base = await getSystemPrompt(db);
   const withJson =
-    /["']subject["']/.test(base) && /["']opening["']/.test(base) && /["']product_match["']/.test(base)
+    /["']subject["']/.test(base) && /["']body["']/.test(base) && /["']product_match["']/.test(base)
       ? base
       : `${base.trimEnd()}${DRAFT_JSON_SUFFIX}`;
   const client = await getClientContext(db);
@@ -216,10 +206,10 @@ export async function getEmailTemplate(db: SupabaseClient): Promise<EmailTemplat
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
 
   const value: EmailTemplate = {
-    intro: map.email_template_intro?.trim() || DEFAULT_EMAIL_INTRO,
-    offerings: map.email_template_offerings?.trim() || DEFAULT_EMAIL_OFFERINGS,
-    closingWithAttachment: map.email_template_closing_with_attachment?.trim() || DEFAULT_EMAIL_CLOSING_WITH_ATTACHMENT,
-    closingNoAttachment: map.email_template_closing_no_attachment?.trim() || DEFAULT_EMAIL_CLOSING_NO_ATTACHMENT,
+    intro: map.email_template_intro?.trim() ?? "",
+    offerings: map.email_template_offerings?.trim() ?? "",
+    closingWithAttachment: map.email_template_closing_with_attachment?.trim() ?? "",
+    closingNoAttachment: map.email_template_closing_no_attachment?.trim() ?? "",
   };
 
   cachedEmailTemplate = { value, expiresAt: now + CACHE_TTL_MS };
@@ -244,8 +234,8 @@ export async function getProductSections(db: SupabaseClient): Promise<ProductSec
     PRODUCT_TYPES.map((t) => [
       t,
       {
-        section: map[`product_${t}_section`]?.trim() || DEFAULT_PRODUCT_SECTIONS[t],
-        hint: map[`product_${t}_hint`]?.trim() || DEFAULT_PRODUCT_HINTS[t],
+        section: map[`product_${t}_section`]?.trim() ?? "",
+        hint: map[`product_${t}_hint`]?.trim() ?? "",
       },
     ]),
   ) as ProductSections;
@@ -270,8 +260,8 @@ export async function getReplyPrompts(db: SupabaseClient): Promise<ReplyPrompts>
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
 
   const value: ReplyPrompts = {
-    classifier: map.reply_classifier_prompt?.trim() || DEFAULT_REPLY_CLASSIFIER_PROMPT,
-    drafter: map.reply_drafter_prompt?.trim() || DEFAULT_REPLY_DRAFTER_PROMPT,
+    classifier: map.reply_classifier_prompt?.trim() ?? "",
+    drafter: map.reply_drafter_prompt?.trim() ?? "",
   };
 
   cachedReplyPrompts = { value, expiresAt: now + CACHE_TTL_MS };
