@@ -722,7 +722,7 @@ export function CampaignDetail({
                     {count}
                   </span>
                 )}
-                {typeof alertCount === "number" && alertCount > 0 && (
+                {typeof alertCount === "number" && alertCount > 0 && alertCount !== count && (
                   <span className="min-w-4 rounded bg-amber-500/20 px-1 text-[10px] font-bold tabular-nums text-amber-500">
                     {alertCount}
                   </span>
@@ -832,6 +832,28 @@ export function CampaignDetail({
                     );
                   })()}
                 </div>
+
+                {/* Original outbound email — RIGHT bubble (first message in thread) */}
+                {selectedReply.campaign_leads?.email_drafts && (
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="max-w-[85%] space-y-1 items-end flex flex-col">
+                      <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
+                        {selectedReply.campaign_leads.email_drafts.subject && (
+                          <p className="text-xs font-semibold text-primary mb-1.5">
+                            {selectedReply.campaign_leads.email_drafts.subject}
+                          </p>
+                        )}
+                        <div
+                          className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
+                          dangerouslySetInnerHTML={{ __html: selectedReply.campaign_leads.email_drafts.body ?? "" }}
+                        />
+                      </div>
+                    </div>
+                    <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
+                      K
+                    </div>
+                  </div>
+                )}
 
                 {/* Inbound message — LEFT bubble */}
                 <div className="flex items-end gap-2">

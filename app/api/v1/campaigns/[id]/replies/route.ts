@@ -13,8 +13,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .from("reply_events")
     .select(`
       id, event_type, reply_body, intent_classified, received_at, lead_email, campaign_lead_id,
-      campaign_leads:campaign_lead_id ( id, lead_temperature, interest_status, crm_status,
-        leads:lead_id ( first_name, last_name, email, title ) )
+      campaign_leads:campaign_lead_id ( id, lead_temperature, interest_status, crm_status, draft_id,
+        leads:lead_id ( first_name, last_name, email, title ),
+        email_drafts:draft_id ( subject, body ) )
     `)
     .eq("campaign_id", id)
     .eq("event_type", "reply_received")

@@ -561,7 +561,9 @@ export interface CampaignReply {
     lead_temperature: string | null;
     interest_status: number | null;
     crm_status: string;
+    draft_id: string | null;
     leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null } | null;
+    email_drafts: { subject: string | null; body: string | null } | null;
   } | null;
   reply_draft: ReplyDraft | null;
 }

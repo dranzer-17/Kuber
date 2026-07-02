@@ -29,6 +29,7 @@ export default function CampaignDetailPage() {
 
   return (
     <CampaignDetail
+      key={campaign.id}
       campaign={campaign}
       onBack={() => router.push("/campaigns")}
     />
