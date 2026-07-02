@@ -39,6 +39,8 @@ export type Campaign = {
   attachmentName?: string;
   hot?: number;
   cold?: number;
+  followupDay2?: number;
+  followupDay3?: number;
 };
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
@@ -118,6 +120,8 @@ export function CreateCampaignModal({
     monday: true, tuesday: true, wednesday: true, thursday: true,
     friday: true, saturday: false, sunday: false,
   });
+  const [followupDay2, setFollowupDay2] = useState(30);
+  const [followupDay3, setFollowupDay3] = useState(90);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
@@ -183,6 +187,7 @@ export function CreateCampaignModal({
     setTimezoneOverride(false); setPrimaryCountry(null);
     setScheduleDate(undefined); setSenderName(""); setAiPromptContext("");
     setSendDays({ monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false });
+    setFollowupDay2(30); setFollowupDay3(90);
     setCreating(false); setError("");
     setAttachment(null); setUploading(false); setUploadError("");
   }
@@ -211,6 +216,8 @@ export function CreateCampaignModal({
         send_days: sendDays,
         ai_prompt_context: aiPromptContext || undefined,
         sender_name: senderName || undefined,
+        followup_day_2: followupDay2,
+        followup_day_3: followupDay3,
         ...(scheduleDate ? {
           send_mode: "scheduled" as const,
           schedule_start_at: new Date(
@@ -373,6 +380,42 @@ export function CreateCampaignModal({
                     onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
                   />
                 ))}
+              </div>
+            </div>
+
+            <div className="px-5 py-4 space-y-3">
+              <div className="flex items-center gap-2.5">
+                <Clock className="size-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-sm font-medium leading-none">Follow-up schedule</p>
+                  <p className="text-xs text-muted-foreground">Days after Stage 1 to send each follow-up</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                  <span className="text-xs text-muted-foreground shrink-0 w-16">Stage 2 after</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={followupDay2}
+                    onChange={(e) => setFollowupDay2(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+                    className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+                  />
+                  <span className="text-xs text-muted-foreground">days</span>
+                </div>
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                  <span className="text-xs text-muted-foreground shrink-0 w-16">Stage 3 after</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={followupDay3}
+                    onChange={(e) => setFollowupDay3(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+                    className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+                  />
+                  <span className="text-xs text-muted-foreground">days</span>
+                </div>
               </div>
             </div>
           </div>

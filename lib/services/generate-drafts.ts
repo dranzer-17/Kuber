@@ -3,16 +3,16 @@ import { z } from "zod";
 import { complete } from "@/lib/services/llm";
 import {
   getDraftSystemPrompt,
-  resolveCampaignSignature,
-  getEmailTemplate,
-  getProductSections,
+  getEmailSignature,
+  getProductOfferings,
+  getSubjectTemplate,
 } from "@/lib/services/settings";
-import { KUBER_CONTEXT, type KuberProductMatch } from "@/lib/constants";
+import { KUBER_CONTEXT } from "@/lib/constants";
 
 const DraftSchema = z.object({
   subject: z.string(),
   body: z.string(),
-  product_match: z.enum(["black", "white", "color", "additive", "none"]),
+  product_match: z.string(),
 });
 
 type DraftLLMOutput = z.infer<typeof DraftSchema>;
@@ -75,26 +75,10 @@ function plainToHtml(plain: string): string {
     "</p>"
   );
 }
-function buildTemplateInstruction(
-  emailTemplate: Awaited<ReturnType<typeof getEmailTemplate>>,
-  productSections: Awaited<ReturnType<typeof getProductSections>>,
-  hasAttachment: boolean,
-): string {
-  const closing = hasAttachment ? emailTemplate.closingWithAttachment : emailTemplate.closingNoAttachment;
-  return [
-    "\n\nEMAIL BODY STRUCTURE — write all five sections in order as one cohesive body:",
-    "1. PERSONALISED OPENING (2-4 sentences): Address the lead specifically. Reference what their company does and bridge naturally to Kuber's relevance. Do NOT restate Kuber's credentials here — that comes next.",
-    "2. COMPANY INTRODUCTION — include this text verbatim (or very close):\n" + emailTemplate.intro,
-    "3. OFFERINGS & KEY STRENGTHS — include this text verbatim (or very close):\n" + emailTemplate.offerings,
-    "4. PRODUCT RECOMMENDATION (1 short paragraph, naturally written — do NOT copy-paste verbatim): Highlight 2-3 specific benefits from the matched product that are most relevant to this lead's business.",
-    "5. CLOSING — include this text verbatim:\n" + closing,
-    "",
-    "PRODUCT REFERENCE LIBRARY — pick ONE and use it to write section 4:",
-    `BLACK MASTERBATCH (fits: ${productSections.black.hint})\n${productSections.black.section}`,
-    `WHITE MASTERBATCH (fits: ${productSections.white.hint})\n${productSections.white.section}`,
-    `COLOUR MASTERBATCH (fits: ${productSections.color.hint})\n${productSections.color.section}`,
-    `ADDITIVE MASTERBATCH (fits: ${productSections.additive.hint})\n${productSections.additive.section}`,
-  ].join("\n\n");
+function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProductOfferings>>): string {
+  if (products.length === 0) return "";
+  const entries = products.map((p) => `${p.name.toUpperCase()}\n${p.description}`);
+  return "\n\nPRODUCT REFERENCE LIBRARY — pick the ONE best fit for this lead and set product_match to its exact name:\n\n" + entries.join("\n\n");
 }
 
 function buildUserPrompt(
@@ -141,14 +125,16 @@ export async function generateOneDraft(
   if (!lead) return { ok: false, reason: "Lead not found" };
   if (!lead.email) return { ok: false, reason: "Lead has no email" };
 
-  // --- Fetch full campaign for signature + attachment resolution ---
+  // --- Fetch full campaign for attachment resolution ---
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, signature_override, signature_user_id, created_by, attachment_name, ai_prompt_context")
+    .select("id, signature_override, attachment_name, ai_prompt_context")
     .eq("id", campaignId)
     .maybeSingle();
 
-  const signatureBlock = await resolveCampaignSignature(db, campaign ?? {});
+  // Signature: campaign-level override wins; otherwise use the Email Footer setting.
+  const emailFooter = await getEmailSignature(db);
+  const signatureBlock = campaign?.signature_override?.trim() || emailFooter;
 
   // Per-lead attachment overrides campaign default. The brochure-attachment sentence
   // lives in the fixed closing template (lib/constants.ts), not something the LLM writes.
@@ -179,16 +165,15 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const [baseSystemPrompt, emailTemplate, productSections] = await Promise.all([
+    const [baseSystemPrompt, products, subjectTemplate] = await Promise.all([
       getDraftSystemPrompt(db),
-      getEmailTemplate(db),
-      getProductSections(db),
+      getProductOfferings(db),
+      getSubjectTemplate(db),
     ]);
-    // Assemble full system prompt with campaign context + template/product context
     const systemPrompt =
       baseSystemPrompt
       + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
-      + buildTemplateInstruction(emailTemplate, productSections, !!effectiveAttachmentName);
+      + buildProductReferenceBlock(products);
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
@@ -215,11 +200,13 @@ export async function generateOneDraft(
 
     const finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
 
+    const finalSubject = subjectTemplate || validated.data.subject;
+
     const finalStatus = humanInLoop ? "draft" : "approved";
     const now = new Date().toISOString();
 
     await db.from("email_drafts").update({
-      subject: validated.data.subject,
+      subject: finalSubject,
       body: finalBody,
       status: finalStatus,
       ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: userId ?? null } : {}),
@@ -263,6 +250,38 @@ export async function fetchDraftTargets(
 
   const generatingLeadIds = new Set((generatingDrafts ?? []).map((d) => d.lead_id));
 
+  if (stepNumber === 1) {
+    const { data: rows } = await db
+      .from("campaign_leads")
+      .select(`
+        id, lead_id,
+        attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
+        leads!inner(
+          id, first_name, last_name, email, title, headline, seniority, country,
+          organizations(name, domain, company_description, sells_to, keywords)
+        )
+      `)
+      .eq("campaign_id", campaignId)
+      .is("draft_id", null)
+      .in("crm_status", ["new", "enriched", "draft"])
+      .not("leads.email", "is", null)
+      .order("created_at", { ascending: true })
+      .limit(limit * 2);
+
+    return (rows ?? [])
+      .filter((r) => !generatingLeadIds.has(r.lead_id))
+      .slice(0, limit) as CampaignLeadTarget[];
+  }
+
+  // For follow-up steps: find approved/sent leads that don't yet have a draft for this step.
+  const { data: existingStepDrafts } = await db
+    .from("email_drafts")
+    .select("lead_id")
+    .eq("campaign_id", campaignId)
+    .eq("step_number", stepNumber);
+
+  const alreadyHasStep = new Set((existingStepDrafts ?? []).map((d) => d.lead_id));
+
   const { data: rows } = await db
     .from("campaign_leads")
     .select(`
@@ -274,14 +293,13 @@ export async function fetchDraftTargets(
       )
     `)
     .eq("campaign_id", campaignId)
-    .is("draft_id", null)
-    .in("crm_status", ["new", "enriched", "draft"])
+    .in("crm_status", ["approved", "sent"])
     .not("leads.email", "is", null)
     .order("created_at", { ascending: true })
     .limit(limit * 2);
 
   return (rows ?? [])
-    .filter((r) => !generatingLeadIds.has(r.lead_id))
+    .filter((r) => !generatingLeadIds.has(r.lead_id) && !alreadyHasStep.has(r.lead_id))
     .slice(0, limit) as CampaignLeadTarget[];
 }
 

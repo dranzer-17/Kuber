@@ -213,6 +213,7 @@ export function CampaignDetail({
   const [replyRegenQuery, setReplyRegenQuery] = useState("");
   const [replyRegenerating, setReplyRegenerating] = useState(false);
   const [replySending, setReplySending] = useState(false);
+  const [refreshingReplies, setRefreshingReplies] = useState(false);
 
   const { loadCampaigns } = useApp();
 
@@ -542,10 +543,10 @@ export function CampaignDetail({
   ).length;
 
   const checkedSentLeads = campaignLeads.filter(
-    (cl) => checkedIds.has(cl.id) && cl.crm_status === "sent"
+    (cl) => checkedIds.has(cl.id) && (cl.crm_status === "sent" || cl.crm_status === "approved")
   );
   const checkedSentCount = checkedSentLeads.length;
-  // Show Step 3 only if ALL selected sent leads already have step 2 generated
+  // Show Step 3 only if ALL selected leads already have step 2 generated
   const allCheckedHaveStep2 = checkedSentCount > 0 && checkedSentLeads.every(
     (cl) => (cl.email_drafts?.step_number ?? 1) >= 2
   );
@@ -737,10 +738,22 @@ export function CampaignDetail({
         <div className="flex flex-1 min-h-0">
           {/* Left: reply list */}
           <div className="w-72 shrink-0 border-r border-border flex flex-col">
-            <div className="px-4 py-3 border-b border-border shrink-0">
+            <div className="px-4 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 Replies · {replies.length}
               </p>
+              <button
+                type="button"
+                disabled={refreshingReplies}
+                onClick={async () => {
+                  setRefreshingReplies(true);
+                  try { await loadReplies(); } finally { setRefreshingReplies(false); }
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className={cn("size-3.5", refreshingReplies && "animate-spin")} />
+                Refresh
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto divide-y divide-border/40">
               {replies.length === 0 ? (

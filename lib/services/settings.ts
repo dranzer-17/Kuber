@@ -1,11 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { buildDraftSystem, DRAFT_JSON_SUFFIX } from "@/lib/services/llm";
-import { type KuberProductMatch } from "@/lib/constants";
+import { DRAFT_JSON_SUFFIX } from "@/lib/services/llm";
 
 let cachedPrompt: { value: string; expiresAt: number } | null = null;
 let cachedClient: { value: ClientContext; expiresAt: number } | null = null;
-let cachedEmailTemplate: { value: EmailTemplate; expiresAt: number } | null = null;
-let cachedProductSections: { value: ProductSections; expiresAt: number } | null = null;
+let cachedProductOfferings: { value: ProductOffering[]; expiresAt: number } | null = null;
 let cachedReplyPrompts: { value: ReplyPrompts; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
 
@@ -33,7 +31,7 @@ export async function getSystemPrompt(db: SupabaseClient): Promise<string> {
     .eq("key", "system_prompt")
     .maybeSingle();
 
-  const value = data?.value?.trim() || buildDraftSystem();
+  const value = data?.value?.trim() ?? "";
   cachedPrompt = { value, expiresAt: now + CACHE_TTL_MS };
   return value;
 }
@@ -178,69 +176,35 @@ export async function resolveCampaignSignature(
   return sig.contact;
 }
 
-// ── Cold outreach template (intro/offerings/closing) ────────────────────────
+// ── Subject line template ─────────────────────────────────────────────────────
 
-export type EmailTemplate = {
-  intro: string;
-  offerings: string;
-  closingWithAttachment: string;
-  closingNoAttachment: string;
-};
-
-const EMAIL_TEMPLATE_KEYS = [
-  "email_template_intro",
-  "email_template_offerings",
-  "email_template_closing_with_attachment",
-  "email_template_closing_no_attachment",
-] as const;
-
-export async function getEmailTemplate(db: SupabaseClient): Promise<EmailTemplate> {
-  const now = Date.now();
-  if (cachedEmailTemplate && cachedEmailTemplate.expiresAt > now) return cachedEmailTemplate.value;
-
-  const { data: rows } = await db
+export async function getSubjectTemplate(db: SupabaseClient): Promise<string> {
+  const { data } = await db
     .from("settings")
-    .select("key, value")
-    .in("key", [...EMAIL_TEMPLATE_KEYS]);
-
-  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
-
-  const value: EmailTemplate = {
-    intro: map.email_template_intro?.trim() ?? "",
-    offerings: map.email_template_offerings?.trim() ?? "",
-    closingWithAttachment: map.email_template_closing_with_attachment?.trim() ?? "",
-    closingNoAttachment: map.email_template_closing_no_attachment?.trim() ?? "",
-  };
-
-  cachedEmailTemplate = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
+    .select("value")
+    .eq("key", "email_subject_template")
+    .maybeSingle();
+  return data?.value?.trim() ?? "";
 }
 
-// ── Per-product addenda + AI fit hints ───────────────────────────────────────
+// ── Dynamic product offerings ─────────────────────────────────────────────────
 
-export type ProductSections = Record<Exclude<KuberProductMatch, "none">, { section: string; hint: string }>;
+export type ProductOffering = { name: string; description: string };
 
-const PRODUCT_TYPES = ["black", "white", "color", "additive"] as const;
-
-export async function getProductSections(db: SupabaseClient): Promise<ProductSections> {
+export async function getProductOfferings(db: SupabaseClient): Promise<ProductOffering[]> {
   const now = Date.now();
-  if (cachedProductSections && cachedProductSections.expiresAt > now) return cachedProductSections.value;
+  if (cachedProductOfferings && cachedProductOfferings.expiresAt > now) return cachedProductOfferings.value;
 
-  const keys = PRODUCT_TYPES.flatMap((t) => [`product_${t}_section`, `product_${t}_hint`]);
-  const { data: rows } = await db.from("settings").select("key, value").in("key", keys);
-  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
+  const { data } = await db
+    .from("settings")
+    .select("value")
+    .eq("key", "product_offerings")
+    .maybeSingle();
 
-  const value = Object.fromEntries(
-    PRODUCT_TYPES.map((t) => [
-      t,
-      {
-        section: map[`product_${t}_section`]?.trim() ?? "",
-        hint: map[`product_${t}_hint`]?.trim() ?? "",
-      },
-    ]),
-  ) as ProductSections;
+  let value: ProductOffering[] = [];
+  try { value = JSON.parse(data?.value ?? "[]") as ProductOffering[]; } catch { value = []; }
 
-  cachedProductSections = { value, expiresAt: now + CACHE_TTL_MS };
+  cachedProductOfferings = { value, expiresAt: now + CACHE_TTL_MS };
   return value;
 }
 
@@ -271,8 +235,7 @@ export async function getReplyPrompts(db: SupabaseClient): Promise<ReplyPrompts>
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;
-  cachedEmailTemplate = null;
-  cachedProductSections = null;
+  cachedProductOfferings = null;
   cachedReplyPrompts = null;
 }
 

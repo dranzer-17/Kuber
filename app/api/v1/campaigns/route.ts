@@ -43,6 +43,8 @@ export async function POST(req: NextRequest) {
       daily_limit: parsed.data.daily_limit,
       ai_prompt_context: parsed.data.ai_prompt_context,
       sender_name: parsed.data.sender_name,
+      followup_day_2: parsed.data.followup_day_2,
+      followup_day_3: parsed.data.followup_day_3,
       attachment_path: parsed.data.attachment_path,
       attachment_name: parsed.data.attachment_name,
       attachment_mime: parsed.data.attachment_mime,

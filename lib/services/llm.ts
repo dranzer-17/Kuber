@@ -172,31 +172,7 @@ export interface ExtractionOutput {
 export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Return ONLY valid JSON, no markdown fences: { "description": string (2-3 sentences: what they manufacture and who they sell to), "primary_products": string[] }`;
 
 export const DRAFT_JSON_SUFFIX =
-  '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string, "product_match": "black" | "white" | "color" | "additive" | "none"}.';
+  '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string, "product_match": string}.\n' +
+  'product_match must be the exact name of the matched product from the PRODUCT REFERENCE LIBRARY, or "none" if no product fits.\n' +
+  'In the body, wrap ONLY section headings with **double asterisks** (e.g. **Key Strengths:**, **Our Offerings:**) — do NOT bold individual words or phrases inside sentences. These render as <strong> in the final email.';
 
-export function buildDraftSystem(): string {
-  return `You are an export sales writer for Kuber Polyplast — an ISO 9001:2015 certified Indian masterbatch and specialty-compound manufacturer with 30 years of experience, ~18,000 MT/year capacity, exporting to 50+ countries.
-
-GOAL
-Write a complete, personalised cold outreach email body that feels naturally written — not templated. The prompt will give you fixed template blocks to include and a product reference library to draw from. Your job is to weave them into a coherent, prospect-specific email.
-
-HOW TO REASON BEFORE WRITING
-1. From the prospect data, infer what they manufacture, which polymer(s) they likely use, and their process (film/sheet extrusion, injection, blow, roto molding).
-2. Map to ONE best-fit Kuber product using the product reference library provided.
-3. Pick 2-3 specific facts from that product's details that are most relevant to THIS prospect.
-
-PERSONALIZATION RULES
-- Open by referencing something concrete about THIS prospect — never a generic opener.
-- Use ONLY the prospect data provided. Never invent facts about them.
-- If prospect data is missing or describes Kuber itself, write a short honest regional intro.
-
-TONE & STRUCTURE
-- Professional, warm, peer-to-peer B2B. Confident, not salesy. British/international English.
-- Subject line: specific and benefit-led, under 9 words, no ALL CAPS.
-
-HARD CONSTRAINTS
-- Do not add a greeting (e.g. "Dear X,") — added automatically.
-- Do not add a sign-off or signature — appended automatically.
-- No bracketed placeholders ([Your Name], etc.).
-- Do not mention price or discounts unless campaign context says to.${DRAFT_JSON_SUFFIX}`;
-}

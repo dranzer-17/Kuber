@@ -12,6 +12,8 @@ export const CreateCampaignSchema = z.object({
   daily_limit: z.number().int().min(1).max(500).default(30),
   ai_prompt_context: z.string().optional(),
   sender_name: z.string().optional(),
+  followup_day_2: z.number().int().min(1).max(365).default(30),
+  followup_day_3: z.number().int().min(1).max(365).default(90),
 
   // Campaign attachment fields (set by upload endpoint)
   attachment_path: z.string().optional(),

@@ -96,6 +96,8 @@ export interface DbCampaign {
   sender_name: string | null;
   hot_count: number;
   cold_count: number;
+  followup_day_2: number | null;
+  followup_day_3: number | null;
 }
 
 export function mapDbLead(l: DbLead): Lead {
@@ -157,6 +159,8 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     senderName: c.sender_name ?? undefined,
     hot: c.hot_count ?? 0,
     cold: c.cold_count ?? 0,
+    followupDay2: c.followup_day_2 ?? 30,
+    followupDay3: c.followup_day_3 ?? 90,
   };
 }
 
@@ -432,6 +436,7 @@ export async function createCampaign(token: string, body: {
   schedule_timezone?: string; send_days?: Record<string, boolean>;
   send_mode?: "now" | "scheduled"; schedule_start_at?: string;
   ai_prompt_context?: string; sender_name?: string;
+  followup_day_2?: number; followup_day_3?: number;
   attachment_path?: string; attachment_name?: string;
   attachment_mime?: string; attachment_size?: number;
   attachment_url?: string | null;
