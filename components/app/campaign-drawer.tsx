@@ -63,22 +63,18 @@ function stripQuotedLines(text: string | null | undefined): string | null {
   if (!text) return null;
   const lines = text.split("\n");
   const kept: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trimStart();
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
     if (trimmed.startsWith(">")) break;
-    if (/^On .+wrote:\s*$/.test(trimmed)) break;
     if (trimmed === "--" || trimmed === "\u2014") break;
-    kept.push(line);
+    // "On ... wrote:" on one line
+    if (/^On .+wrote:\s*$/.test(trimmed)) break;
+    // "On ..." with "wrote:" on the very next line (Gmail multiline attribution)
+    if (/^On .+/.test(trimmed) && /^wrote:\s*$/.test(lines[i + 1]?.trimStart() ?? "")) break;
+    kept.push(lines[i]);
   }
   return kept.join("\n").trim() || null;
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  Draft:     "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  Live:      "bg-green-500/15 text-green-400 border-green-500/25",
-  Paused:    "bg-amber-500/15 text-amber-400 border-amber-500/25",
-  Scheduled: "bg-blue-500/15 text-blue-400 border-blue-500/25",
-};
 
 const DRAFT_STATUS_LABEL: Record<string, string> = {
   generating: "Generating",
@@ -111,7 +107,7 @@ type CampaignLead = {
   lead_temperature: string | null;
   created_at: string;
   leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
-  email_drafts: { id: string; subject: string | null; body: string | null; status: string } | null;
+  email_drafts: { id: string; subject: string | null; body: string | null; status: string; step_number?: number | null } | null;
   attachment?: AttachmentInfo;
 };
 
@@ -545,6 +541,16 @@ export function CampaignDetail({
     (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
   ).length;
 
+  const checkedSentLeads = campaignLeads.filter(
+    (cl) => checkedIds.has(cl.id) && cl.crm_status === "sent"
+  );
+  const checkedSentCount = checkedSentLeads.length;
+  // Show Step 3 only if ALL selected sent leads already have step 2 generated
+  const allCheckedHaveStep2 = checkedSentCount > 0 && checkedSentLeads.every(
+    (cl) => (cl.email_drafts?.step_number ?? 1) >= 2
+  );
+  const followUpStep = allCheckedHaveStep2 ? 3 : 2;
+
   const sortedCampaignLeads = sortCampaignLeads(campaignLeads, leadsSort);
 
   const selectedLead = selected?.leads;
@@ -574,13 +580,20 @@ export function CampaignDetail({
     unsubscribed: { label: "UNSUBSCRIBED", cls: "bg-zinc-700/40 text-zinc-500 border-zinc-600/30" },
   };
 
+  const pendingReplyDrafts = replies.filter((r) => r.reply_draft?.status === "draft").length;
+  const campaignTabs = [
+    { id: "list" as const, label: "Leads", icon: List, count: campaign.leads },
+    { id: "kanban" as const, label: "Kanban", icon: LayoutGrid },
+    { id: "report" as const, label: "Report", icon: BarChart2 },
+    { id: "replies" as const, label: "Replies", icon: Reply, count: replies.length, alertCount: pendingReplyDrafts },
+  ];
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-background">
       {/* Header */}
-      <div className="border-b border-border px-8 py-5 shrink-0 space-y-4">
+      <div className="border-b border-border px-8 py-3 shrink-0 bg-background space-y-3">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-sm shrink-0">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
               <button
                 type="button"
                 onClick={onBack}
@@ -588,28 +601,39 @@ export function CampaignDetail({
               >
                 Campaigns
               </button>
-              <ChevronRight className="size-4 text-muted-foreground" />
-            </nav>
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold truncate leading-tight">{campaign.name}</h1>
-              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                <span className={cn(
-                  "text-[10px] font-semibold uppercase tracking-wide border rounded px-1.5 py-0.5",
-                  STATUS_STYLES[campaign.status] ?? STATUS_STYLES.Draft,
-                )}>{campaign.status}</span>
-                {campaign.humanInLoop && (
-                  <span className="text-[10px] text-muted-foreground">Human review</span>
-                )}
-                {isGenerating && (
-                  <span className="text-[10px] text-amber-400 flex items-center gap-1">
-                    <Loader2 className="size-2.5 animate-spin" /> Generating…
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 truncate text-foreground font-medium">{campaign.name}</span>
+          </nav>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {checkedSentCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={generatingFollowUp}
+                onClick={async () => {
+                  setGeneratingFollowUp(true);
+                  try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) return;
+                    await fetch(`/api/v1/campaigns/${campaign.id}/generate-followups`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+                      body: JSON.stringify({
+                        step_number: followUpStep,
+                        campaign_lead_ids: checkedSentLeads.map((cl) => cl.id),
+                      }),
+                    });
+                    setTimeout(() => void loadData(), 3000);
+                  } catch (e) { console.error(e); }
+                  finally { setGeneratingFollowUp(false); }
+                }}
+                className="gap-1.5"
+              >
+                {generatingFollowUp ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                Step {followUpStep} follow-up ({checkedSentCount})
+              </Button>
+            )}
             {draftReadyLeads.length > 0 && (
               <Button
                 variant="outline"
@@ -632,219 +656,95 @@ export function CampaignDetail({
           </div>
         </div>
 
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-4 text-sm">
-            {[
-              { label: "Leads", value: campaign.leads },
-              { label: "Sent", value: campaign.sent },
-              { label: "Replied", value: campaign.replied },
-            ].map(({ label, value }) => (
-              <span key={label} className="text-muted-foreground">
-                <span className="font-semibold text-foreground tabular-nums">{value}</span> {label}
-              </span>
-            ))}
-            {(campaign.hot ?? 0) > 0 && (
-              <span className="text-muted-foreground inline-flex items-center gap-1">
-                <Flame className="size-3.5 text-red-400" />
-                <span className="font-semibold text-red-400 tabular-nums">{campaign.hot}</span> Hot
-              </span>
-            )}
-            {(campaign.cold ?? 0) > 0 && (
-              <span className="text-muted-foreground inline-flex items-center gap-1">
-                <Snowflake className="size-3.5 text-sky-400" />
-                <span className="font-semibold text-sky-400 tabular-nums">{campaign.cold}</span> Cold
-              </span>
-            )}
-          </div>
-
-          {progress && (
-            <div className="flex flex-wrap gap-2 text-[10px] items-center">
-              {progress.draft > 0 && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">
-                  {progress.draft} draft ready
-                  <InfoTip text={CAMPAIGN_STATUS_HELP.draft} />
+        <div className="flex min-w-0 items-center justify-between gap-6 border-t border-border pt-3">
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-xs">
+              {[
+                { label: "Leads", value: campaign.leads },
+                { label: "Sent", value: campaign.sent },
+                { label: "Replied", value: campaign.replied },
+              ].map(({ label, value }) => (
+                <span key={label} className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2.5 text-muted-foreground">
+                  <span className="font-semibold text-foreground tabular-nums">{value}</span>
+                  {label}
+                </span>
+              ))}
+              {(campaign.hot ?? 0) > 0 && (
+                <span className="inline-flex h-8 items-center gap-1 rounded-md border border-red-500/20 bg-red-500/10 px-2.5 text-red-400">
+                  <Flame className="size-3" />
+                  <span className="font-semibold tabular-nums">{campaign.hot}</span> Hot
                 </span>
               )}
-              {progress.approved > 0 && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">
-                  {progress.approved} certified
-                  <InfoTip text={CAMPAIGN_STATUS_HELP.approved} />
+              {(campaign.cold ?? 0) > 0 && (
+                <span className="inline-flex h-8 items-center gap-1 rounded-md border border-sky-500/20 bg-sky-500/10 px-2.5 text-sky-400">
+                  <Snowflake className="size-3" />
+                  <span className="font-semibold tabular-nums">{campaign.cold}</span> Cold
                 </span>
               )}
-              {progress.sent > 0 && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-400">
-                  {progress.sent} sent
-                  <InfoTip text={CAMPAIGN_STATUS_HELP.sent} />
-                </span>
-              )}
-              {progress.failed > 0 && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400">
+              {progress && progress.failed > 0 && (
+                <span className="inline-flex h-8 items-center gap-1 rounded-md border border-red-500/20 bg-red-500/10 px-2.5 text-red-400">
                   {progress.failed} failed
                   <InfoTip text={CAMPAIGN_STATUS_HELP.failed} />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-5 px-1.5 text-[10px] gap-1 text-red-400 hover:text-red-300"
+                  <button
+                    type="button"
+                    className="ml-1 inline-flex items-center gap-1 font-medium hover:text-red-300"
                     disabled={retryingAll}
                     onClick={() => void handleRetryAllFailed()}
                   >
-                    {retryingAll ? <Loader2 className="size-2.5 animate-spin" /> : <RotateCcw className="size-2.5" />}
+                    {retryingAll ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
                     Retry
-                  </Button>
+                  </button>
                 </span>
               )}
             </div>
-          )}
 
-        </div>
-      </div>
-
-      {/* Follow-up draft generation — only shown for campaigns that have sent emails */}
-      {campaign.sent > 0 && (
-        <div className="border-b border-border px-8 py-3 shrink-0">
-          <div className="border border-border rounded-lg p-3 space-y-2 bg-secondary/10">
-            <p className="text-xs font-semibold text-foreground">Follow-up Drafts</p>
-            <p className="text-xs text-muted-foreground">
-              Generate personalised AI drafts for Step 2 (30-day) and Step 3 (90-day) follow-ups for leads who haven&apos;t replied.
-            </p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={generatingFollowUp}
-                onClick={async () => {
-                  setGeneratingFollowUp(true);
-                  try {
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (!session) return;
-                    await fetch(`/api/v1/campaigns/${campaign.id}/generate-followups`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-                      body: JSON.stringify({ step_number: 2 }),
-                    });
-                    setTimeout(() => void loadData(), 3000);
-                  } catch (e) { console.error(e); }
-                  finally { setGeneratingFollowUp(false); }
-                }}>
-                {generatingFollowUp ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
-                Generate Step 2 Drafts
-              </Button>
-              <Button size="sm" variant="outline" disabled={generatingFollowUp}
-                onClick={async () => {
-                  setGeneratingFollowUp(true);
-                  try {
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (!session) return;
-                    await fetch(`/api/v1/campaigns/${campaign.id}/generate-followups`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-                      body: JSON.stringify({ step_number: 3 }),
-                    });
-                    setTimeout(() => void loadData(), 3000);
-                  } catch (e) { console.error(e); }
-                  finally { setGeneratingFollowUp(false); }
-                }}>
-                {generatingFollowUp ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
-                Generate Step 3 Drafts
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* View tabs: List | Kanban | Report */}
-      <div className="border-b border-border px-8 py-2 shrink-0 flex items-center justify-between">
-        <div className="flex gap-1">
-        {([
-          { id: "list" as const, label: "Leads" },
-          { id: "kanban" as const, label: "Kanban" },
-          { id: "report" as const, label: "Report" },
-          { id: "replies" as const, label: "replies" },
-        ]).map(({ id, label }) => {
-          const pendingCount = label === "replies" ? replies.filter(r => r.reply_draft?.status === "draft").length : 0;
-          const displayLabel = label === "replies"
-            ? `Replies${replies.length ? ` (${replies.length})` : ""}`
-            : label.charAt(0).toUpperCase() + label.slice(1);
-          return (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setViewTab(id)}
-            className={cn(
-              "px-3 py-1.5 rounded-md text-xs font-medium transition-colors inline-flex items-center gap-1",
-              viewTab === id
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
-            )}
-          >
-            {displayLabel}
-            {pendingCount > 0 && (
-              <span className="px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-400 rounded-full">
-                {pendingCount}
-              </span>
-            )}
-          </button>
-          );
-        })}
-        </div>
-
-        <div className="flex items-center gap-4">
-          {progress && progress.total > 0 && progressCompleted < progress.total && (
-            <span className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin text-primary" />
-              <span className="font-medium text-foreground">{progressCompleted} out of {progress.total}</span>
-            </span>
-          )}
-          {progress && progress.total > 0 && progressCompleted >= progress.total && (
-            <span className="flex items-center gap-1.5 text-sm text-green-500">
-              <CheckCircle2 className="size-4" /> {progress.total} ready
-            </span>
-          )}
-
-          {/* Config — floating overlay anchored to button */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setConfigOpen((o) => !o)}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              {configOpen ? "Hide config" : "Show config"}
-            </button>
-            {configOpen && (
-              <div className="absolute right-0 top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-xl divide-y divide-border overflow-hidden text-sm w-72">
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
-                  <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
-                </div>
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
-                  <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
-                </div>
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
-                  <span className="font-medium">{campaign.timezone ?? "—"}</span>
-                </div>
-                {activeDays.length > 0 && (
-                  <div className="flex items-center justify-between px-4 py-2.5">
-                    <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
-                    <span className="font-medium">{activeDays.join(", ")}</span>
-                  </div>
+            <div className="ml-auto flex shrink-0 items-center rounded-lg border border-border bg-card p-0.5">
+            {campaignTabs.map(({ id, label, icon: Icon, count, alertCount }) => {
+              return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setViewTab(id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                  viewTab === id
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
-              </div>
-            )}
-          </div>
+              >
+                <Icon className="size-3.5" />
+                {label}
+                {typeof count === "number" && count > 0 && (
+                  <span className={cn(
+                    "min-w-4 rounded px-1 text-[10px] font-semibold tabular-nums",
+                    viewTab === id ? "bg-primary/15 text-primary" : "bg-secondary text-muted-foreground",
+                  )}>
+                    {count}
+                  </span>
+                )}
+                {typeof alertCount === "number" && alertCount > 0 && (
+                  <span className="min-w-4 rounded bg-amber-500/20 px-1 text-[10px] font-bold tabular-nums text-amber-500">
+                    {alertCount}
+                  </span>
+                )}
+              </button>
+              );
+            })}
+            </div>
         </div>
       </div>
 
       {viewTab === "replies" ? (
         <div className="flex flex-1 min-h-0">
           {/* Left: reply list */}
-          <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/50">
+          <div className="w-72 shrink-0 border-r border-border flex flex-col">
             <div className="px-4 py-3 border-b border-border shrink-0">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground inline-flex items-center gap-1">
-                <Reply className="size-3" /> Inbound Replies ({replies.length})
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Replies · {replies.length}
               </p>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto divide-y divide-border/40">
               {replies.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">
+                <div className="p-8 text-center text-sm text-muted-foreground">
                   No replies received yet.
                 </div>
               ) : replies.map((r) => {
@@ -853,31 +753,38 @@ export function CampaignDetail({
                 const temp = r.intent_classified ?? r.campaign_leads?.lead_temperature ?? "neutral";
                 const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
                 const draftStatus = r.reply_draft?.status;
+                const isActive = selectedReplyId === r.id;
                 return (
                   <button
                     key={r.id}
                     type="button"
                     onClick={() => setSelectedReplyId(r.id)}
                     className={cn(
-                      "w-full text-left px-4 py-3 border-b border-border/50 transition-colors",
-                      selectedReplyId === r.id ? "bg-secondary/80" : "hover:bg-secondary/40",
+                      "w-full text-left px-4 py-3.5 transition-colors",
+                      isActive ? "bg-primary/8 border-l-2 border-l-primary" : "hover:bg-secondary/40 border-l-2 border-l-transparent",
                     )}
                   >
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1.5">
                       <Avatar name={name ?? ""} size="sm" />
-                      <span className="text-sm font-medium truncate flex-1">{name}</span>
-                      <span className={cn("text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full border inline-flex items-center gap-0.5", badge.cls)}>
-                        {badge.icon}{badge.label}
-                      </span>
+                      <span className="text-sm font-semibold truncate flex-1">{name}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-1">{stripQuotedLines(r.reply_body)}</p>
-                    <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                      <span>{r.received_at ? format(new Date(r.received_at), "MMM d, h:mm a") : ""}</span>
-                      {draftStatus && (
-                        <span className={cn("px-1.5 py-0.5 rounded-full", DRAFT_STATUS_STYLE[draftStatus] ?? "")}>
-                          {draftStatus === "generating" ? "Drafting…" : draftStatus === "draft" ? "Draft ready" : draftStatus === "approved" ? "Approved" : draftStatus === "sent" ? "Sent ✓" : draftStatus}
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-2 leading-relaxed">
+                      {stripQuotedLines(r.reply_body)}
+                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-muted-foreground/70">
+                        {r.received_at ? format(new Date(r.received_at), "MMM d, h:mm a") : ""}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border inline-flex items-center gap-0.5", badge.cls)}>
+                          {badge.icon}{badge.label}
                         </span>
-                      )}
+                        {draftStatus && (
+                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", DRAFT_STATUS_STYLE[draftStatus] ?? "")}>
+                            {draftStatus === "generating" ? "Drafting…" : draftStatus === "draft" ? "Ready" : draftStatus === "approved" ? "Approved" : draftStatus === "sent" ? "Sent ✓" : draftStatus}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 );
@@ -885,152 +792,110 @@ export function CampaignDetail({
             </div>
           </div>
 
-          {/* Right: reply detail */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* Right: email thread */}
+          <div className="flex-1 overflow-y-auto bg-secondary/10">
             {!selectedReply ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                Select a reply to view details
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Select a reply to view the thread
               </div>
             ) : (
-              <>
-                {/* Inbound reply card */}
-                <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-                  <div className="flex items-center gap-3">
+              <div className="max-w-2xl mx-auto p-6 space-y-3">
+                {/* Thread header */}
+                <div className="flex items-center justify-between gap-3 pb-2">
+                  <div className="flex items-center gap-3 min-w-0">
                     <Avatar name={selectedReplyName} size="md" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold">{selectedReplyName}</p>
-                      <p className="text-xs text-muted-foreground">{selectedReply.lead_email}</p>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm truncate">{selectedReplyName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{selectedReply.lead_email}</p>
                     </div>
-                    {(() => {
-                      const temp = selectedReply.intent_classified ?? selectedReply.campaign_leads?.lead_temperature ?? "neutral";
-                      const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
-                      return (
-                        <span className={cn("text-xs font-semibold uppercase px-2.5 py-1 rounded-full border inline-flex items-center gap-1", badge.cls)}>
-                          {badge.icon}{badge.label}
-                        </span>
-                      );
-                    })()}
                   </div>
-                  <div className="rounded-lg bg-secondary/30 border border-border p-4">
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                      {stripQuotedLines(selectedReply.reply_body)}
-                    </p>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Received {selectedReply.received_at ? format(new Date(selectedReply.received_at), "MMM d, yyyy 'at' h:mm a") : ""}
-                  </p>
+                  {(() => {
+                    const temp = selectedReply.intent_classified ?? selectedReply.campaign_leads?.lead_temperature ?? "neutral";
+                    const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
+                    return (
+                      <span className={cn("text-xs font-semibold uppercase px-2.5 py-1 rounded-full border shrink-0 inline-flex items-center gap-1", badge.cls)}>
+                        {badge.icon}{badge.label}
+                      </span>
+                    );
+                  })()}
                 </div>
 
-                {/* AI Reply Draft card */}
-                <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Reply className="size-4 text-muted-foreground" />
-                    <span className="text-sm font-semibold">AI Reply Draft</span>
-                    {selectedReply.reply_draft && (
-                      <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ml-auto",
-                        DRAFT_STATUS_STYLE[selectedReply.reply_draft.status] ?? ""
-                      )}>
-                        {selectedReply.reply_draft.status === "generating" ? "Generating…" : selectedReply.reply_draft.status}
-                      </span>
-                    )}
+                {/* Inbound message — LEFT bubble */}
+                <div className="flex items-end gap-2">
+                  <div className="size-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-muted-foreground">
+                    {selectedReplyName.charAt(0).toUpperCase()}
                   </div>
+                  <div className="max-w-[85%] space-y-1">
+                    <div className="rounded-2xl rounded-bl-sm bg-secondary border border-border px-4 py-3">
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed text-foreground">
+                        {stripQuotedLines(selectedReply.reply_body)}
+                      </p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/70 pl-1">
+                      {selectedReply.received_at ? format(new Date(selectedReply.received_at), "MMM d, h:mm a") : ""}
+                    </p>
+                  </div>
+                </div>
 
+                {/* AI Reply — RIGHT bubble */}
+                <div className="flex flex-col items-end gap-1">
                   {!selectedReply.reply_draft ? (
-                    <p className="text-sm text-muted-foreground">No reply draft generated yet.</p>
+                    <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft generated yet.</div>
                   ) : selectedReply.reply_draft.status === "generating" ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                    <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
                       <Loader2 className="size-4 animate-spin" /> Generating reply draft…
                     </div>
                   ) : selectedReply.reply_draft.status === "sent" ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-green-400 text-sm">
-                        <CheckCircle2 className="size-4" /> Reply sent successfully
+                    <>
+                      <div className="max-w-[85%] space-y-1 items-end flex flex-col">
+                        <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
+                          <div
+                            className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
+                            dangerouslySetInnerHTML={{ __html: selectedReply.reply_draft.body ?? "" }}
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5 pr-1">
+                          <CheckCircle2 className="size-3 text-green-400" />
+                          <p className="text-[10px] text-green-400">Sent</p>
+                        </div>
                       </div>
-                      <div className="rounded-lg bg-secondary/30 border border-border p-4">
-                        <p className="text-xs text-muted-foreground mb-1">{selectedReply.reply_draft.subject}</p>
-                        <p className="text-sm whitespace-pre-wrap">{selectedReply.reply_draft.body}</p>
+                      <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
+                        K
                       </div>
-                    </div>
+                    </>
                   ) : (
-                    <div className="space-y-3">
-                      <Input
-                        value={replyEditSubject}
-                        onChange={(e) => setReplyEditSubject(e.target.value)}
-                        placeholder="Subject"
-                        className="text-sm"
-                      />
-                      <RichTextEditor
-                        value={replyEditBody}
-                        onChange={setReplyEditBody}
-                      />
-                      {error && <p className="text-sm text-destructive">{error}</p>}
-
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Save edits */}
-                        <Button size="sm" variant="outline" disabled={replySaving}
-                          onClick={async () => {
-                            if (!selectedReply.reply_draft) return;
-                            setReplySaving(true); setError("");
-                            try {
-                              const { data: { session } } = await supabase.auth.getSession();
-                              if (!session) return;
-                              await editReplyDraft(session.access_token, selectedReply.reply_draft.id, replyEditSubject, replyEditBody);
-                              await loadReplies();
-                            } catch (e) { setError((e as Error).message); }
-                            finally { setReplySaving(false); }
-                          }}
-                          className="gap-1.5">
-                          <Save className="size-3.5" /> Save edits
+                    /* Editable draft — full width card, right-aligned header */
+                    <div className="w-full rounded-2xl rounded-br-sm border border-primary/20 bg-primary/5 overflow-hidden">
+                      <div className="px-4 py-2.5 border-b border-primary/10 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-primary">Your reply</span>
+                          <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full",
+                            DRAFT_STATUS_STYLE[selectedReply.reply_draft.status] ?? ""
+                          )}>
+                            {selectedReply.reply_draft.status}
+                          </span>
+                        </div>
+                        <Button size="sm" variant="ghost"
+                          onClick={() => setReplyRegenOpen((o) => !o)}
+                          className="h-6 gap-1 text-[11px] text-muted-foreground hover:text-foreground px-2">
+                          <RotateCcw className="size-3" /> Regenerate
                         </Button>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        <Input
+                          value={replyEditSubject}
+                          onChange={(e) => setReplyEditSubject(e.target.value)}
+                          placeholder="Subject"
+                          className="text-sm font-medium bg-background/60"
+                        />
+                        <RichTextEditor
+                          value={replyEditBody}
+                          onChange={setReplyEditBody}
+                          minHeight={180}
+                        />
+                        {error && <p className="text-sm text-destructive">{error}</p>}
 
-                        {/* Approve */}
-                        {selectedReply.reply_draft.status !== "approved" && (
-                          <Button size="sm" disabled={replySaving}
-                            onClick={async () => {
-                              if (!selectedReply.reply_draft) return;
-                              setReplySaving(true); setError("");
-                              try {
-                                const { data: { session } } = await supabase.auth.getSession();
-                                if (!session) return;
-                                await approveReplyDraft(session.access_token, selectedReply.reply_draft.id, replyEditSubject, replyEditBody);
-                                await loadReplies();
-                              } catch (e) { setError((e as Error).message); }
-                              finally { setReplySaving(false); }
-                            }}
-                            className="gap-1.5">
-                            <Check className="size-3.5" /> Approve
-                          </Button>
-                        )}
-
-                        {/* Send */}
-                        {selectedReply.reply_draft.status === "approved" && (
-                          <Button size="sm" disabled={replySending}
-                            onClick={async () => {
-                              if (!selectedReply.reply_draft) return;
-                              setReplySending(true); setError("");
-                              try {
-                                const { data: { session } } = await supabase.auth.getSession();
-                                if (!session) return;
-                                await sendReplyDraft(session.access_token, selectedReply.reply_draft.id);
-                                await loadReplies();
-                              } catch (e) {
-                                const msg = (e as Error).message ?? "Failed to send reply";
-                                if (msg.includes("MISSING_THREAD")) {
-                                  setError("Cannot send: the original email reference has expired in Instantly. Regenerate the reply to get a fresh thread reference.");
-                                } else {
-                                  setError(msg);
-                                }
-                              }
-                              finally { setReplySending(false); }
-                            }}
-                            className="gap-1.5 bg-green-600 hover:bg-green-700">
-                            {replySending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-                            Send reply
-                          </Button>
-                        )}
-
-                        {/* Reject */}
-                        {selectedReply.reply_draft.status === "draft" && (
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Button size="sm" variant="outline" disabled={replySaving}
                             onClick={async () => {
                               if (!selectedReply.reply_draft) return;
@@ -1038,72 +903,127 @@ export function CampaignDetail({
                               try {
                                 const { data: { session } } = await supabase.auth.getSession();
                                 if (!session) return;
-                                await rejectReplyDraft(session.access_token, selectedReply.reply_draft.id);
+                                await editReplyDraft(session.access_token, selectedReply.reply_draft.id, replyEditSubject, replyEditBody);
                                 await loadReplies();
                               } catch (e) { setError((e as Error).message); }
                               finally { setReplySaving(false); }
                             }}
-                            className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
-                            <ThumbsDown className="size-3.5" /> Reject
+                            className="gap-1.5">
+                            {replySaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                            Save
                           </Button>
-                        )}
 
-                        {/* Regenerate toggle */}
-                        <Button size="sm" variant="outline"
-                          onClick={() => setReplyRegenOpen((o) => !o)}
-                          className="gap-1.5">
-                          <RotateCcw className="size-3.5" /> Regenerate
-                        </Button>
-                      </div>
+                          {selectedReply.reply_draft.status !== "approved" && (
+                            <Button size="sm" disabled={replySaving}
+                              onClick={async () => {
+                                if (!selectedReply.reply_draft) return;
+                                setReplySaving(true); setError("");
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  if (!session) return;
+                                  await approveReplyDraft(session.access_token, selectedReply.reply_draft.id, replyEditSubject, replyEditBody);
+                                  await loadReplies();
+                                } catch (e) { setError((e as Error).message); }
+                                finally { setReplySaving(false); }
+                              }}
+                              className="gap-1.5">
+                              <Check className="size-3.5" /> Approve
+                            </Button>
+                          )}
 
-                      {/* Regenerate panel */}
-                      {replyRegenOpen && (
-                        <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
-                          <Input
-                            value={replyRegenQuery}
-                            onChange={(e) => setReplyRegenQuery(e.target.value)}
-                            placeholder="Optional instruction, e.g. Make it shorter…"
-                            onKeyDown={(e) => {
-                              if (e.key !== "Enter" || !selectedReply.reply_draft) return;
-                              (async () => {
+                          {selectedReply.reply_draft.status === "approved" && (
+                            <Button size="sm" disabled={replySending}
+                              onClick={async () => {
+                                if (!selectedReply.reply_draft) return;
+                                setReplySending(true); setError("");
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  if (!session) return;
+                                  await sendReplyDraft(session.access_token, selectedReply.reply_draft.id);
+                                  await loadReplies();
+                                } catch (e) {
+                                  const msg = (e as Error).message ?? "Failed to send reply";
+                                  setError(msg.includes("MISSING_THREAD")
+                                    ? "Cannot send: the original email reference has expired in Instantly. Regenerate the reply to get a fresh thread reference."
+                                    : msg);
+                                }
+                                finally { setReplySending(false); }
+                              }}
+                              className="gap-1.5 bg-green-600 hover:bg-green-700">
+                              {replySending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                              Send reply
+                            </Button>
+                          )}
+
+                          {selectedReply.reply_draft.status === "draft" && (
+                            <Button size="sm" variant="outline" disabled={replySaving}
+                              onClick={async () => {
+                                if (!selectedReply.reply_draft) return;
+                                setReplySaving(true); setError("");
+                                try {
+                                  const { data: { session } } = await supabase.auth.getSession();
+                                  if (!session) return;
+                                  await rejectReplyDraft(session.access_token, selectedReply.reply_draft.id);
+                                  await loadReplies();
+                                } catch (e) { setError((e as Error).message); }
+                                finally { setReplySaving(false); }
+                              }}
+                              className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
+                              <ThumbsDown className="size-3.5" /> Reject
+                            </Button>
+                          )}
+                        </div>
+
+                        {replyRegenOpen && (
+                          <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
+                            <Input
+                              value={replyRegenQuery}
+                              onChange={(e) => setReplyRegenQuery(e.target.value)}
+                              placeholder="Optional instruction, e.g. Make it shorter…"
+                              className="text-sm"
+                              onKeyDown={(e) => {
+                                if (e.key !== "Enter" || !selectedReply.reply_draft) return;
+                                (async () => {
+                                  setReplyRegenerating(true); setError("");
+                                  try {
+                                    const { data: { session } } = await supabase.auth.getSession();
+                                    if (!session) return;
+                                    await regenerateReplyDraft(session.access_token, selectedReply.reply_draft!.id, replyRegenQuery || undefined);
+                                    setReplyRegenOpen(false); setReplyRegenQuery("");
+                                    await loadReplies();
+                                  } catch (e) { setError((e as Error).message); }
+                                  finally { setReplyRegenerating(false); }
+                                })();
+                              }}
+                            />
+                            <Button size="sm" disabled={replyRegenerating}
+                              onClick={async () => {
+                                if (!selectedReply.reply_draft) return;
                                 setReplyRegenerating(true); setError("");
                                 try {
                                   const { data: { session } } = await supabase.auth.getSession();
                                   if (!session) return;
-                                  await regenerateReplyDraft(session.access_token, selectedReply.reply_draft!.id, replyRegenQuery || undefined);
+                                  await regenerateReplyDraft(session.access_token, selectedReply.reply_draft.id, replyRegenQuery || undefined);
                                   setReplyRegenOpen(false); setReplyRegenQuery("");
                                   await loadReplies();
                                 } catch (e) { setError((e as Error).message); }
                                 finally { setReplyRegenerating(false); }
-                              })();
-                            }}
-                          />
-                          <Button size="sm" disabled={replyRegenerating}
-                            onClick={async () => {
-                              if (!selectedReply.reply_draft) return;
-                              setReplyRegenerating(true); setError("");
-                              try {
-                                const { data: { session } } = await supabase.auth.getSession();
-                                if (!session) return;
-                                await regenerateReplyDraft(session.access_token, selectedReply.reply_draft.id, replyRegenQuery || undefined);
-                                setReplyRegenOpen(false); setReplyRegenQuery("");
-                                await loadReplies();
-                              } catch (e) { setError((e as Error).message); }
-                              finally { setReplyRegenerating(false); }
-                            }}
-                            className="gap-1.5">
-                            <RotateCcw className="size-3.5" /> Regenerate
-                          </Button>
-                        </div>
-                      )}
+                              }}
+                              className="gap-1.5">
+                              {replyRegenerating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+                              Regenerate
+                            </Button>
+                          </div>
+                        )}
 
-                      {selectedReply.reply_draft.status === "failed" && selectedReply.reply_draft.error && (
-                        <p className="text-xs text-red-400">Error: {selectedReply.reply_draft.error}</p>
-                      )}
+                        {selectedReply.reply_draft.status === "failed" && selectedReply.reply_draft.error && (
+                          <p className="text-xs text-red-400 mt-1">Error: {selectedReply.reply_draft.error}</p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -1171,31 +1091,37 @@ export function CampaignDetail({
         </div>
       ) : (
       <div className="flex flex-1 min-h-0">
-        <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/50">
-          <div className="px-4 py-3 border-b border-border shrink-0">
+        <div className="w-[360px] shrink-0 border-r border-border flex flex-col bg-card/40">
+          <div className="px-4 py-3 border-b border-border shrink-0 bg-card/60">
             <div className="flex items-center justify-between mb-1 gap-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground inline-flex items-center gap-1">
                 Leads ({campaign.leads})
                 <InfoTip text="Select leads to certify individually, or use Certify all in the header." />
               </p>
-              <div className="flex rounded-md border border-border p-0.5 text-[10px]">
+              <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
                 <button
                   type="button"
                   onClick={() => setLeadsSort("az")}
-                  className={cn("px-2 py-0.5 rounded", leadsSort === "az" ? "bg-secondary text-foreground" : "text-muted-foreground")}
+                  className={cn(
+                    "flex items-center px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors",
+                    leadsSort === "az" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
                 >
                   A–Z
                 </button>
                 <button
                   type="button"
                   onClick={() => setLeadsSort("newest")}
-                  className={cn("px-2 py-0.5 rounded", leadsSort === "newest" ? "bg-secondary text-foreground" : "text-muted-foreground")}
+                  className={cn(
+                    "flex items-center px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors",
+                    leadsSort === "newest" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
                 >
                   Newest
                 </button>
               </div>
             </div>
-            {draftReadyLeads.length > 0 && (
+            {(draftReadyLeads.length > 0 || checkedDraftCount > 0) && (
               <div className="flex items-center justify-between gap-2 mt-2">
                 <button
                   type="button"
@@ -1205,27 +1131,29 @@ export function CampaignDetail({
                   {draftReadyLeads.every((cl) => checkedIds.has(cl.id)) ? "Deselect all" : "Select all draft-ready"}
                 </button>
                 {checkedDraftCount > 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 text-[10px] gap-1 px-2"
-                    disabled={certifying}
-                    onClick={() => handleBulkCertify(
-                      campaignLeads
-                        .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
-                        .map((cl) => cl.email_drafts!.id),
-                    )}
-                  >
-                    {certifying ? <Loader2 className="size-2.5 animate-spin" /> : <Check className="size-2.5" />}
-                    Certify selected ({checkedDraftCount})
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[10px] gap-1 px-2"
+                      disabled={certifying}
+                      onClick={() => handleBulkCertify(
+                        campaignLeads
+                          .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
+                          .map((cl) => cl.email_drafts!.id),
+                      )}
+                    >
+                      {certifying ? <Loader2 className="size-2.5 animate-spin" /> : <Check className="size-2.5" />}
+                      Certify selected ({checkedDraftCount})
+                    </Button>
                     <InfoTip text={CAMPAIGN_ACTION_HELP.certifySelected} />
-                  </Button>
+                  </div>
                 )}
               </div>
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1">
             {loading ? (
               <div className="space-y-1 animate-pulse">
                 {Array.from({ length: 8 }).map((_, i) => (
@@ -1246,16 +1174,16 @@ export function CampaignDetail({
                 const lead = cl.leads;
                 const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
                 const isSelected = selectedId === cl.id;
-                const canCheck = cl.email_drafts?.status === "draft";
+                const canCheck = ["draft", "approved"].includes(cl.email_drafts?.status ?? "") || cl.crm_status === "sent";
                 return (
                   <button
                     key={cl.id}
                     type="button"
                     onClick={() => setSelectedId(cl.id)}
                     className={cn(
-                      "w-full flex items-center gap-2 px-2.5 py-2.5 rounded-lg text-left transition-colors",
+                      "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors",
                       isSelected
-                        ? "bg-primary/10 border border-primary/30"
+                        ? "bg-primary/10 border border-primary/30 shadow-sm"
                         : "hover:bg-secondary/60 border border-transparent",
                     )}
                   >
@@ -1294,10 +1222,67 @@ export function CampaignDetail({
               })
             )}
           </div>
+
+          <div className="shrink-0 border-t border-border bg-card/60 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                {progress && progress.total > 0 && progressCompleted < progress.total ? (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin text-primary" />
+                    <span><span className="font-medium text-foreground">{progressCompleted}</span> of {progress.total} ready</span>
+                  </p>
+                ) : progress && progress.total > 0 ? (
+                  <p className="flex items-center gap-1.5 text-xs text-green-500">
+                    <CheckCircle2 className="size-3.5" /> {progress.total} ready
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No draft progress yet</p>
+                )}
+                {isGenerating && (
+                  <p className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-500">
+                    <Loader2 className="size-3 animate-spin" /> Generating drafts
+                  </p>
+                )}
+              </div>
+
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setConfigOpen((o) => !o)}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                >
+                  <Gauge className="size-3.5" />
+                  Config
+                </button>
+                {configOpen && (
+                  <div className="absolute bottom-full right-0 mb-2 z-50 w-72 overflow-hidden rounded-xl border border-border bg-card text-sm shadow-xl divide-y divide-border">
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
+                      <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
+                      <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
+                      <span className="font-medium">{campaign.timezone ?? "—"}</span>
+                    </div>
+                    {activeDays.length > 0 && (
+                      <div className="flex items-center justify-between px-4 py-2.5">
+                        <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
+                        <span className="font-medium">{activeDays.join(", ")}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Draft review panel */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-secondary/10">
           {!selected ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
               <p className="text-sm text-muted-foreground">Select a lead to review and certify their draft.</p>
@@ -1305,8 +1290,8 @@ export function CampaignDetail({
           ) : (
             <>
               {/* ── Lead name card — fixed, never scrolls ─────────────────── */}
-              <div className="shrink-0 border-b border-border px-8 py-4 bg-card/30">
-                <div className="max-w-2xl mx-auto">
+              <div className="shrink-0 border-b border-border px-6 py-3 bg-background">
+                <div className="max-w-4xl mx-auto">
                   <div
                     role="button"
                     tabIndex={0}
@@ -1328,7 +1313,7 @@ export function CampaignDetail({
                       });
                     }}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.currentTarget.click(); }}
-                    className="w-full flex items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 text-left hover:bg-secondary/40 hover:border-primary/30 transition-all group cursor-pointer"
+                    className="w-full flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-secondary/40 hover:border-primary/30 transition-all group cursor-pointer"
                   >
                     <Avatar name={selectedName} size="md" />
                     <div className="flex-1 min-w-0">
@@ -1362,16 +1347,16 @@ export function CampaignDetail({
               </div>
 
               {/* ── Email draft — scrollable ───────────────────────────────── */}
-              <div className="flex-1 overflow-y-auto px-8 py-6">
-              <div className="max-w-2xl mx-auto space-y-4">
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="max-w-4xl mx-auto space-y-4">
 
                 {selected.email_drafts?.status === "generating" || regenerating ? (
-                  <div className="flex flex-col items-center py-20 gap-3 rounded-xl border border-border bg-card">
+                  <div className="flex flex-col items-center py-20 gap-3 rounded-lg border border-border bg-card">
                     <Loader2 className="size-6 text-muted-foreground animate-spin" />
                     <p className="text-sm text-muted-foreground">Generating personalised email…</p>
                   </div>
                 ) : selected.email_drafts ? (
-                  <div className="space-y-4 rounded-xl border border-border bg-card p-6">
+                  <div className="space-y-4 rounded-lg border border-border bg-card p-5">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
                       <Input
@@ -1387,7 +1372,7 @@ export function CampaignDetail({
                         value={editBody}
                         onChange={setEditBody}
                         disabled={isPreviewingHistory || selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
-                        minHeight={320}
+                        minHeight={520}
                       />
                     </div>
 

@@ -695,7 +695,7 @@ export default function LeadsPage() {
               )}
             </span>
             <Button
-              size="sm" variant="destructive" className="gap-1.5"
+              size="sm" variant="destructive" className="gap-1.5 text-white!"
               onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
             >
               <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
