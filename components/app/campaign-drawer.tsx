@@ -108,7 +108,7 @@ type CampaignLead = {
   lead_temperature: string | null;
   created_at: string;
   leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
-  email_drafts: { id: string; subject: string | null; body: string | null; status: string; step_number?: number | null } | null;
+  email_drafts: { id: string; subject: string | null; body: string | null; status: string; step_number?: number | null; created_at?: string } | null;
   attachment?: AttachmentInfo;
 };
 
@@ -209,6 +209,20 @@ export function CampaignDetail({
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
   const [refreshingReplies, setRefreshingReplies] = useState(false);
 
+  const [systemPromptUpdatedAt, setSystemPromptUpdatedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch("/api/v1/settings/prompt-meta", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const json = await res.json();
+      setSystemPromptUpdatedAt(json.data?.updatedAt ?? null);
+    })();
+  }, []);
+
   const { loadCampaigns, session: appSession } = useApp();
 
   const loadData = useCallback(async () => {
@@ -273,6 +287,12 @@ export function CampaignDetail({
   }, [progress, loadData]);
 
   const selected = campaignLeads.find((cl) => cl.id === selectedId) ?? null;
+
+  const promptChangedSinceDraft = !!(
+    systemPromptUpdatedAt &&
+    selected?.email_drafts?.created_at &&
+    new Date(systemPromptUpdatedAt) > new Date(selected.email_drafts.created_at)
+  );
 
   useEffect(() => {
     if (selected?.email_drafts) {
@@ -806,7 +826,7 @@ export function CampaignDetail({
                 Select a reply to view the thread
               </div>
             ) : (
-              <div className="max-w-4xl mx-auto p-6 space-y-3">
+              <div className="w-full max-w-[1400px] mx-auto p-6 space-y-3">
                 {/* Thread header */}
                 <div className="flex items-center justify-between gap-3 pb-2">
                   <div className="flex items-center gap-3 min-w-0">
@@ -1288,6 +1308,27 @@ export function CampaignDetail({
                       {["draft", "failed", "rejected"].includes(selected.email_drafts.status) && !isPreviewingHistory && (
                         <Button variant="outline" className="gap-1.5" onClick={() => setRegenOpen((o) => !o)}>
                           <RotateCcw className="size-3.5" /> Regenerate
+                        </Button>
+                      )}
+                      {["draft", "failed", "rejected"].includes(selected.email_drafts.status) && !isPreviewingHistory && promptChangedSinceDraft && (
+                        <Button
+                          variant="outline"
+                          className="gap-1.5 border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+                          disabled={regenerating}
+                          onClick={async () => {
+                            setRegenerating(true); setError("");
+                            try {
+                              const { data: { session } } = await supabase.auth.getSession();
+                              if (!session || !selected?.email_drafts?.id) return;
+                              const { draft } = await regenerateDraft(session.access_token, selected.email_drafts.id);
+                              setEditSubject(draft.subject ?? "");
+                              setEditBody(draft.body ?? "");
+                              await loadData();
+                            } catch (e) { setError((e as Error).message); }
+                            finally { setRegenerating(false); }
+                          }}
+                        >
+                          <RotateCcw className="size-3.5" /> Regenerate using new System Prompt
                         </Button>
                       )}
                       {versions.length > 1 && (
