@@ -5,7 +5,6 @@ import {
   getDraftSystemPrompt,
   getEmailSignature,
   getProductOfferings,
-  getSubjectTemplate,
 } from "@/lib/services/settings";
 import { KUBER_CONTEXT } from "@/lib/constants";
 
@@ -165,10 +164,9 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const [baseSystemPrompt, products, subjectTemplate] = await Promise.all([
+    const [baseSystemPrompt, products] = await Promise.all([
       getDraftSystemPrompt(db),
       getProductOfferings(db),
-      getSubjectTemplate(db),
     ]);
     const systemPrompt =
       baseSystemPrompt
@@ -200,7 +198,7 @@ export async function generateOneDraft(
 
     const finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
 
-    const finalSubject = subjectTemplate || validated.data.subject;
+    const finalSubject = validated.data.subject;
 
     const finalStatus = humanInLoop ? "draft" : "approved";
     const now = new Date().toISOString();

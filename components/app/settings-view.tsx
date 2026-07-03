@@ -4,7 +4,7 @@ import type React from "react";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import {
-  User, Bot, LogOut, Plus, Mail,
+  User, Bot, LogOut, Plus,
   ChevronRight, PenLine, Bold, Italic, Underline,
   List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type, Palette, Check, Sun, Moon,
   Building2, Package, FileText, X,
@@ -26,7 +26,7 @@ const PRODUCT_SUGGESTIONS = [
 ];
 
 type Section = "profile" | "ai" | "knowledge" | "appearance" | "account";
-type AiSection = "template" | "replies" | "subject" | "footer";
+type AiSection = "template" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
 
@@ -41,7 +41,6 @@ const NAV_ITEMS: { id: Section; label: string }[] = [
 const AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "template", label: "Email Template", icon: PenLine },
   { id: "replies",  label: "Reply AI",       icon: Bot },
-  { id: "subject",  label: "Subject Line",   icon: Mail },
   { id: "footer",   label: "Email Footer",   icon: Type },
 ];
 
@@ -167,7 +166,6 @@ export function SettingsView() {
   const [logoUploading,  setLogoUploading ] = useState(false);
 
   const [sigContact, setSigContact] = useState("");
-  const [subjectTemplate, setSubjectTemplate] = useState("");
 
   const [productOfferings, setProductOfferings] = useState<ProductOffering[]>([]);
 
@@ -203,7 +201,6 @@ export function SettingsView() {
         setClientProducts((s.client_products ?? "").split(",").map((p: string) => p.trim()).filter(Boolean));
         setTargetMarkets(s.client_target_markets ?? "");
         setSystemPrompt(s.system_prompt ?? "");
-        setSubjectTemplate(s.email_subject_template ?? "");
         setSigContact(s.signature_contact ?? "");
         setReplyClassifierPrompt(s.reply_classifier_prompt ?? "");
         setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
@@ -266,16 +263,18 @@ export function SettingsView() {
   }
 
   async function handleSave() {
-    // Block saving if any product offering is missing a name or description — an
-    // empty description contributes nothing to the AI's product-matching prompt and
-    // just adds noise (confirmed live: a "black plastic" entry was saved with a
-    // completely blank description before this check existed).
-    const incompleteProduct = productOfferings.find(
-      (p) => !p.name.trim() || !p.description.trim()
-    );
-    if (incompleteProduct) {
-      toast.error("Every product needs both a name and a description before saving.");
-      return;
+    // Only validate Product Offerings completeness when the user is actually on that
+    // tab. Without this scoping, a stale incomplete product sitting in Knowledge
+    // Sources blocks saving on completely unrelated tabs (Email Template, Reply AI,
+    // Email Footer) even when nothing about products was touched — confirmed live bug.
+    if (section === "knowledge" && knowledgeSection === "products") {
+      const incompleteProduct = productOfferings.find(
+        (p) => !p.name.trim() || !p.description.trim()
+      );
+      if (incompleteProduct) {
+        toast.error("Every product needs both a name and a description before saving.");
+        return;
+      }
     }
 
     setSaving(true);
@@ -289,7 +288,6 @@ export function SettingsView() {
         client_products:         clientProducts.join(", "),
         client_target_markets:   targetMarkets,
         system_prompt:           systemPrompt,
-        email_subject_template:  subjectTemplate,
         signature_contact:       sigContact,
         product_offerings:       JSON.stringify(productOfferings),
         reply_classifier_prompt: replyClassifierPrompt,
@@ -506,26 +504,6 @@ export function SettingsView() {
                         placeholder="Write the full email template here including intro, offerings summary, closing..."
                         helper="Campaign-level context and matched product details are appended automatically."
                       />
-                    </section>
-                  )}
-
-                  {aiSection === "subject" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                      <div className="flex items-center gap-2">
-                        <Mail className="size-4 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">Subject Line</h3>
-                      </div>
-                      <p className="text-xs text-muted-foreground -mt-2">
-                        This exact subject line is used on every outreach email. Leave blank to let the AI generate one per email.
-                      </p>
-                      <div className="space-y-2">
-                        <Label>Subject line</Label>
-                        <Input
-                          value={subjectTemplate}
-                          onChange={(e) => setSubjectTemplate(e.target.value)}
-                          placeholder="e.g. Masterbatch solutions for your production line — Kuber Polyplast"
-                        />
-                      </div>
                     </section>
                   )}
 

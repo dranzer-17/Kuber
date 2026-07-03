@@ -178,14 +178,6 @@ export async function resolveCampaignSignature(
 
 // ── Subject line template ─────────────────────────────────────────────────────
 
-export async function getSubjectTemplate(db: SupabaseClient): Promise<string> {
-  const { data } = await db
-    .from("settings")
-    .select("value")
-    .eq("key", "email_subject_template")
-    .maybeSingle();
-  return data?.value?.trim() ?? "";
-}
 
 // ── Dynamic product offerings ─────────────────────────────────────────────────
 
