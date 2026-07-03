@@ -39,8 +39,7 @@ export type Campaign = {
   attachmentName?: string;
   hot?: number;
   cold?: number;
-  followupDay2?: number;
-  followupDay3?: number;
+  followupDays?: number[];
 };
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
@@ -120,8 +119,7 @@ export function CreateCampaignModal({
     monday: true, tuesday: true, wednesday: true, thursday: true,
     friday: true, saturday: false, sunday: false,
   });
-  const [followupDay2, setFollowupDay2] = useState(30);
-  const [followupDay3, setFollowupDay3] = useState(90);
+  const [followupDays, setFollowupDays] = useState<number[]>([30, 90]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
@@ -187,7 +185,7 @@ export function CreateCampaignModal({
     setTimezoneOverride(false); setPrimaryCountry(null);
     setScheduleDate(undefined); setSenderName(""); setAiPromptContext("");
     setSendDays({ monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: false, sunday: false });
-    setFollowupDay2(30); setFollowupDay3(90);
+    setFollowupDays([30, 90]);
     setCreating(false); setError("");
     setAttachment(null); setUploading(false); setUploadError("");
   }
@@ -216,8 +214,7 @@ export function CreateCampaignModal({
         send_days: sendDays,
         ai_prompt_context: aiPromptContext || undefined,
         sender_name: senderName || undefined,
-        followup_day_2: followupDay2,
-        followup_day_3: followupDay3,
+        followup_days: followupDays,
         ...(scheduleDate ? {
           send_mode: "scheduled" as const,
           schedule_start_at: new Date(
@@ -388,34 +385,45 @@ export function CreateCampaignModal({
                 <Clock className="size-4 text-muted-foreground shrink-0" />
                 <div>
                   <p className="text-sm font-medium leading-none">Follow-up schedule</p>
-                  <p className="text-xs text-muted-foreground">Days after Stage 1 to send each follow-up</p>
+                  <p className="text-xs text-muted-foreground">Days after the first email to send each follow-up</p>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
-                  <span className="text-xs text-muted-foreground shrink-0 w-16">Stage 2 after</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={followupDay2}
-                    onChange={(e) => setFollowupDay2(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
-                    className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
-                  />
-                  <span className="text-xs text-muted-foreground">days</span>
-                </div>
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
-                  <span className="text-xs text-muted-foreground shrink-0 w-16">Stage 3 after</span>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={followupDay3}
-                    onChange={(e) => setFollowupDay3(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
-                    className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
-                  />
-                  <span className="text-xs text-muted-foreground">days</span>
-                </div>
+              <div className="space-y-2">
+                {followupDays.map((days, idx) => (
+                  <div key={idx} className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                    <span className="text-xs text-muted-foreground shrink-0 w-24">Follow-up {idx + 1} after</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={days}
+                      onChange={(e) => {
+                        const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
+                        setFollowupDays((prev) => prev.map((d, i) => (i === idx ? v : d)));
+                      }}
+                      className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+                    />
+                    <span className="text-xs text-muted-foreground flex-1">days</span>
+                    {followupDays.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setFollowupDays((prev) => prev.filter((_, i) => i !== idx))}
+                        className="text-xs text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {followupDays.length < 8 && (
+                  <button
+                    type="button"
+                    onClick={() => setFollowupDays((prev) => [...prev, (prev[prev.length - 1] ?? 30) + 30])}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    + Add follow-up step
+                  </button>
+                )}
               </div>
             </div>
           </div>

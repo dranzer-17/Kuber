@@ -129,12 +129,29 @@ export async function POST(req: NextRequest) {
 
   // 6) Update campaign_leads state (with lead_temperature for interest events)
   if (campaignLeadId) {
+    // Fetch current state BEFORE patching — needed for two idempotency guards below:
+    // (1) only count a lead's FIRST reply toward replied_count (a lead replying twice
+    //     must not push the reply rate above 100%), and
+    // (2) only increment hot_count/cold_count when Instantly's classification actually
+    //     CHANGES for this lead — not on every duplicate/retried webhook delivery of the
+    //     same event, which would otherwise double-count.
+    const { data: beforeState } = await db
+      .from("campaign_leads")
+      .select("crm_status, interest_status")
+      .eq("id", campaignLeadId)
+      .maybeSingle();
+    const wasAlreadyReplied = beforeState?.crm_status === "replied";
+    const previousInterest  = beforeState?.interest_status ?? null;
+
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (CRM_BY_EVENT[p.event_type])                    patch.crm_status = CRM_BY_EVENT[p.event_type];
     const interest = INTEREST_BY_EVENT[p.event_type];
     if (interest !== undefined) {
       patch.interest_status = interest;
-      // keep our temperature in sync when Instantly's own AI fires a lead_* event
+      // Instantly's own AI is the sole source of truth for lead_temperature (team
+      // decision). We no longer run our own LLM classifier on replies — see
+      // app/api/internal/process-reply/route.ts, which now only drafts, never classifies.
+      // This is the ONLY place in the codebase that sets lead_temperature.
       const temp = INTEREST_TO_TEMPERATURE[interest as number];
       if (temp) patch.lead_temperature = temp;
     }
@@ -147,10 +164,10 @@ export async function POST(req: NextRequest) {
       await db.from("campaign_leads").update(patch).eq("id", campaignLeadId);
     }
 
-    // Increment campaign-level replied_count so the header stat stays accurate.
-    // This is separate from hot_count/cold_count (incremented by classify-reply.ts
-    // after the AI classifier runs). replied_count increments immediately on any reply.
-    if (p.event_type === "reply_received" && masterId) {
+    // Increment campaign-level replied_count ONLY the first time this lead replies.
+    // Without this guard, a lead who replies twice inflates replied_count past sent_count,
+    // producing reply rates above 100% — confirmed bug in test campaigns.
+    if (p.event_type === "reply_received" && masterId && !wasAlreadyReplied) {
       try {
         await db.rpc("increment_campaign_counter", {
           p_campaign_id: masterId,
@@ -158,7 +175,22 @@ export async function POST(req: NextRequest) {
         });
       } catch { /* non-fatal — stat is cosmetic */ }
     }
+
+    // Increment hot_count / cold_count based on Instantly's own classification,
+    // guarded so a lead's classification only counts once per actual CHANGE in
+    // interest value — not once per duplicate delivery of the same webhook event.
+    if (interest !== undefined && masterId && interest !== previousInterest) {
+      const temp = INTEREST_TO_TEMPERATURE[interest as number];
+      try {
+        if (temp === "hot") {
+          await db.rpc("increment_campaign_counter", { p_campaign_id: masterId, p_column: "hot_count" });
+        } else if (temp === "cold") {
+          await db.rpc("increment_campaign_counter", { p_campaign_id: masterId, p_column: "cold_count" });
+        }
+      } catch { /* non-fatal */ }
+    }
   }
+
 
   // 7) Org-level hard opt-out: unsubscribe blocks the whole org
   if (p.event_type === "lead_unsubscribed" && p.lead_email) {

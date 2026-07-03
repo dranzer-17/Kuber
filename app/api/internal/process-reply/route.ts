@@ -1,11 +1,19 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { classifyReply, applyClassification } from "@/lib/services/classify-reply";
 import { generateReplyDraft } from "@/lib/services/generate-reply";
 import { getInstantlyEmail, listThreadEmails } from "@/lib/services/instantly";
 
 export const maxDuration = 55;
 
+/**
+ * This route's ONLY job is generating our human-reviewed reply draft.
+ * It does NOT classify the reply — lead_temperature / interest_status are set
+ * exclusively by app/api/v1/webhooks/instantly/route.ts, driven by Instantly's own
+ * built-in AI classification (lead_interested / lead_not_interested / etc. events).
+ * This is a deliberate team decision: Instantly's classifier is the sole source of
+ * truth for hot/cold/ooo/unsubscribed status. Do not re-add a classification step
+ * here without confirming with the team first.
+ */
 export async function POST(req: NextRequest) {
   if (req.headers.get("x-internal-secret") !== process.env.INTERNAL_SECRET) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -39,8 +47,6 @@ export async function POST(req: NextRequest) {
       threadId = inbound.thread_id ?? null;
       eaccount = inbound.eaccount ?? null;
 
-      // Pull the thread and find our first outbound email as originalEmailText
-      // so the classifier and drafter have the full context they need.
       if (threadId) {
         const threadEmails = await listThreadEmails(threadId);
         // ue_type 2 = received (prospect). Everything else is us. Take the earliest non-received email.
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
           originalEmailText = ourFirst.body.text.trim() || null;
         }
       }
-    } catch { /* non-fatal — classifier has safe defaults */ }
+    } catch { /* non-fatal — drafter has safe defaults */ }
   }
 
   // resolve campaign name + ai context
@@ -64,25 +70,7 @@ export async function POST(req: NextRequest) {
     if (c) { campaignName = c.name; aiPromptContext = c.ai_prompt_context ?? null; }
   }
 
-  // --- 1) classify ---
-  const classification = await classifyReply(db, {
-    originalEmailText,
-    replyText: b.reply_text,
-  });
-  await applyClassification(db, {
-    campaignLeadId: b.campaign_lead_id ?? null,
-    masterCampaignId: b.master_campaign_id ?? null,
-    leadEmail: b.lead_email ?? null,
-    classification,
-    replyEventId: b.reply_event_id,
-  });
-
-  // --- 2) do NOT draft a reply for unsubscribes ---
-  if (classification.temperature === "unsubscribed") {
-    return Response.json({ classified: classification.temperature, drafted: false });
-  }
-
-  // --- 3) create a reply_draft row + generate ---
+  // --- create a reply_draft row + generate (no classification step — see file header) ---
   const { data: rd, error } = await db
     .from("reply_drafts")
     .insert({
@@ -97,7 +85,7 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
   if (error || !rd) {
-    return Response.json({ classified: classification.temperature, drafted: false, error: error?.message });
+    return Response.json({ drafted: false, error: error?.message });
   }
 
   const result = await generateReplyDraft(db, {
@@ -112,7 +100,6 @@ export async function POST(req: NextRequest) {
   });
 
   return Response.json({
-    classified: classification.temperature,
     drafted: result.ok,
     reply_draft_id: rd.id,
   });

@@ -96,6 +96,8 @@ export interface DbCampaign {
   sender_name: string | null;
   hot_count: number;
   cold_count: number;
+  // followup_day_2 / followup_day_3 are kept as nullable columns in the DB but
+  // no longer written on creation — step delays now live in campaign_steps rows.
   followup_day_2: number | null;
   followup_day_3: number | null;
 }
@@ -159,8 +161,6 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     senderName: c.sender_name ?? undefined,
     hot: c.hot_count ?? 0,
     cold: c.cold_count ?? 0,
-    followupDay2: c.followup_day_2 ?? 30,
-    followupDay3: c.followup_day_3 ?? 90,
   };
 }
 
@@ -436,7 +436,7 @@ export async function createCampaign(token: string, body: {
   schedule_timezone?: string; send_days?: Record<string, boolean>;
   send_mode?: "now" | "scheduled"; schedule_start_at?: string;
   ai_prompt_context?: string; sender_name?: string;
-  followup_day_2?: number; followup_day_3?: number;
+  followup_days?: number[];
   attachment_path?: string; attachment_name?: string;
   attachment_mime?: string; attachment_size?: number;
   attachment_url?: string | null;
@@ -548,27 +548,26 @@ export interface ReplyDraft {
   error: string | null;
 }
 
-export interface CampaignReply {
+export interface ThreadMessage {
   id: string;
   event_type: string;
   reply_body: string | null;
-  intent_classified: string | null;
   received_at: string;
-  lead_email: string | null;
-  campaign_lead_id: string | null;
-  campaign_leads: {
-    id: string;
-    lead_temperature: string | null;
-    interest_status: number | null;
-    crm_status: string;
-    draft_id: string | null;
-    leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null } | null;
-    email_drafts: { subject: string | null; body: string | null } | null;
-  } | null;
-  reply_draft: ReplyDraft | null;
+  reply_drafts: ReplyDraft[];
 }
 
-export async function fetchCampaignReplies(token: string, campaignId: string): Promise<{ replies: CampaignReply[] }> {
+export interface CampaignReplyThread {
+  thread_key: string;
+  campaign_lead_id: string | null;
+  lead_email: string;
+  lead: { first_name: string | null; last_name: string | null; email: string | null; title: string | null } | null;
+  latest_temperature: string | null;
+  original_email: { subject: string | null; body: string | null } | null;
+  latest_received_at: string;
+  messages: ThreadMessage[];
+}
+
+export async function fetchCampaignReplies(token: string, campaignId: string): Promise<{ threads: CampaignReplyThread[] }> {
   return apiFetch(`/api/v1/campaigns/${campaignId}/replies`, {}, token);
 }
 export async function editReplyDraft(token: string, id: string, subject: string, body: string): Promise<ReplyDraft> {

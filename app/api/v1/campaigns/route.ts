@@ -3,7 +3,8 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateCampaignSchema } from "@/lib/validators/campaigns";
-import { DEFAULT_CAMPAIGN_STEPS } from "@/lib/constants";
+import { buildDefaultCampaignSteps } from "@/lib/constants";
+
 
 export async function GET(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -43,8 +44,8 @@ export async function POST(req: NextRequest) {
       daily_limit: parsed.data.daily_limit,
       ai_prompt_context: parsed.data.ai_prompt_context,
       sender_name: parsed.data.sender_name,
-      followup_day_2: parsed.data.followup_day_2,
-      followup_day_3: parsed.data.followup_day_3,
+      // followup_day_2 / followup_day_3 DB columns are left nullable going forward;
+      // actual step delays are now stored in campaign_steps rows built below.
       attachment_path: parsed.data.attachment_path,
       attachment_name: parsed.data.attachment_name,
       attachment_mime: parsed.data.attachment_mime,
@@ -55,15 +56,21 @@ export async function POST(req: NextRequest) {
       created_by: user.id,
       signature_user_id: parsed.data.signature_user_id ?? user.id,
       created_at: new Date().toISOString(),
+
     })
     .select()
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
 
-  // Create default sequence steps (campaign_steps table)
+  // Build sequence steps dynamically from the requested follow-up delays.
+  const followupDays = Array.isArray(parsed.data.followup_days) && parsed.data.followup_days.length > 0
+    ? parsed.data.followup_days
+    : [30, 90]; // safe default if the client omitted it
+  const steps = buildDefaultCampaignSteps(followupDays);
+
   await db.from("campaign_steps").insert(
-    DEFAULT_CAMPAIGN_STEPS.map((s) => ({
+    steps.map((s) => ({
       ...s,
       campaign_id: data.id,
       created_at: new Date().toISOString(),

@@ -301,29 +301,42 @@ export const KUBER_CONTEXT = `Kuber Polyplast is an ISO 9001:2015 certified Indi
 
 export type KuberProductMatch = "black" | "white" | "color" | "additive" | "none";
 
-export const DEFAULT_CAMPAIGN_STEPS = [
-  {
-    step_order: 1,
-    delay: 0,
-    delay_unit: "days" as const,
-    subject: "{{customSubject}}",
-    body: "{{customBody}}",
-  },
-  {
-    step_order: 2,
-    delay: 30,
-    delay_unit: "days" as const,
-    subject: "",  // empty = Instantly threads it as a reply in the same conversation
-    body: "Hi {{firstName}},\n\nJust following up on my previous note — would love your thoughts.\n\nBest regards",
-  },
-  {
-    step_order: 3,
-    delay: 90,
-    delay_unit: "days" as const,
-    subject: "",  // empty = threaded
-    body: "Hi {{firstName}},\n\nCircling back one final time in case this is useful.\n\nBest regards",
-  },
-] as const;
+export type CampaignStepInput = {
+  step_order: number;
+  delay: number;
+  delay_unit: "days";
+  subject: string;
+  body: string;
+};
+
+/**
+ * Builds the campaign_steps rows for a new campaign given an array of follow-up
+ * delay-days. Step 1 is always the initial send (delay 0). Each entry in
+ * `followupDays` becomes one additional follow-up step at that many days after Step 1.
+ */
+export function buildDefaultCampaignSteps(followupDays: number[]): CampaignStepInput[] {
+  const steps: CampaignStepInput[] = [
+    {
+      step_order: 1,
+      delay: 0,
+      delay_unit: "days",
+      subject: "{{customSubject}}",
+      body: "{{customBody}}",
+    },
+  ];
+
+  followupDays.forEach((days, idx) => {
+    steps.push({
+      step_order: idx + 2,
+      delay: days,
+      delay_unit: "days",
+      subject: "", // empty = Instantly threads it as a reply in the same conversation
+      body: "Hi {{firstName}},\n\nJust following up on my previous note — would love your thoughts.\n\nBest regards",
+    });
+  });
+
+  return steps;
+}
 
 export const BATCH_COLORS = [
   { name: "violet", bg: "bg-violet-400",  ring: "ring-violet-400",  text: "text-violet-400",  pill: "bg-violet-500/15 border-violet-500/30 text-violet-400"  },
