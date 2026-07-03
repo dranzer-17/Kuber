@@ -160,113 +160,124 @@ export async function sendCampaign(
     }
 
     for (const b of buckets.values()) {
-      const tz = pickTimezone(
-        b.rows.map((r) => {
-          const l = Array.isArray(r.leads) ? r.leads[0] : r.leads;
-          return l?.time_zone ?? null;
-        }),
-        b.countryName,
-        fallbackTz,
-      );
-      const bucketLabel = b.countryName ?? "Other";
+      try {
+        const tz = pickTimezone(
+          b.rows.map((r) => {
+            const l = Array.isArray(r.leads) ? r.leads[0] : r.leads;
+            return l?.time_zone ?? null;
+          }),
+          b.countryName,
+          fallbackTz,
+        );
+        const bucketLabel = b.countryName ?? "Other";
 
-      // Upsert sub-campaign row (status stays 'creating' until real activation in step 6)
-      let { data: sub } = await db
-        .from("instantly_campaigns")
-        .select("id,instantly_campaign_id")
-        .eq("campaign_id", campaignId)
-        .eq("country_code", b.code)
-        .maybeSingle();
-
-      if (!sub) {
-        const { data: created, error } = await db
+        // Upsert sub-campaign row (status stays 'creating' until real activation in step 6)
+        let { data: sub } = await db
           .from("instantly_campaigns")
-          .insert({
-            campaign_id: campaignId,
-            country: bucketLabel,
-            country_code: b.code,
-            timezone: tz,
-            status: "creating",
-            daily_limit: campaign.daily_limit ?? 30,
-            email_list: emailList,
-            created_at: new Date().toISOString(),
-          })
           .select("id,instantly_campaign_id")
-          .single();
-        if (error) throw new Error(`instantly_campaigns insert: ${error.message}`);
-        sub = created;
-      }
-
-      // Create the Instantly campaign if not yet created (TEST-MODE-aware schedule)
-      let instId = sub!.instantly_campaign_id;
-      if (!instId) {
-        instId = await createInstantlyCampaign({
-          name: `${campaign.name}_${bucketLabel}`,
-          dailyLimit: campaign.daily_limit ?? 30,
-          windowFrom: effWindowFrom,
-          windowTo: effWindowTo,
-          timezone: tz,
-          sendDays: effSendDays,
-          steps,
-          emailList,
-        });
-        await db
-          .from("instantly_campaigns")
-          .update({ instantly_campaign_id: instId, updated_at: new Date().toISOString() })
-          .eq("id", sub!.id);
-      }
-
-      // Build per-lead payloads (carry leadId so we can flip their drafts to 'sent')
-      const payloads = b.rows.map((r) => {
-        const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads;
-        return {
-          campaignLeadId: r.id,
-          leadId: r.lead_id,
-          email: lead!.email!,
-          firstName: lead!.first_name ?? "",
-          lastName: lead!.last_name ?? "",
-          customVariables: buildCustomVariables(draftsForLead(r.lead_id), campaign.sender_name),
-        };
-      });
-
-      // Push in batches of 100 with a 2s gap
-      for (let i = 0; i < payloads.length; i += BATCH) {
-        const slice = payloads.slice(i, i + BATCH);
-        const result = await addLeadsToInstantly(instId, slice);
-        const byEmail = new Map(
-          (result.created_leads ?? []).map((c) => [c.email.toLowerCase(), c.id]),
-        );
-        const now = new Date().toISOString();
-
-        // Mark campaign_leads as sent + capture Instantly lead id + link sub-campaign
-        await Promise.all(
-          slice.map((p) =>
-            db.from("campaign_leads").update({
-              instantly_campaign_id: sub!.id,
-              instantly_lead_id: byEmail.get(p.email.toLowerCase()) ?? null,
-              crm_status: "sent",
-              updated_at: now,
-            }).eq("id", p.campaignLeadId),
-          ),
-        );
-
-        // Mark their drafts as sent so the UI badge + Send count update correctly
-        await db.from("email_drafts")
-          .update({ status: "sent", updated_at: now })
           .eq("campaign_id", campaignId)
-          .in("lead_id", slice.map((p) => p.leadId))
-          .in("status", ["approved", "draft_ready"]);
+          .eq("country_code", b.code)
+          .maybeSingle();
 
-        totalSent += slice.length;
-        if (i + BATCH < payloads.length) await sleep(2000);
+        if (!sub) {
+          const { data: created, error } = await db
+            .from("instantly_campaigns")
+            .insert({
+              campaign_id: campaignId,
+              country: bucketLabel,
+              country_code: b.code,
+              timezone: tz,
+              status: "creating",
+              daily_limit: campaign.daily_limit ?? 30,
+              email_list: emailList,
+              created_at: new Date().toISOString(),
+            })
+            .select("id,instantly_campaign_id")
+            .single();
+          if (error) throw new Error(`instantly_campaigns insert: ${error.message}`);
+          sub = created;
+        }
+
+        // Create the Instantly campaign if not yet created (TEST-MODE-aware schedule)
+        let instId = sub!.instantly_campaign_id;
+        if (!instId) {
+          instId = await createInstantlyCampaign({
+            name: `${campaign.name}_${bucketLabel}`,
+            dailyLimit: campaign.daily_limit ?? 30,
+            windowFrom: effWindowFrom,
+            windowTo: effWindowTo,
+            timezone: tz,
+            sendDays: effSendDays,
+            steps,
+            emailList,
+          });
+          await db
+            .from("instantly_campaigns")
+            .update({ instantly_campaign_id: instId, updated_at: new Date().toISOString() })
+            .eq("id", sub!.id);
+        }
+
+        // Build per-lead payloads (carry leadId so we can flip their drafts to 'sent')
+        const payloads = b.rows.map((r) => {
+          const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads;
+          return {
+            campaignLeadId: r.id,
+            leadId: r.lead_id,
+            email: lead!.email!,
+            firstName: lead!.first_name ?? "",
+            lastName: lead!.last_name ?? "",
+            customVariables: buildCustomVariables(draftsForLead(r.lead_id), campaign.sender_name),
+          };
+        });
+
+        // Push in batches of 100 with a 2s gap
+        for (let i = 0; i < payloads.length; i += BATCH) {
+          const slice = payloads.slice(i, i + BATCH);
+          const result = await addLeadsToInstantly(instId, slice);
+          const byEmail = new Map(
+            (result.created_leads ?? []).map((c) => [c.email.toLowerCase(), c.id]),
+          );
+          const now = new Date().toISOString();
+
+          // Mark campaign_leads as sent + capture Instantly lead id + link sub-campaign
+          await Promise.all(
+            slice.map((p) =>
+              db.from("campaign_leads").update({
+                instantly_campaign_id: sub!.id,
+                instantly_lead_id: byEmail.get(p.email.toLowerCase()) ?? null,
+                crm_status: "sent",
+                updated_at: now,
+              }).eq("id", p.campaignLeadId),
+            ),
+          );
+
+          // Mark their drafts as sent so the UI badge + Send count update correctly
+          await db.from("email_drafts")
+            .update({ status: "sent", updated_at: now })
+            .eq("campaign_id", campaignId)
+            .in("lead_id", slice.map((p) => p.leadId))
+            .in("status", ["approved", "draft_ready"]);
+
+          totalSent += slice.length;
+          if (i + BATCH < payloads.length) await sleep(2000);
+        }
+
+        // Update sub-campaign counters
+        await db.from("instantly_campaigns").update({
+          lead_count: b.rows.length,
+          sent_count: b.rows.length,
+          updated_at: new Date().toISOString(),
+        }).eq("id", sub!.id);
+      } catch (e) {
+        console.error(`Bucket ${b.code} failed:`, (e as Error).message);
+        await db.from("instantly_campaigns").upsert({
+          campaign_id: campaignId,
+          country_code: b.code,
+          status: "failed",
+          last_error: (e as Error).message,
+        }, { onConflict: "campaign_id,country_code" });
+        continue;
       }
-
-      // Update sub-campaign counters
-      await db.from("instantly_campaigns").update({
-        lead_count: b.rows.length,
-        sent_count: b.rows.length,
-        updated_at: new Date().toISOString(),
-      }).eq("id", sub!.id);
     }
   }
 

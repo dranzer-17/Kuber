@@ -652,8 +652,9 @@ export default function LeadsPage() {
   const eligibleInView = pagedLeads.filter(isCampaignEligible);
   const allEligibleChecked = eligibleInView.length > 0 && eligibleInView.every((l) => checkedIds.has(l.id));
   const someChecked = pagedLeads.some((l) => checkedIds.has(l.id));
-  const checkedCount = pagedLeads.filter((l) => checkedIds.has(l.id)).length;
-  const eligibleCheckedCount = pagedLeads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l)).length;
+  const checkedLeads = leads.filter((l) => checkedIds.has(l.id));
+  const checkedCount = checkedLeads.length;
+  const eligibleCheckedCount = checkedLeads.filter(isCampaignEligible).length;
   const ineligibleCheckedCount = checkedCount - eligibleCheckedCount;
   const canCreateCampaign = eligibleCheckedCount > 0 && ineligibleCheckedCount === 0;
 
