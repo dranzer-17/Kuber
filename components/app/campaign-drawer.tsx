@@ -806,7 +806,7 @@ export function CampaignDetail({
                 Select a reply to view the thread
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto p-6 space-y-3">
+              <div className="max-w-4xl mx-auto p-6 space-y-3">
                 {/* Thread header */}
                 <div className="flex items-center justify-between gap-3 pb-2">
                   <div className="flex items-center gap-3 min-w-0">

@@ -938,7 +938,7 @@ export default function LeadsPage() {
                       onClick={toggleAll}
                       className={cn(
                         "flex size-4 cursor-pointer rounded items-center justify-center transition-colors",
-                        allEligibleChecked ? "bg-primary ring-2 ring-primary" : someChecked ? "bg-primary/40 ring-2 ring-primary/60" : "bg-transparent ring-2 ring-white",
+                        allEligibleChecked ? "bg-primary ring-2 ring-primary" : someChecked ? "bg-primary/40 ring-2 ring-primary/60" : "bg-transparent ring-2 ring-border",
                       )}
                     >
                       {(allEligibleChecked || someChecked) && <Check className="size-2.5 text-primary-foreground" />}
@@ -995,7 +995,7 @@ export default function LeadsPage() {
                               eligible && "cursor-pointer",
                               isChecked && eligible
                                 ? "bg-primary ring-2 ring-primary"
-                                : "bg-transparent ring-2 ring-white",
+                                : "bg-transparent ring-2 ring-border",
                             )}
                           >
                             {isChecked && eligible && <Check className="size-2.5 text-primary-foreground" />}

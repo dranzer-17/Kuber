@@ -169,7 +169,6 @@ export function SettingsView() {
 
   const [productOfferings, setProductOfferings] = useState<ProductOffering[]>([]);
 
-  const [replyClassifierPrompt, setReplyClassifierPrompt] = useState("");
   const [replyDrafterPrompt,    setReplyDrafterPrompt   ] = useState("");
 
   const [sigFullName, setSigFullName] = useState("");
@@ -202,7 +201,6 @@ export function SettingsView() {
         setTargetMarkets(s.client_target_markets ?? "");
         setSystemPrompt(s.system_prompt ?? "");
         setSigContact(s.signature_contact ?? "");
-        setReplyClassifierPrompt(s.reply_classifier_prompt ?? "");
         setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
         try { setProductOfferings(JSON.parse(s.product_offerings ?? "[]") as ProductOffering[]); } catch { setProductOfferings([]); }
         const l = await fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
@@ -290,7 +288,6 @@ export function SettingsView() {
         system_prompt:           systemPrompt,
         signature_contact:       sigContact,
         product_offerings:       JSON.stringify(productOfferings),
-        reply_classifier_prompt: replyClassifierPrompt,
         reply_drafter_prompt:    replyDrafterPrompt,
       });
       toast.success("Settings saved");
@@ -516,24 +513,6 @@ export function SettingsView() {
                       <p className="text-xs text-muted-foreground -mt-2">
                         Controls how follow-up replies are drafted after a prospect responds.
                       </p>
-
-                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-1">
-                        <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                          Not currently in use
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Reply classification (hot / cold / out-of-office) is now handled
-                          entirely by Instantly&apos;s own built-in AI, configured under Instantly →
-                          Settings → AI Automations → &quot;Automatically tag lead status in replies.&quot;
-                          The box below has no effect on classification and is kept only in case
-                          this decision is revisited.
-                        </p>
-                      </div>
-
-                      <div className="opacity-50 pointer-events-none">
-                        <RichTextEditor label="Reply classifier prompt (unused)" value={replyClassifierPrompt} onChange={setReplyClassifierPrompt} minHeight={200}
-                          helper="Not called by any part of the live pipeline. Kept for reference only." />
-                      </div>
 
                       <RichTextEditor label="Reply drafter prompt" value={replyDrafterPrompt} onChange={setReplyDrafterPrompt} minHeight={220}
                         helper="Must return JSON with subject and body. Still in active use — this is what writes our human-reviewed reply drafts." />
