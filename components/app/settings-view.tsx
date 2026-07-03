@@ -7,7 +7,7 @@ import {
   User, Bot, LogOut, Plus, Mail,
   ChevronRight, PenLine, Bold, Italic, Underline,
   List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type, Palette, Check, Sun, Moon,
-  Building2, Package, FileText, Upload, X,
+  Building2, Package, FileText, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -174,7 +174,10 @@ export function SettingsView() {
   const [replyClassifierPrompt, setReplyClassifierPrompt] = useState("");
   const [replyDrafterPrompt,    setReplyDrafterPrompt   ] = useState("");
 
-  const [docFiles, setDocFiles] = useState<File[]>([]);
+  const [sigFullName, setSigFullName] = useState("");
+  const [sigTitle, setSigTitle] = useState("");
+  const [sigContactBlock, setSigContactBlock] = useState("");
+  const [savingMySignature, setSavingMySignature] = useState(false);
 
   const [userEmail, setUserEmail] = useState("");
   const [userName,  setUserName  ] = useState("");
@@ -217,6 +220,22 @@ export function SettingsView() {
     void load();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      try {
+        const res = await fetch("/api/v1/user-signature", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const json = await res.json();
+        setSigFullName(json.data?.full_name ?? "");
+        setSigTitle(json.data?.title ?? "");
+        setSigContactBlock(json.data?.contact ?? "");
+      } catch { /* leave fields blank on failure */ }
+    })();
+  }, []);
+
   async function handleLogoPick(file: File | null) {
     if (!file) return;
     setLogoUploading(true);
@@ -247,6 +266,18 @@ export function SettingsView() {
   }
 
   async function handleSave() {
+    // Block saving if any product offering is missing a name or description — an
+    // empty description contributes nothing to the AI's product-matching prompt and
+    // just adds noise (confirmed live: a "black plastic" entry was saved with a
+    // completely blank description before this check existed).
+    const incompleteProduct = productOfferings.find(
+      (p) => !p.name.trim() || !p.description.trim()
+    );
+    if (incompleteProduct) {
+      toast.error("Every product needs both a name and a description before saving.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
@@ -270,6 +301,29 @@ export function SettingsView() {
       setError((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveMySignature() {
+    setSavingMySignature(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await fetch("/api/v1/user-signature", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          full_name: sigFullName,
+          title: sigTitle,
+          contact: sigContactBlock,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to save signature");
+      toast.success("Signature saved");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingMySignature(false);
     }
   }
 
@@ -397,6 +451,32 @@ export function SettingsView() {
                     </div>
                     <span className="text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">Admin</span>
                   </div>
+
+                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                    <div>
+                      <h3 className="text-sm font-semibold">My Signature</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        This is the signature actually appended to outreach emails and replies you send —
+                        it takes priority over the global Email Footer fallback under AI &amp; Outreach.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label>Full name</Label>
+                        <Input value={sigFullName} onChange={(e) => setSigFullName(e.target.value)} placeholder="e.g. Rudraksh Mehta" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Title</Label>
+                        <Input value={sigTitle} onChange={(e) => setSigTitle(e.target.value)} placeholder="e.g. Business Development" />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <RichTextEditor label="Contact block" value={sigContactBlock} onChange={setSigContactBlock} minHeight={100} />
+                    </div>
+                    <Button onClick={saveMySignature} disabled={savingMySignature}>
+                      {savingMySignature ? "Saving..." : "Save signature"}
+                    </Button>
+                  </div>
                 </>
               )}
 
@@ -450,12 +530,29 @@ export function SettingsView() {
                         <h3 className="text-sm font-semibold">Reply AI</h3>
                       </div>
                       <p className="text-xs text-muted-foreground -mt-2">
-                        Controls how inbound replies are classified and how follow-up replies are drafted.
+                        Controls how follow-up replies are drafted after a prospect responds.
                       </p>
-                      <RichTextEditor label="Reply classifier prompt" value={replyClassifierPrompt} onChange={setReplyClassifierPrompt} minHeight={280}
-                        helper="Must return JSON with temperature, interest_status, and reasoning." />
+
+                      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-1">
+                        <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                          Not currently in use
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Reply classification (hot / cold / out-of-office) is now handled
+                          entirely by Instantly&apos;s own built-in AI, configured under Instantly →
+                          Settings → AI Automations → &quot;Automatically tag lead status in replies.&quot;
+                          The box below has no effect on classification and is kept only in case
+                          this decision is revisited.
+                        </p>
+                      </div>
+
+                      <div className="opacity-50 pointer-events-none">
+                        <RichTextEditor label="Reply classifier prompt (unused)" value={replyClassifierPrompt} onChange={setReplyClassifierPrompt} minHeight={200}
+                          helper="Not called by any part of the live pipeline. Kept for reference only." />
+                      </div>
+
                       <RichTextEditor label="Reply drafter prompt" value={replyDrafterPrompt} onChange={setReplyDrafterPrompt} minHeight={220}
-                        helper="Must return JSON with subject and body." />
+                        helper="Must return JSON with subject and body. Still in active use — this is what writes our human-reviewed reply drafts." />
                     </section>
                   )}
 
@@ -588,34 +685,13 @@ export function SettingsView() {
                         <FileText className="size-4 text-muted-foreground" />
                         <h3 className="text-sm font-semibold">Extra Documents</h3>
                       </div>
-                      <p className="text-xs text-muted-foreground -mt-2">
-                        Upload PDFs, FAQs, or product specs to give the AI additional context.
-                      </p>
-                      <label className={cn("flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-secondary/10 p-10 text-center cursor-pointer transition-colors hover:border-primary/40 hover:bg-primary/5")}>
-                        <Upload className="size-8 text-muted-foreground" />
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Drop files here or click to upload</p>
-                          <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, TXT — up to 10 MB each</p>
-                        </div>
-                        <input type="file" multiple accept=".pdf,.docx,.txt" className="hidden"
-                          onChange={(e) => { setDocFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])]); e.target.value = ""; }} />
-                      </label>
-                      {docFiles.length > 0 && (
-                        <div className="space-y-2">
-                          {docFiles.map((file, idx) => (
-                            <div key={`${file.name}-${idx}`} className="flex items-center gap-3 rounded-lg border border-border bg-secondary/20 px-4 py-2.5">
-                              <FileText className="size-4 shrink-0 text-muted-foreground" />
-                              <span className="flex-1 truncate text-sm">{file.name}</span>
-                              <span className="text-xs text-muted-foreground shrink-0">{(file.size / 1024).toFixed(0)} KB</span>
-                              <button type="button" onClick={() => setDocFiles((prev) => prev.filter((_, i) => i !== idx))}
-                                className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-                                <X className="size-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground">Document ingestion is coming soon.</p>
+                      <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-2">
+                        <FileText className="size-8 text-muted-foreground mx-auto" />
+                        <p className="text-sm font-medium">Document upload — coming soon</p>
+                        <p className="text-xs text-muted-foreground">
+                          You&apos;ll be able to upload PDFs, FAQs, and product specs here to give the AI additional context.
+                        </p>
+                      </div>
                     </section>
                   )}
 

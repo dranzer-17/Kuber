@@ -41,11 +41,11 @@ function ChartTooltip({ active, payload, label }: {
 }
 
 function StatCard({
-  title, value, icon: Icon, trend, highlight = false,
+  title, value, icon: Icon, trend, highlight = false, loading = false,
 }: {
   title: string; value: string | number;
   icon: React.ElementType; trend: string;
-  highlight?: boolean;
+  highlight?: boolean; loading?: boolean;
 }) {
   return (
     <div className={cn(
@@ -58,9 +58,16 @@ function StatCard({
       )}>
         <Icon className={cn("size-4", highlight ? "text-primary-foreground" : "text-muted-foreground")} />
       </div>
-      <div className={cn("text-3xl font-bold mb-1 tabular-nums", highlight ? "text-primary-foreground" : "text-foreground")}>
-        {value}
-      </div>
+      {loading ? (
+        <div className={cn(
+          "h-9 w-16 rounded mb-1 animate-pulse",
+          highlight ? "bg-primary-foreground/20" : "bg-secondary/60",
+        )} />
+      ) : (
+        <div className={cn("text-3xl font-bold mb-1 tabular-nums", highlight ? "text-primary-foreground" : "text-foreground")}>
+          {value}
+        </div>
+      )}
       <div className={cn("text-sm font-medium mb-0.5", highlight ? "text-primary-foreground/80" : "text-foreground/80")}>
         {title}
       </div>
@@ -77,13 +84,18 @@ interface DashboardViewProps {
   leads: Lead[];
   campaigns: Campaign[];
   imports: ImportBatch[];
+  hotCount: number | null;
+  loading?: boolean;
   onNavigate: (view: "lead-generation" | "leads" | "campaigns") => void;
   onSelectBatch: (label: string) => void;
 }
 
-export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectBatch }: DashboardViewProps) {
+export function DashboardView({ leads, campaigns, imports, hotCount, loading = false, onNavigate, onSelectBatch }: DashboardViewProps) {
   const totalLeads    = leads.length;
-  const hotLeads      = leads.filter((l) => l.score === "Hot").length;
+  // hotCount comes from campaign_leads.lead_temperature (the real classification
+  // source used everywhere else in the app) rather than the unused lead.score field,
+  // which is never populated by any part of the ingestion/enrichment pipeline.
+  const hotLeads      = hotCount ?? 0;
   const enrichedLeads = leads.filter((l) => STATUS_ORDER[l.status] >= 2).length;
   const liveCampaigns = campaigns.filter((c) => c.status === "Live").length;
   const totalSent     = campaigns.reduce((a, c) => a + c.sent, 0);
@@ -143,12 +155,12 @@ export function DashboardView({ leads, campaigns, imports, onNavigate, onSelectB
 
       {/* ── Stat cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatCard title="Total Leads"    value={totalLeads}      icon={Users}     trend={`${totalLeads} in pipeline`}                                        highlight />
-        <StatCard title="Hot Leads"      value={hotLeads}        icon={TrendingUp} trend={`${Math.round(hotLeads / Math.max(totalLeads,1) * 100)}% of total`} />
-        <StatCard title="Emails Sent"    value={totalSent}       icon={Mail}      trend={`${campaigns.length} campaigns`}                                     />
-        <StatCard title="Reply Rate"     value={`${replyRate}%`} icon={Activity}  trend={`${totalReplied} replies total`}                                     />
-        <StatCard title="Live Campaigns" value={liveCampaigns}   icon={Megaphone} trend={`${campaigns.length} total created`}                                 />
-        <StatCard title="Enriched"       value={enrichedLeads}   icon={Zap}       trend={`${Math.round(enrichedLeads / Math.max(totalLeads,1) * 100)}% done`} />
+        <StatCard title="Total Leads"    value={totalLeads}      icon={Users}     trend={`${totalLeads} in pipeline`}                                        highlight loading={loading} />
+        <StatCard title="Hot Leads"      value={hotLeads}        icon={TrendingUp} trend={`${Math.round(hotLeads / Math.max(totalLeads,1) * 100)}% of total`} loading={loading} />
+        <StatCard title="Emails Sent"    value={totalSent}       icon={Mail}      trend={`${campaigns.length} campaigns`}                                     loading={loading} />
+        <StatCard title="Reply Rate"     value={`${replyRate}%`} icon={Activity}  trend={`${totalReplied} replies total`}                                     loading={loading} />
+        <StatCard title="Live Campaigns" value={liveCampaigns}   icon={Megaphone} trend={`${campaigns.length} total created`}                                 loading={loading} />
+        <StatCard title="Enriched"       value={enrichedLeads}   icon={Zap}       trend={`${Math.round(enrichedLeads / Math.max(totalLeads,1) * 100)}% done`} loading={loading} />
       </div>
 
       {/* ── Charts row ── */}
