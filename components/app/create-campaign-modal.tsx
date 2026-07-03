@@ -66,7 +66,6 @@ const DAY_LABELS: Record<string, string> = {
 const TIMEZONES = [
   "Asia/Kolkata", "Asia/Dubai", "Asia/Singapore", "Asia/Bangkok",
   "Europe/London", "Europe/Berlin", "America/New_York", "America/Los_Angeles",
-  "UTC",
 ];
 
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {

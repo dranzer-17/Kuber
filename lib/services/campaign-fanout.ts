@@ -39,21 +39,27 @@ function pickTimezone(
   countryName: string | null,
   masterFallback: string,
 ): string {
+  let tz = masterFallback;
+
   // 1. modal from Apollo-provided lead.time_zone values for this bucket
   const counts = new Map<string, number>();
-  for (const tz of leadTimezones) {
-    if (tz) counts.set(tz, (counts.get(tz) ?? 0) + 1);
+  for (const t of leadTimezones) {
+    if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
   }
   if (counts.size > 0) {
-    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    tz = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
   }
   // 2. country default from constants
-  if (countryName) {
-    const tz = COUNTRY_TO_TIMEZONE[countryName];
-    if (tz) return tz;
+  else if (countryName && COUNTRY_TO_TIMEZONE[countryName]) {
+    tz = COUNTRY_TO_TIMEZONE[countryName];
   }
-  // 3. master fallback
-  return masterFallback;
+
+  // Instantly API strictly rejects "UTC" and "Etc/UTC" in schedules.
+  if (tz === "UTC" || tz === "Etc/UTC") {
+    return "Europe/London";
+  }
+  
+  return tz;
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
