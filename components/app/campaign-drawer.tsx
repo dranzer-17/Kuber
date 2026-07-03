@@ -50,6 +50,7 @@ import { OrgDrawer } from "@/components/app/org-drawer";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/lib/app-context";
 import type { Campaign } from "@/components/app/create-campaign-modal";
+import { CampaignConfigModal } from "@/components/app/campaign-config-modal";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { Lead } from "@/lib/leads";
 import {
@@ -199,9 +200,8 @@ export function CampaignDetail({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
   const [siblingSteps, setSiblingSteps] = useState<Array<{ id: string; step_number: number; subject: string | null; body: string | null; status: string; created_at: string }>>([]);
-  const [campaignSteps, setCampaignSteps] = useState<Array<{ step_order: number; subject: string; body: string }>>([]);
+  const [campaignSteps, setCampaignSteps] = useState<Array<{ step_order: number; subject: string; body: string; delay: number; delay_unit: string }>>([]);
   const [activeFollowUpStep, setActiveFollowUpStep] = useState<number | null>(null);
-  const [followUpSubject, setFollowUpSubject] = useState("");
   const [followUpBody, setFollowUpBody] = useState("");
   const [savingFollowUp, setSavingFollowUp] = useState(false);
   const [regeneratingFollowUp, setRegeneratingFollowUp] = useState(false);
@@ -364,15 +364,13 @@ export function CampaignDetail({
   // than a separate read-only "template" state and "draft" state.
   useEffect(() => {
     if (activeFollowUpSibling) {
-      setFollowUpSubject(activeFollowUpSibling.subject ?? "");
       setFollowUpBody(activeFollowUpSibling.body ?? "");
     } else {
-      setFollowUpSubject(fillTemplateTags(activeFollowUpTemplate?.subject, selected?.leads));
       setFollowUpBody(fillTemplateTags(activeFollowUpTemplate?.body, selected?.leads));
     }
     setFollowUpRegenOpen(false);
     setFollowUpRegenQuery("");
-  }, [activeFollowUpStep, activeFollowUpSibling?.id, activeFollowUpSibling?.subject, activeFollowUpSibling?.body, activeFollowUpTemplate?.subject, activeFollowUpTemplate?.body, selected?.leads]);
+  }, [activeFollowUpStep, activeFollowUpSibling?.id, activeFollowUpSibling?.body, activeFollowUpTemplate?.body, selected?.leads]);
 
   useEffect(() => {
     async function loadCampaignSteps() {
@@ -380,7 +378,7 @@ export function CampaignDetail({
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
         const { steps } = await fetchCampaignSteps(session.access_token, campaign.id);
-        setCampaignSteps(steps.map((s) => ({ step_order: s.step_order, subject: s.subject, body: s.body })));
+        setCampaignSteps(steps.map((s) => ({ step_order: s.step_order, subject: s.subject, body: s.body, delay: s.delay, delay_unit: s.delay_unit })));
       } catch { setCampaignSteps([]); }
     }
     void loadCampaignSteps();
@@ -581,7 +579,7 @@ export function CampaignDetail({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const { instantly_sync } = await saveFollowUpDraft(
-        session.access_token, campaign.id, selected.id, activeFollowUpStep, followUpSubject, followUpBody,
+        session.access_token, campaign.id, selected.id, activeFollowUpStep, "", followUpBody,
       );
       if (instantly_sync.attempted && !instantly_sync.synced) {
         toast.error(`Saved, but didn't reach Instantly: ${instantly_sync.error ?? "unknown error"}`);
@@ -616,7 +614,6 @@ export function CampaignDetail({
         followUpBody,
         followUpRegenQuery || "Rewrite this follow-up.",
       );
-      setFollowUpSubject(draft.subject ?? "");
       setFollowUpBody(draft.body ?? "");
       setFollowUpRegenOpen(false);
       setFollowUpRegenQuery("");
@@ -1270,28 +1267,7 @@ export function CampaignDetail({
                   <Gauge className="size-3.5" />
                   Config
                 </button>
-                {configOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 z-50 w-72 overflow-hidden rounded-xl border border-border bg-card text-sm shadow-xl divide-y divide-border">
-                    <div className="flex items-center justify-between px-4 py-2.5">
-                      <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
-                      <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
-                    </div>
-                    <div className="flex items-center justify-between px-4 py-2.5">
-                      <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
-                      <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
-                    </div>
-                    <div className="flex items-center justify-between px-4 py-2.5">
-                      <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
-                      <span className="font-medium">{campaign.timezone ?? "—"}</span>
-                    </div>
-                    {activeDays.length > 0 && (
-                      <div className="flex items-center justify-between px-4 py-2.5">
-                        <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
-                        <span className="font-medium">{activeDays.join(", ")}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {configOpen && <CampaignConfigModal campaign={campaign} open={configOpen} />}
               </div>
             </div>
           </div>
@@ -1513,23 +1489,41 @@ export function CampaignDetail({
                         in one action — no separate Certify step here — plus Regenerate). Never a
                         "version" of the draft above — a different email later in the sequence. */}
                     {selected.email_drafts?.status === "sent" && campaignSteps.some((s) => s.step_order > 1) && (
-                      <div className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5">
+                          <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                            Follow-up templates
+                          </Label>
+                          <InfoTip text="Each tab is one follow-up step configured for this campaign. Generate or write this lead's version here, independent of the initial email above — editing or regenerating a follow-up never affects the sent draft or this lead's status." />
+                        </div>
+                        <div className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
                         <div className="flex items-center gap-1 border-b border-border px-2 pt-2 overflow-x-auto">
-                          {campaignSteps.filter((s) => s.step_order > 1).map((s) => (
-                            <button
-                              key={s.step_order}
-                              type="button"
-                              onClick={() => setActiveFollowUpStep(s.step_order)}
-                              className={cn(
-                                "px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 transition-colors whitespace-nowrap",
-                                activeFollowUpStep === s.step_order
-                                  ? "border-primary text-primary"
-                                  : "border-transparent text-muted-foreground hover:text-foreground",
-                              )}
-                            >
-                              {formatOrdinal(s.step_order - 1)} follow-up
-                            </button>
-                          ))}
+                          {campaignSteps.filter((s) => s.step_order > 1).map((s) => {
+                            // Delay is stored shifted back one step (step N's delay is the
+                            // wait before step N+1 — see lib/constants.ts buildDefaultCampaignSteps),
+                            // so THIS step's own "sends after" wait lives on the previous step.
+                            const waitStep = campaignSteps.find((p) => p.step_order === s.step_order - 1);
+                            return (
+                              <button
+                                key={s.step_order}
+                                type="button"
+                                onClick={() => setActiveFollowUpStep(s.step_order)}
+                                className={cn(
+                                  "flex flex-col items-center gap-0.5 px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 transition-colors whitespace-nowrap",
+                                  activeFollowUpStep === s.step_order
+                                    ? "border-primary text-primary"
+                                    : "border-transparent text-muted-foreground hover:text-foreground",
+                                )}
+                              >
+                                <span>{formatOrdinal(s.step_order - 1)} follow-up</span>
+                                {waitStep && (
+                                  <span className="text-[10px] font-normal text-muted-foreground/70">
+                                    {waitStep.delay} {waitStep.delay_unit} later
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
 
                         <div className="p-3.5 space-y-2.5">
@@ -1548,17 +1542,9 @@ export function CampaignDetail({
                             </>
                           ) : (
                             <>
-                              {!activeFollowUpSibling && (
-                                <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground">
-                                  Generic template — edit freely or hit Regenerate
-                                </span>
-                              )}
-                              <Input
-                                value={followUpSubject}
-                                onChange={(e) => setFollowUpSubject(e.target.value)}
-                                className="text-sm font-medium"
-                                placeholder="Subject"
-                              />
+                              <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground">
+                                Generic template — edit freely or hit Regenerate
+                              </span>
                               <RichTextEditor
                                 value={followUpBody}
                                 onChange={setFollowUpBody}
@@ -1605,6 +1591,7 @@ export function CampaignDetail({
                               )}
                             </>
                           )}
+                        </div>
                         </div>
                       </div>
                     )}
