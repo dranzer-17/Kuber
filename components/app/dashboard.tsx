@@ -86,11 +86,13 @@ interface DashboardViewProps {
   imports: ImportBatch[];
   hotCount: number | null;
   loading?: boolean;
+  temperatureBreakdown: { hot: number; cold: number; ooo: number; unsubscribed: number; unclassified: number } | null;
+  pendingReplies: Array<{ id: string; campaignId: string; campaignName: string; leadEmail: string | null; preview: string; createdAt: string }>;
   onNavigate: (view: "lead-generation" | "leads" | "campaigns") => void;
   onSelectBatch: (label: string) => void;
 }
 
-export function DashboardView({ leads, campaigns, imports, hotCount, loading = false, onNavigate, onSelectBatch }: DashboardViewProps) {
+export function DashboardView({ leads, campaigns, imports, hotCount, loading = false, temperatureBreakdown, pendingReplies, onNavigate, onSelectBatch }: DashboardViewProps) {
   const totalLeads    = leads.length;
   // hotCount comes from campaign_leads.lead_temperature (the real classification
   // source used everywhere else in the app) rather than the unused lead.score field,
@@ -242,6 +244,98 @@ export function DashboardView({ leads, campaigns, imports, hotCount, loading = f
                   );
                 })}
               </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Reply activity row ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+        {/* Reply Temperature */}
+        <div className="bg-card border border-border rounded-xl p-6">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h3 className="text-sm font-semibold">Reply Temperature</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">How prospects who replied were classified</p>
+            </div>
+            <div className="p-2 rounded-lg border border-border bg-secondary">
+              <PieIcon className="size-3.5 text-muted-foreground" />
+            </div>
+          </div>
+          {!temperatureBreakdown || Object.values(temperatureBreakdown).every((v) => v === 0) ? (
+            <div className="h-[140px] flex items-center justify-center text-xs text-muted-foreground">
+              No replies classified yet
+            </div>
+          ) : (
+            (() => {
+              const data = [
+                { name: "Hot", value: temperatureBreakdown.hot, color: "#ef4444" },
+                { name: "Cold", value: temperatureBreakdown.cold, color: "#3b82f6" },
+                { name: "Out of office", value: temperatureBreakdown.ooo, color: "#f59e0b" },
+                { name: "Unsubscribed", value: temperatureBreakdown.unsubscribed, color: "#6b7280" },
+              ].filter((d) => d.value > 0);
+              const total = data.reduce((a, d) => a + d.value, 0);
+              return (
+                <div className="flex items-center gap-6">
+                  <div className="shrink-0">
+                    <ResponsiveContainer width={140} height={140}>
+                      <PieChart>
+                        <Pie data={data} cx="50%" cy="50%" innerRadius={40} outerRadius={62} paddingAngle={2} dataKey="value" strokeWidth={0}>
+                          {data.map((d) => <Cell key={d.name} fill={d.color} />)}
+                        </Pie>
+                        <Tooltip content={<ChartTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex-1 space-y-2.5 min-w-0">
+                    {data.map((d) => (
+                      <div key={d.name} className="flex items-center gap-2">
+                        <span className="size-2 rounded-full shrink-0" style={{ background: d.color }} />
+                        <span className="text-xs text-muted-foreground flex-1 truncate">{d.name}</span>
+                        <span className="text-xs font-semibold tabular-nums">{d.value}</span>
+                        <span className="text-[10px] text-muted-foreground/50 w-8 text-right tabular-nums">
+                          {Math.round((d.value / Math.max(total, 1)) * 100)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()
+          )}
+        </div>
+
+        {/* Needs Your Review */}
+        <div className="bg-card border border-border rounded-xl p-6">
+          <div className="flex items-center justify-between mb-5">
+            <div>
+              <h3 className="text-sm font-semibold">Needs Your Review</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Reply drafts waiting for approval, across all campaigns</p>
+            </div>
+            <div className="p-2 rounded-lg border border-border bg-secondary">
+              <Mail className="size-3.5 text-muted-foreground" />
+            </div>
+          </div>
+          {pendingReplies.length === 0 ? (
+            <div className="h-[140px] flex items-center justify-center text-xs text-muted-foreground">
+              No replies waiting for review
+            </div>
+          ) : (
+            <div className="space-y-1 max-h-[220px] overflow-y-auto">
+              {pendingReplies.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => onNavigate("campaigns")}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-secondary/50 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium truncate">{r.leadEmail ?? "Unknown lead"}</p>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{r.campaignName}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate">{r.preview}</p>
+                </button>
+              ))}
             </div>
           )}
         </div>

@@ -6,11 +6,22 @@ import { DashboardView } from "@/components/app/dashboard";
 import { useApp } from "@/lib/app-context";
 import { fetchImports, type ImportBatch } from "@/lib/api-client";
 
+type TemperatureBreakdown = {
+  hot: number; cold: number; ooo: number; unsubscribed: number; unclassified: number;
+};
+
+type PendingReply = {
+  id: string; campaignId: string; campaignName: string;
+  leadEmail: string | null; preview: string; createdAt: string;
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const { leads, campaigns, session } = useApp();
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([]);
   const [hotCount, setHotCount] = useState<number | null>(null);
+  const [temperatureBreakdown, setTemperatureBreakdown] = useState<TemperatureBreakdown | null>(null);
+  const [pendingReplies, setPendingReplies] = useState<PendingReply[]>([]);
 
   useEffect(() => {
     if (!session) return;
@@ -29,6 +40,19 @@ export default function DashboardPage() {
       .catch(() => setHotCount(0));
   }, [session]);
 
+  useEffect(() => {
+    if (!session) return;
+    fetch("/api/v1/dashboard/analytics", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        setTemperatureBreakdown(d.data?.temperatureBreakdown ?? null);
+        setPendingReplies(d.data?.pendingReplies ?? []);
+      })
+      .catch(() => {});
+  }, [session]);
+
   // Dashboard is considered "still loading" until BOTH the always-loaded `leads`
   // context array has data AND the hot-count fetch has resolved at least once. Used
   // to show a loading skeleton on the stat cards instead of a misleading "0" during
@@ -42,6 +66,8 @@ export default function DashboardPage() {
       imports={importBatches}
       hotCount={hotCount}
       loading={dashboardLoading}
+      temperatureBreakdown={temperatureBreakdown}
+      pendingReplies={pendingReplies}
       onNavigate={(view) => router.push(view === "campaigns" ? "/campaigns" : "/leads")}
       onSelectBatch={(label) => router.push(`/leads?batches=${encodeURIComponent(label)}`)}
     />

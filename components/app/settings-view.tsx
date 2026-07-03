@@ -352,7 +352,13 @@ export function SettingsView() {
     </div>
   ) : null;
 
-  const showSaveBar = !loading && (section === "ai" || section === "knowledge");
+  // Extra Documents has nothing to save (it's a static "coming soon" message) — hide
+  // the save bar specifically for that sub-tab while keeping it for Company Details
+  // and Product Offerings, which both still need it.
+  const showSaveBar = !loading && (
+    section === "ai" ||
+    (section === "knowledge" && knowledgeSection !== "documents")
+  );
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

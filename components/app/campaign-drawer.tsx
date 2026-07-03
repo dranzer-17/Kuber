@@ -39,6 +39,7 @@ import {
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
+import { ReplyDraftBox } from "@/components/app/reply-draft-box";
 import { LeadDrawer } from "@/components/app/lead-drawer";
 import { OrgDrawer } from "@/components/app/org-drawer";
 import { supabase } from "@/lib/supabase";
@@ -206,16 +207,9 @@ export function CampaignDetail({
   const [drawerOrgId, setDrawerOrgId] = useState<string | null>(null);
   const [threads, setThreads] = useState<CampaignReplyThread[]>([]);
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
-  const [replyEditSubject, setReplyEditSubject] = useState("");
-  const [replyEditBody, setReplyEditBody] = useState("");
-  const [replySaving, setReplySaving] = useState(false);
-  const [replyRegenOpen, setReplyRegenOpen] = useState(false);
-  const [replyRegenQuery, setReplyRegenQuery] = useState("");
-  const [replyRegenerating, setReplyRegenerating] = useState(false);
-  const [replySending, setReplySending] = useState(false);
   const [refreshingReplies, setRefreshingReplies] = useState(false);
 
-  const { loadCampaigns } = useApp();
+  const { loadCampaigns, session: appSession } = useApp();
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -904,158 +898,12 @@ export function CampaignDetail({
                             </div>
                           </>
                         ) : (
-                          /* Editable draft */
-                          <div className="w-full rounded-2xl rounded-br-sm border border-primary/20 bg-primary/5 overflow-hidden">
-                            <div className="px-4 py-2.5 border-b border-primary/10 flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-semibold text-primary">Your reply</span>
-                                <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full",
-                                  DRAFT_STATUS_STYLE[latestDraft.status] ?? ""
-                                )}>
-                                  {latestDraft.status}
-                                </span>
-                              </div>
-                              <Button size="sm" variant="ghost"
-                                onClick={() => setReplyRegenOpen((o) => !o)}
-                                className="h-6 gap-1 text-[11px] text-muted-foreground hover:text-foreground px-2">
-                                <RotateCcw className="size-3" /> Regenerate
-                              </Button>
-                            </div>
-                            <div className="p-4 space-y-3">
-                              <Input
-                                value={replyEditSubject}
-                                onChange={(e) => setReplyEditSubject(e.target.value)}
-                                placeholder="Subject"
-                                className="text-sm font-medium bg-background/60"
-                              />
-                              <RichTextEditor
-                                value={replyEditBody}
-                                onChange={setReplyEditBody}
-                                minHeight={180}
-                              />
-                              {error && <p className="text-sm text-destructive">{error}</p>}
-
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Button size="sm" variant="outline" disabled={replySaving}
-                                  onClick={async () => {
-                                    setReplySaving(true); setError("");
-                                    try {
-                                      const { data: { session } } = await supabase.auth.getSession();
-                                      if (!session) return;
-                                      await editReplyDraft(session.access_token, latestDraft.id, replyEditSubject, replyEditBody);
-                                      await loadReplies();
-                                    } catch (e) { setError((e as Error).message); }
-                                    finally { setReplySaving(false); }
-                                  }}
-                                  className="gap-1.5">
-                                  {replySaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                                  Save
-                                </Button>
-
-                                {latestDraft.status !== "approved" && (
-                                  <Button size="sm" disabled={replySaving}
-                                    onClick={async () => {
-                                      setReplySaving(true); setError("");
-                                      try {
-                                        const { data: { session } } = await supabase.auth.getSession();
-                                        if (!session) return;
-                                        await approveReplyDraft(session.access_token, latestDraft.id, replyEditSubject, replyEditBody);
-                                        await loadReplies();
-                                      } catch (e) { setError((e as Error).message); }
-                                      finally { setReplySaving(false); }
-                                    }}
-                                    className="gap-1.5">
-                                    <Check className="size-3.5" /> Approve
-                                  </Button>
-                                )}
-
-                                {latestDraft.status === "approved" && (
-                                  <Button size="sm" disabled={replySending}
-                                    onClick={async () => {
-                                      setReplySending(true); setError("");
-                                      try {
-                                        const { data: { session } } = await supabase.auth.getSession();
-                                        if (!session) return;
-                                        await sendReplyDraft(session.access_token, latestDraft.id);
-                                        await loadReplies();
-                                      } catch (e) {
-                                        const msg = (e as Error).message ?? "Failed to send reply";
-                                        setError(msg.includes("MISSING_THREAD")
-                                          ? "Cannot send: the original email reference has expired in Instantly. Regenerate the reply to get a fresh thread reference."
-                                          : msg);
-                                      }
-                                      finally { setReplySending(false); }
-                                    }}
-                                    className="gap-1.5 bg-green-600 hover:bg-green-700">
-                                    {replySending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-                                    Send reply
-                                  </Button>
-                                )}
-
-                                {latestDraft.status === "draft" && (
-                                  <Button size="sm" variant="outline" disabled={replySaving}
-                                    onClick={async () => {
-                                      setReplySaving(true); setError("");
-                                      try {
-                                        const { data: { session } } = await supabase.auth.getSession();
-                                        if (!session) return;
-                                        await rejectReplyDraft(session.access_token, latestDraft.id);
-                                        await loadReplies();
-                                      } catch (e) { setError((e as Error).message); }
-                                      finally { setReplySaving(false); }
-                                    }}
-                                    className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
-                                    <ThumbsDown className="size-3.5" /> Reject
-                                  </Button>
-                                )}
-                              </div>
-
-                              {replyRegenOpen && (
-                                <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
-                                  <Input
-                                    value={replyRegenQuery}
-                                    onChange={(e) => setReplyRegenQuery(e.target.value)}
-                                    placeholder="Optional instruction, e.g. Make it shorter…"
-                                    className="text-sm"
-                                    onKeyDown={(e) => {
-                                      if (e.key !== "Enter") return;
-                                      (async () => {
-                                        setReplyRegenerating(true); setError("");
-                                        try {
-                                          const { data: { session } } = await supabase.auth.getSession();
-                                          if (!session) return;
-                                          await regenerateReplyDraft(session.access_token, latestDraft.id, replyRegenQuery || undefined);
-                                          setReplyRegenOpen(false); setReplyRegenQuery("");
-                                          await loadReplies();
-                                        } catch (e) { setError((e as Error).message); }
-                                        finally { setReplyRegenerating(false); }
-                                      })();
-                                    }}
-                                  />
-                                  <Button size="sm" disabled={replyRegenerating}
-                                    onClick={async () => {
-                                      setReplyRegenerating(true); setError("");
-                                      try {
-                                        const { data: { session } } = await supabase.auth.getSession();
-                                        if (!session) return;
-                                        await regenerateReplyDraft(session.access_token, latestDraft.id, replyRegenQuery || undefined);
-                                        setReplyRegenOpen(false); setReplyRegenQuery("");
-                                        await loadReplies();
-                                      } catch (e) { setError((e as Error).message); }
-                                      finally { setReplyRegenerating(false); }
-                                    }}
-                                    className="gap-1.5">
-                                    {replyRegenerating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
-                                    Regenerate
-                                  </Button>
-                                </div>
-                              )}
-
-                              {latestDraft.status === "failed" && latestDraft.error && (
-                                <p className="text-xs text-red-400 mt-1">Error: {latestDraft.error}</p>
-                              )}
-                            </div>
-                          </div>
+                          <ReplyDraftBox
+                            key={latestDraft.id}
+                            draft={latestDraft}
+                            token={appSession?.access_token ?? ""}
+                            onChanged={() => void loadReplies()}
+                          />
                         )}
                       </div>
                     </div>
