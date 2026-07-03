@@ -12,7 +12,12 @@ export const CreateCampaignSchema = z.object({
   daily_limit: z.number().int().min(1).max(500).default(30),
   ai_prompt_context: z.string().optional(),
   sender_name: z.string().optional(),
-  followup_days: z.array(z.number().int().min(1).max(365)).optional(),
+  // Each entry is the wait AFTER the previous email before this follow-up sends
+  // (mirrors Instantly's own per-step delay/delay_unit semantics directly).
+  followup_steps: z.array(z.object({
+    delay: z.number().int().min(1).max(365),
+    delay_unit: z.enum(["minutes", "hours", "days"]).default("days"),
+  })).optional(),
 
   // Campaign attachment fields (set by upload endpoint)
   attachment_path: z.string().optional(),

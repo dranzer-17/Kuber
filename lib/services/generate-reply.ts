@@ -46,15 +46,21 @@ export async function generateReplyDraft(
       ].join("\n");
     }
 
-    // Resolve campaign signature
+    // Resolve campaign signature + additional AI context from the master campaign.
     let signatureBlock = "";
+    let aiPromptContext = args.aiPromptContext?.trim() || null;
+    let campaignName = args.campaignName;
     if (args.masterCampaignId) {
       const { data: campaign } = await db
         .from("campaigns")
-        .select("signature_override, signature_user_id, created_by")
+        .select("name, signature_override, signature_user_id, created_by, ai_prompt_context")
         .eq("id", args.masterCampaignId)
         .maybeSingle();
       if (campaign) {
+        if (!aiPromptContext && campaign.ai_prompt_context?.trim()) {
+          aiPromptContext = campaign.ai_prompt_context.trim();
+        }
+        if (campaign.name) campaignName = campaign.name;
         signatureBlock = await resolveCampaignSignature(db, campaign).catch(() => "");
       }
     }
@@ -62,16 +68,17 @@ export async function generateReplyDraft(
     const { drafter } = await getReplyPrompts(db);
     const system = drafter
       + `\n\nKuber context: ${KUBER_CONTEXT}`
-      + (args.aiPromptContext ? `\n\nCampaign context: ${args.aiPromptContext}` : "");
+      + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "");
 
     const user = [
-      `Campaign: "${args.campaignName}"`,
+      `Campaign: "${campaignName}"`,
       `Original reply subject: ${args.replySubject ?? "(none)"}`,
       ``,
       `Full conversation so far (oldest first):`,
       threadContext,
-      args.customInstruction ? `\nAdditional instruction: ${args.customInstruction}` : "",
-    ].join("\n");
+      aiPromptContext ? `Campaign context: ${aiPromptContext}` : "",
+      args.customInstruction ? `Additional instruction: ${args.customInstruction}` : "",
+    ].filter(Boolean).join("\n");
 
     const { json } = await complete<{ subject: string; body: string }>({ system, user });
     const parsed = ReplySchema.safeParse(json);

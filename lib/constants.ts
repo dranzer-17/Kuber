@@ -304,32 +304,44 @@ export type KuberProductMatch = "black" | "white" | "color" | "additive" | "none
 export type CampaignStepInput = {
   step_order: number;
   delay: number;
-  delay_unit: "days";
+  delay_unit: "minutes" | "hours" | "days";
   subject: string;
   body: string;
 };
 
+export type FollowupStepInput = {
+  delay: number;
+  delay_unit: "minutes" | "hours" | "days";
+};
+
 /**
  * Builds the campaign_steps rows for a new campaign given an array of follow-up
- * delay-days. Step 1 is always the initial send (delay 0). Each entry in
- * `followupDays` becomes one additional follow-up step at that many days after Step 1.
+ * waits. Each entry in `followupSteps` is the wait AFTER the previous email
+ * before that follow-up sends.
+ *
+ * Instantly's `delay`/`delay_unit` on a step is NOT "wait before this email" —
+ * it's "wait before the NEXT email" (see developer.instantly.ai). So the wait
+ * values are stored shifted back by one step: step N's delay holds the wait
+ * before step N+1. The final step's delay is unused (there's no step after it)
+ * and is left at 0/"days".
  */
-export function buildDefaultCampaignSteps(followupDays: number[]): CampaignStepInput[] {
+export function buildDefaultCampaignSteps(followupSteps: FollowupStepInput[]): CampaignStepInput[] {
   const steps: CampaignStepInput[] = [
     {
       step_order: 1,
-      delay: 0,
-      delay_unit: "days",
+      delay: followupSteps[0]?.delay ?? 0,
+      delay_unit: followupSteps[0]?.delay_unit ?? "days",
       subject: "{{customSubject}}",
       body: "{{customBody}}",
     },
   ];
 
-  followupDays.forEach((days, idx) => {
+  followupSteps.forEach((_, idx) => {
+    const next = followupSteps[idx + 1];
     steps.push({
       step_order: idx + 2,
-      delay: days,
-      delay_unit: "days",
+      delay: next?.delay ?? 0,
+      delay_unit: next?.delay_unit ?? "days",
       subject: "", // empty = Instantly threads it as a reply in the same conversation
       body: "Hi {{firstName}},\n\nJust following up on my previous note — would love your thoughts.\n\nBest regards",
     });

@@ -14,9 +14,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!old) return fail(404, "NOT_FOUND", "Reply draft not found");
 
   const { data: ev } = await db.from("reply_events").select("reply_body, campaign_id").eq("id", old.reply_event_id).maybeSingle();
-  let campaignName = "Campaign"; let aiPromptContext: string | null = null;
-  if (ev?.campaign_id) {
-    const { data: c } = await db.from("campaigns").select("name, ai_prompt_context").eq("id", ev.campaign_id).maybeSingle();
+  const masterCampaignId = old.campaign_id ?? ev?.campaign_id ?? null;
+  let campaignName = "Campaign";
+  let aiPromptContext: string | null = null;
+  if (masterCampaignId) {
+    const { data: c } = await db.from("campaigns").select("name, ai_prompt_context").eq("id", masterCampaignId).maybeSingle();
     if (c) { campaignName = c.name; aiPromptContext = c.ai_prompt_context ?? null; }
   }
 
@@ -35,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const result = await generateReplyDraft(db, {
     replyDraftId: rd.id,
-    masterCampaignId: old.campaign_id,
+    masterCampaignId,
     campaignName,
     replyText: ev?.reply_body ?? "",
     replySubject: old.subject,

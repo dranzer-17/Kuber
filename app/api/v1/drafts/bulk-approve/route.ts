@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { BulkApproveSchema } from "@/lib/validators/drafts";
+import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 
 export async function POST(req: NextRequest) {
   let user: { id: string };
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
   for (const draftId of parsed.data.draft_ids) {
     const { data: draft } = await db
       .from("email_drafts")
-      .select("id, status")
+      .select("id, status, lead_id, campaign_id")
       .eq("id", draftId)
       .maybeSingle();
 
@@ -41,6 +42,8 @@ export async function POST(req: NextRequest) {
       crm_status: "approved",
       updated_at: now,
     }).eq("draft_id", draftId);
+
+    await syncApprovedDraftToInstantly(db, draft.lead_id, draft.campaign_id);
 
     approved++;
   }

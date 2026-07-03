@@ -4,10 +4,12 @@ import {
   createInstantlyCampaign,
   addLeadsToInstantly,
   activateInstantlyCampaign,
+  patchInstantlySequences,
   buildCustomVariables,
   type InstantlyStep,
   type InstantlyLeadInput,
 } from "@/lib/services/instantly";
+import { toInstantlyTimezone } from "@/lib/instantly-timezones";
 
 const BATCH = 100;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -54,12 +56,12 @@ function pickTimezone(
     tz = COUNTRY_TO_TIMEZONE[countryName];
   }
 
-  // Instantly API strictly rejects "UTC" and "Etc/UTC" in schedules.
+  // Instantly API rejects UTC/Etc/UTC and many IANA zones not in their enum.
   if (tz === "UTC" || tz === "Etc/UTC") {
-    return "Europe/London";
+    return toInstantlyTimezone("UTC");
   }
-  
-  return tz;
+
+  return toInstantlyTimezone(tz);
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -126,6 +128,8 @@ export async function sendCampaign(
     .is("instantly_campaign_id", null);
 
   let totalSent = 0;
+  const bucketErrors: string[] = [];
+  const eligibleCount = cls?.length ?? 0;
 
   // 5) Push NEW leads (only when there are any) ───────────────────────────────
   if (cls && cls.length > 0) {
@@ -215,6 +219,12 @@ export async function sendCampaign(
             .from("instantly_campaigns")
             .update({ instantly_campaign_id: instId, updated_at: new Date().toISOString() })
             .eq("id", sub!.id);
+        } else {
+          // Sub-campaign already exists on Instantly — keep its sequence in sync
+          // with campaign_steps. Without this, steps added/edited after the first
+          // send (e.g. a new follow-up step) never reach Instantly, since it only
+          // learns the sequence at creation time otherwise.
+          await patchInstantlySequences(instId, steps);
         }
 
         // Build per-lead payloads (carry leadId so we can flip their drafts to 'sent')
@@ -269,15 +279,24 @@ export async function sendCampaign(
           updated_at: new Date().toISOString(),
         }).eq("id", sub!.id);
       } catch (e) {
-        console.error(`Bucket ${b.code} failed:`, (e as Error).message);
+        const message = (e as Error).message;
+        console.error(`Bucket ${b.code} failed:`, message);
+        bucketErrors.push(`${b.countryName ?? b.code}: ${message}`);
         await db.from("instantly_campaigns").upsert({
           campaign_id: campaignId,
           country_code: b.code,
           status: "failed",
-          last_error: (e as Error).message,
+          last_error: message,
         }, { onConflict: "campaign_id,country_code" });
         continue;
       }
+    }
+
+    if (eligibleCount > 0 && totalSent === 0) {
+      throw new Error(
+        bucketErrors[0]
+          ?? "No leads were sent to Instantly. Check campaign timezone and sending window settings.",
+      );
     }
   }
 

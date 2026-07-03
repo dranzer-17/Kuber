@@ -171,11 +171,6 @@ export function SettingsView() {
 
   const [replyDrafterPrompt,    setReplyDrafterPrompt   ] = useState("");
 
-  const [sigFullName, setSigFullName] = useState("");
-  const [sigTitle, setSigTitle] = useState("");
-  const [sigContactBlock, setSigContactBlock] = useState("");
-  const [savingMySignature, setSavingMySignature] = useState(false);
-
   const [userEmail, setUserEmail] = useState("");
   const [userName,  setUserName  ] = useState("");
 
@@ -213,22 +208,6 @@ export function SettingsView() {
       }
     }
     void load();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      try {
-        const res = await fetch("/api/v1/user-signature", {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        const json = await res.json();
-        setSigFullName(json.data?.full_name ?? "");
-        setSigTitle(json.data?.title ?? "");
-        setSigContactBlock(json.data?.contact ?? "");
-      } catch { /* leave fields blank on failure */ }
-    })();
   }, []);
 
   async function handleLogoPick(file: File | null) {
@@ -296,29 +275,6 @@ export function SettingsView() {
       setError((e as Error).message);
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function saveMySignature() {
-    setSavingMySignature(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token ?? "";
-      const res = await fetch("/api/v1/user-signature", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          full_name: sigFullName,
-          title: sigTitle,
-          contact: sigContactBlock,
-        }),
-      });
-      if (!res.ok) throw new Error("Failed to save signature");
-      toast.success("Signature saved");
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSavingMySignature(false);
     }
   }
 
@@ -451,32 +407,6 @@ export function SettingsView() {
                       <p className="text-xs text-muted-foreground mt-0.5">Your access level in this workspace.</p>
                     </div>
                     <span className="text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">Admin</span>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                    <div>
-                      <h3 className="text-sm font-semibold">My Signature</h3>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        This is the signature actually appended to outreach emails and replies you send —
-                        it takes priority over the global Email Footer fallback under AI &amp; Outreach.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label>Full name</Label>
-                        <Input value={sigFullName} onChange={(e) => setSigFullName(e.target.value)} placeholder="e.g. Rudraksh Mehta" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Title</Label>
-                        <Input value={sigTitle} onChange={(e) => setSigTitle(e.target.value)} placeholder="e.g. Business Development" />
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <RichTextEditor label="Contact block" value={sigContactBlock} onChange={setSigContactBlock} minHeight={100} />
-                    </div>
-                    <Button onClick={saveMySignature} disabled={savingMySignature}>
-                      {savingMySignature ? "Saving..." : "Save signature"}
-                    </Button>
                   </div>
                 </>
               )}
@@ -614,7 +544,7 @@ export function SettingsView() {
                         </div>
                       )}
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-3">
                         {productOfferings.map((product, idx) => (
                           <div key={idx} className="rounded-xl border border-border bg-card p-4 space-y-3">
                             <div className="flex items-center gap-2">
@@ -622,7 +552,7 @@ export function SettingsView() {
                                 value={product.name}
                                 onChange={(e) => updateProduct(idx, "name", e.target.value)}
                                 placeholder="Product name"
-                                className="h-8 text-sm font-medium flex-1"
+                                className="h-9 text-sm font-medium flex-1"
                               />
                               <button type="button" onClick={() => removeProduct(idx)}
                                 className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
@@ -633,7 +563,7 @@ export function SettingsView() {
                               value={product.description}
                               onChange={(e) => updateProduct(idx, "description", e.target.value)}
                               placeholder="Describe this product — what it is, who it fits, key benefits..."
-                              className="min-h-24 resize-none text-sm"
+                              className="min-h-32 text-sm resize-y"
                             />
                           </div>
                         ))}

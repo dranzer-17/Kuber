@@ -27,8 +27,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .from("campaign_leads")
     .select(
       `*, attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
-       leads(first_name, last_name, email, email_status, title, country, email_domain_catchall, organization_id),
-       email_drafts(id, subject, body, status, created_at)`,
+       email_drafts(id, subject, body, status, created_at, step_number),
+       leads(first_name, last_name, email, title, country)`,
       { count: "exact" }
     )
     .eq("campaign_id", id);

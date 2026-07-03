@@ -64,10 +64,10 @@ export async function POST(req: NextRequest) {
   if (error) return fail(500, "INTERNAL", error.message);
 
   // Build sequence steps dynamically from the requested follow-up delays.
-  const followupDays = Array.isArray(parsed.data.followup_days) && parsed.data.followup_days.length > 0
-    ? parsed.data.followup_days
-    : [30, 90]; // safe default if the client omitted it
-  const steps = buildDefaultCampaignSteps(followupDays);
+  const followupSteps = Array.isArray(parsed.data.followup_steps) && parsed.data.followup_steps.length > 0
+    ? parsed.data.followup_steps
+    : [{ delay: 30, delay_unit: "days" as const }, { delay: 90, delay_unit: "days" as const }]; // safe default if the client omitted it
+  const steps = buildDefaultCampaignSteps(followupSteps);
 
   await db.from("campaign_steps").insert(
     steps.map((s) => ({

@@ -1,10 +1,6 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { requireAdminSession } from "@/lib/server/session";
 
-/** Use at the top of every protected Server Component / layout. */
+/** Use at the top of protected Server Components. Returns the verified session. */
 export async function requireAdmin() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/");
-  return user;
+  return requireAdminSession();
 }

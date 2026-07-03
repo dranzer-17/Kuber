@@ -7,7 +7,8 @@ import {
   List, LayoutGrid, BarChart2, Paperclip, FileText, Upload, Reply, Flame, Snowflake, ThumbsDown, X,
 } from "lucide-react";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { cn, formatOrdinal } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,10 @@ import {
   regenerateDraft,
   sendApprovedLeads,
   fetchDraftHistory,
+  fetchDraftSiblings,
+  fetchCampaignSteps,
+  regenerateFollowUpDraft,
+  saveFollowUpDraft,
   restoreDraftVersion,
   reopenDraft,
   fetchCampaignReport,
@@ -193,6 +198,15 @@ export function CampaignDetail({
   const [leadsSort, setLeadsSort] = useState<CampaignLeadsSort>("az");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
+  const [siblingSteps, setSiblingSteps] = useState<Array<{ id: string; step_number: number; subject: string | null; body: string | null; status: string; created_at: string }>>([]);
+  const [campaignSteps, setCampaignSteps] = useState<Array<{ step_order: number; subject: string; body: string }>>([]);
+  const [activeFollowUpStep, setActiveFollowUpStep] = useState<number | null>(null);
+  const [followUpSubject, setFollowUpSubject] = useState("");
+  const [followUpBody, setFollowUpBody] = useState("");
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
+  const [regeneratingFollowUp, setRegeneratingFollowUp] = useState(false);
+  const [followUpRegenOpen, setFollowUpRegenOpen] = useState(false);
+  const [followUpRegenQuery, setFollowUpRegenQuery] = useState("");
   const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [viewTab, setViewTab] = useState<CampaignViewTab>("list");
@@ -200,7 +214,6 @@ export function CampaignDetail({
   const [reportLoading, setReportLoading] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingAll, setRetryingAll] = useState(false);
-  const [generatingFollowUp, setGeneratingFollowUp] = useState(false);
   const leadFileRef = useRef<HTMLInputElement>(null);
   const [uploadingLeadAtt, setUploadingLeadAtt] = useState(false);
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
@@ -322,6 +335,57 @@ export function CampaignDetail({
     void loadHistory();
   }, [selected?.email_drafts?.id]);
 
+  useEffect(() => {
+    if (!selected?.email_drafts?.id) { setSiblingSteps([]); return; }
+    async function loadSiblings() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { siblings } = await fetchDraftSiblings(session.access_token, selected!.email_drafts!.id);
+        setSiblingSteps(siblings);
+      } catch { setSiblingSteps([]); }
+    }
+    void loadSiblings();
+  }, [selected?.email_drafts?.id]);
+
+  // Follow-up tabs default to the first configured follow-up step whenever
+  // the selected lead changes (or campaign steps first load).
+  useEffect(() => {
+    const firstFollowUp = campaignSteps.find((s) => s.step_order > 1)?.step_order ?? null;
+    setActiveFollowUpStep(firstFollowUp);
+  }, [selected?.id, campaignSteps]);
+
+  const activeFollowUpSibling = siblingSteps.find((s) => s.step_number === activeFollowUpStep) ?? null;
+  const activeFollowUpTemplate = campaignSteps.find((s) => s.step_order === activeFollowUpStep) ?? null;
+
+  // Seed the follow-up tab's editor from whichever draft actually exists for
+  // that step, or from the campaign's generic step template if none exists
+  // yet — always editable either way, so there's one single text box rather
+  // than a separate read-only "template" state and "draft" state.
+  useEffect(() => {
+    if (activeFollowUpSibling) {
+      setFollowUpSubject(activeFollowUpSibling.subject ?? "");
+      setFollowUpBody(activeFollowUpSibling.body ?? "");
+    } else {
+      setFollowUpSubject(fillTemplateTags(activeFollowUpTemplate?.subject, selected?.leads));
+      setFollowUpBody(fillTemplateTags(activeFollowUpTemplate?.body, selected?.leads));
+    }
+    setFollowUpRegenOpen(false);
+    setFollowUpRegenQuery("");
+  }, [activeFollowUpStep, activeFollowUpSibling?.id, activeFollowUpSibling?.subject, activeFollowUpSibling?.body, activeFollowUpTemplate?.subject, activeFollowUpTemplate?.body, selected?.leads]);
+
+  useEffect(() => {
+    async function loadCampaignSteps() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { steps } = await fetchCampaignSteps(session.access_token, campaign.id);
+        setCampaignSteps(steps.map((s) => ({ step_order: s.step_order, subject: s.subject, body: s.body })));
+      } catch { setCampaignSteps([]); }
+    }
+    void loadCampaignSteps();
+  }, [campaign.id]);
+
   // Sort days in calendar order (Mon–Sun) before display.
   // Object.entries() returns JSON key insertion order which is arbitrary.
   const DAY_ORDER = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
@@ -341,6 +405,16 @@ export function CampaignDetail({
   const progressCompleted = progress
     ? progress.draft + progress.approved + progress.sent + progress.failed
     : 0;
+
+  // Cosmetic only: the generic step template's preview substitutes merge tags
+  // with this lead's real name so it doesn't read like raw template syntax.
+  // Instantly does the actual substitution itself at send time regardless.
+  function fillTemplateTags(text: string | null | undefined, lead: { first_name: string | null; last_name: string | null } | null | undefined): string {
+    if (!text) return "";
+    return text
+      .replace(/\{\{\s*firstName\s*\}\}/gi, lead?.first_name?.trim() || "there")
+      .replace(/\{\{\s*lastName\s*\}\}/gi, lead?.last_name?.trim() || "");
+  }
 
   function getDisplayStatus(cl: CampaignLead): string {
     if (cl.email_drafts?.status) return DRAFT_STATUS_LABEL[cl.email_drafts.status] ?? cl.crm_status;
@@ -484,6 +558,76 @@ export function CampaignDetail({
     }
   }
 
+  async function reloadSiblings() {
+    if (!selected?.email_drafts?.id) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { siblings } = await fetchDraftSiblings(session.access_token, selected.email_drafts.id);
+      setSiblingSteps(siblings);
+    } catch { /* keep previous siblings on failure */ }
+  }
+
+  // Follow-up drafts never own campaign_leads.crm_status/draft_id (only step 1
+  // does — see generateOneDraft), so there's no separate "Certify" step here:
+  // Save persists + approves + syncs to Instantly in one call, via its own
+  // isolated endpoint (not editDraft/approveDraft — see saveFollowUpDraft).
+  // Works whether a draft row already exists or not (a manual write).
+  async function handleSaveFollowUp() {
+    if (!selected || activeFollowUpStep === null) return;
+    setSavingFollowUp(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { instantly_sync } = await saveFollowUpDraft(
+        session.access_token, campaign.id, selected.id, activeFollowUpStep, followUpSubject, followUpBody,
+      );
+      if (instantly_sync.attempted && !instantly_sync.synced) {
+        toast.error(`Saved, but didn't reach Instantly: ${instantly_sync.error ?? "unknown error"}`);
+      } else {
+        toast.success("Follow-up saved");
+      }
+      await reloadSiblings();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingFollowUp(false);
+    }
+  }
+
+  // Regenerate is entirely isolated from the step-1 draft's regenerate flow
+  // (see followup-regenerate/route.ts) — it only ever sees the current
+  // follow-up text (whatever's in the box right now, whether that's an
+  // existing AI draft, a manual edit, or the untouched generic template) plus
+  // the typed instruction. No lead/org context, no product library re-mixed in.
+  async function handleRegenerateFollowUp() {
+    if (!selected || activeFollowUpStep === null) return;
+    setRegeneratingFollowUp(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { draft } = await regenerateFollowUpDraft(
+        session.access_token,
+        campaign.id,
+        selected.id,
+        activeFollowUpStep,
+        followUpBody,
+        followUpRegenQuery || "Rewrite this follow-up.",
+      );
+      setFollowUpSubject(draft.subject ?? "");
+      setFollowUpBody(draft.body ?? "");
+      setFollowUpRegenOpen(false);
+      setFollowUpRegenQuery("");
+      await reloadSiblings();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setRegeneratingFollowUp(false);
+    }
+  }
+
   async function handleSend() {
     setSending(true);
     setError("");
@@ -498,7 +642,11 @@ export function CampaignDetail({
         setError("No certified leads to send.");
         return;
       }
-      await sendApprovedLeads(session.access_token, campaign.id);
+      const result = await sendApprovedLeads(session.access_token, campaign.id);
+      if (result.sent === 0) {
+        setError("No leads were sent to Instantly. Check timezone and sending window settings.");
+        return;
+      }
       await loadData();                                   // refresh this view's leads/drafts
       await loadCampaigns(session.access_token);          // refresh header stats + status badge
     } catch (e) {
@@ -556,16 +704,6 @@ export function CampaignDetail({
     (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
   ).length;
 
-  const checkedSentLeads = campaignLeads.filter(
-    (cl) => checkedIds.has(cl.id) && (cl.crm_status === "sent" || cl.crm_status === "approved")
-  );
-  const checkedSentCount = checkedSentLeads.length;
-  // Show Step 3 only if ALL selected leads already have step 2 generated
-  const allCheckedHaveStep2 = checkedSentCount > 0 && checkedSentLeads.every(
-    (cl) => (cl.email_drafts?.step_number ?? 1) >= 2
-  );
-  const followUpStep = allCheckedHaveStep2 ? 3 : 2;
-
   const sortedCampaignLeads = sortCampaignLeads(campaignLeads, leadsSort);
 
   const selectedLead = selected?.leads;
@@ -617,34 +755,6 @@ export function CampaignDetail({
           </nav>
 
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-            {checkedSentCount > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={generatingFollowUp}
-                onClick={async () => {
-                  setGeneratingFollowUp(true);
-                  try {
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (!session) return;
-                    await fetch(`/api/v1/campaigns/${campaign.id}/generate-followups`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-                      body: JSON.stringify({
-                        step_number: followUpStep,
-                        campaign_lead_ids: checkedSentLeads.map((cl) => cl.id),
-                      }),
-                    });
-                    setTimeout(() => void loadData(), 3000);
-                  } catch (e) { console.error(e); }
-                  finally { setGeneratingFollowUp(false); }
-                }}
-                className="gap-1.5"
-              >
-                {generatingFollowUp ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Step {followUpStep} follow-up ({checkedSentCount})
-              </Button>
-            )}
             {draftReadyLeads.length > 0 && (
               <Button
                 variant="outline"
@@ -1080,7 +1190,7 @@ export function CampaignDetail({
                 const lead = cl.leads;
                 const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
                 const isSelected = selectedId === cl.id;
-                const canCheck = ["draft", "approved"].includes(cl.email_drafts?.status ?? "") || cl.crm_status === "sent";
+                const canCheck = ["draft", "approved"].includes(cl.email_drafts?.status ?? "");
                 return (
                   <button
                     key={cl.id}
@@ -1392,6 +1502,110 @@ export function CampaignDetail({
                         <Button size="sm" onClick={handleRegenerate} disabled={regenerating} className="gap-1.5">
                           <RotateCcw className="size-3.5" /> Regenerate
                         </Button>
+                      </div>
+                    )}
+
+                    {/* Follow-up tabs — entirely self-contained below the sent email above,
+                        never touching it or campaign_leads.crm_status. Tabs = this campaign's
+                        configured follow-up steps. A tab with no draft yet for this lead shows
+                        Instantly's own generic step template (read-only) with a Generate button;
+                        once generated, it becomes an editable mini-panel (Save persists + approves
+                        in one action — no separate Certify step here — plus Regenerate). Never a
+                        "version" of the draft above — a different email later in the sequence. */}
+                    {selected.email_drafts?.status === "sent" && campaignSteps.some((s) => s.step_order > 1) && (
+                      <div className="rounded-lg border border-border bg-secondary/10 overflow-hidden">
+                        <div className="flex items-center gap-1 border-b border-border px-2 pt-2 overflow-x-auto">
+                          {campaignSteps.filter((s) => s.step_order > 1).map((s) => (
+                            <button
+                              key={s.step_order}
+                              type="button"
+                              onClick={() => setActiveFollowUpStep(s.step_order)}
+                              className={cn(
+                                "px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 transition-colors whitespace-nowrap",
+                                activeFollowUpStep === s.step_order
+                                  ? "border-primary text-primary"
+                                  : "border-transparent text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              {formatOrdinal(s.step_order - 1)} follow-up
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="p-3.5 space-y-2.5">
+                          {activeFollowUpSibling?.status === "sent" ? (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-medium text-muted-foreground">{activeFollowUpSibling.subject}</p>
+                                <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground shrink-0">
+                                  Sent
+                                </span>
+                              </div>
+                              <div
+                                className="text-xs text-muted-foreground prose-sm max-w-none [&_p]:my-1.5"
+                                dangerouslySetInnerHTML={{ __html: activeFollowUpSibling.body ?? "" }}
+                              />
+                            </>
+                          ) : (
+                            <>
+                              {!activeFollowUpSibling && (
+                                <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground">
+                                  Generic template — edit freely or hit Regenerate
+                                </span>
+                              )}
+                              <Input
+                                value={followUpSubject}
+                                onChange={(e) => setFollowUpSubject(e.target.value)}
+                                className="text-sm font-medium"
+                                placeholder="Subject"
+                              />
+                              <RichTextEditor
+                                value={followUpBody}
+                                onChange={setFollowUpBody}
+                                minHeight={180}
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  className="gap-1.5"
+                                  disabled={savingFollowUp}
+                                  onClick={handleSaveFollowUp}
+                                >
+                                  {savingFollowUp ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="gap-1.5"
+                                  onClick={() => setFollowUpRegenOpen((o) => !o)}
+                                >
+                                  <RotateCcw className="size-3.5" />
+                                  Regenerate
+                                </Button>
+                              </div>
+                              {followUpRegenOpen && (
+                                <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
+                                  <Input
+                                    value={followUpRegenQuery}
+                                    onChange={(e) => setFollowUpRegenQuery(e.target.value)}
+                                    placeholder="Optional instruction, e.g. Make it shorter…"
+                                    onKeyDown={(e) => e.key === "Enter" && handleRegenerateFollowUp()}
+                                  />
+                                  <Button
+                                    size="sm"
+                                    className="gap-1.5"
+                                    disabled={regeneratingFollowUp}
+                                    onClick={handleRegenerateFollowUp}
+                                  >
+                                    {regeneratingFollowUp ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+                                    Regenerate
+                                  </Button>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
                     )}
 

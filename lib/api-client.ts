@@ -6,12 +6,7 @@ import type { Campaign } from "@/components/app/create-campaign-modal";
 // ─── Token helper ─────────────────────────────────────────────────────────────
 
 async function getToken(): Promise<string> {
-  const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-    { auth: { persistSession: true } }
-  );
+  const { supabase } = await import("@/lib/supabase");
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? "";
 }
@@ -166,6 +161,11 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
+export async function fetchLeadsCount(token: string): Promise<number> {
+  const data = await apiFetch<{ total: number }>("/api/v1/leads/count", {}, token);
+  return data.total;
+}
+
 export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string }): Promise<{ leads: Lead[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set("limit", String(params.limit));
@@ -316,6 +316,12 @@ export async function fetchDraftHistory(token: string, draftId: string): Promise
   return apiFetch(`/api/v1/drafts/${draftId}/history`, {}, token);
 }
 
+export async function fetchDraftSiblings(token: string, draftId: string): Promise<{
+  siblings: Array<{ id: string; step_number: number; subject: string | null; body: string | null; status: string; created_at: string }>;
+}> {
+  return apiFetch(`/api/v1/drafts/${draftId}/siblings`, {}, token);
+}
+
 export async function restoreDraftVersion(token: string, draftId: string): Promise<{ id: string; status: string }> {
   return apiFetch(`/api/v1/drafts/${draftId}`, {
     method: "PATCH",
@@ -430,13 +436,61 @@ export async function fetchCampaigns(token: string): Promise<Campaign[]> {
   return data.campaigns.map(mapDbCampaign);
 }
 
+export async function fetchCampaignSteps(token: string, campaignId: string): Promise<{
+  steps: Array<{ id: string; step_order: number; delay: number; delay_unit: string; subject: string; body: string }>;
+}> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/steps`, {}, token);
+}
+
+// Isolated from the step-1 draft's regenerate/generation pipeline entirely —
+// see app/api/v1/campaigns/[id]/followup-regenerate/route.ts.
+export async function regenerateFollowUpDraft(
+  token: string,
+  campaignId: string,
+  campaignLeadId: string,
+  stepNumber: number,
+  currentBody: string,
+  instruction: string,
+): Promise<{ draft: { id: string; subject: string | null; body: string | null; status: string } }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/followup-regenerate`, {
+    method: "POST",
+    body: JSON.stringify({
+      campaign_lead_id: campaignLeadId,
+      step_number: stepNumber,
+      body: currentBody,
+      instruction,
+    }),
+  }, token);
+}
+
+// Save for a follow-up: persist + approve + sync to Instantly in one action.
+// Deliberately separate from editDraft/approveDraft (the step-1 draft's
+// PATCH .../drafts/[id] flow), whose "edit" action requires a non-empty
+// subject — follow-ups are always empty (they thread as a reply).
+export async function saveFollowUpDraft(
+  token: string,
+  campaignId: string,
+  campaignLeadId: string,
+  stepNumber: number,
+  subject: string,
+  body: string,
+): Promise<{
+  draft: { id: string; subject: string | null; body: string | null; status: string };
+  instantly_sync: { attempted: boolean; synced: boolean; error?: string };
+}> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/followup-save`, {
+    method: "POST",
+    body: JSON.stringify({ campaign_lead_id: campaignLeadId, step_number: stepNumber, subject, body }),
+  }, token);
+}
+
 export async function createCampaign(token: string, body: {
   name: string; human_in_loop: boolean;
   daily_limit?: number; window_from?: string; window_to?: string;
   schedule_timezone?: string; send_days?: Record<string, boolean>;
   send_mode?: "now" | "scheduled"; schedule_start_at?: string;
   ai_prompt_context?: string; sender_name?: string;
-  followup_days?: number[];
+  followup_steps?: { delay: number; delay_unit: "minutes" | "hours" | "days" }[];
   attachment_path?: string; attachment_name?: string;
   attachment_mime?: string; attachment_size?: number;
   attachment_url?: string | null;
@@ -464,7 +518,7 @@ export async function fetchCampaignLeads(token: string, campaignId: string): Pro
   campaign_leads: {
     id: string; lead_id: string; crm_status: string; created_at: string;
     leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null } | null;
-    email_drafts: { id: string; subject: string | null; body: string | null; status: string } | null;
+    email_drafts: { id: string; subject: string | null; body: string | null; status: string; step_number?: number | null } | null;
   }[];
   total: number;
 }> {

@@ -1,3 +1,5 @@
+import { toInstantlyTimezone } from "@/lib/instantly-timezones";
+
 const BASE = "https://api.instantly.ai/api/v2";
 
 function h() {
@@ -110,7 +112,7 @@ export async function createInstantlyCampaign(opts: {
           name: "Default",
           timing: { from: opts.windowFrom, to: opts.windowTo },
           days: toInstantlyDays(opts.sendDays),
-          timezone: opts.timezone,
+          timezone: toInstantlyTimezone(opts.timezone),
         }],
       },
       daily_limit: opts.dailyLimit,
@@ -195,6 +197,24 @@ export async function addLeadsToInstantly(
     }),
   });
   return iJson<BulkAddResult>(res);
+}
+
+// ─── Leads: post-add updates ──────────────────────────────────────────────────
+// PATCH /leads/{id} — used to push updated custom_variables (e.g. a follow-up
+// draft's customBodyN/customSubjectN) to a lead that was already added to a
+// campaign. Without this, editing/approving a follow-up draft after the lead's
+// initial send never reaches Instantly — custom_variables are otherwise only
+// ever set once, at addLeadsToInstantly() time.
+export async function updateInstantlyLeadVariables(
+  instantlyLeadId: string,
+  customVariables: Record<string, string>,
+): Promise<void> {
+  const res = await fetch(`${BASE}/leads/${instantlyLeadId}`, {
+    method: "PATCH",
+    headers: h(),
+    body: JSON.stringify({ custom_variables: customVariables }),
+  });
+  await iJson<unknown>(res);
 }
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────

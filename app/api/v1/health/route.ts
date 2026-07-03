@@ -19,6 +19,7 @@ export async function GET(_req: NextRequest) {
     openrouter: !!process.env.OPENROUTER_API_KEY,
     openai: !!process.env.OPENAI_API_KEY,
     supabase_service_role: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    supabase_jwt_secret: !!process.env.SUPABASE_JWT_SECRET,
   };
 
   if (dbStatus !== "ok") {

@@ -606,6 +606,13 @@ export default function LeadsPage() {
   // Reset to page 1 whenever the filtered result set changes
   useEffect(() => { setPage(1); }, [searchQuery, filters, leadsSort]);
 
+  // Load leads only when visiting this page (not globally on every route).
+  useEffect(() => {
+    if (!session || loadingLeads) return;
+    if (leads.length > 0) return;
+    void loadLeads(session.access_token);
+  }, [session, leads.length, loadingLeads, loadLeads]);
+
   // Fetch import batches for the batch filter dropdown; re-run when leads refresh
   useEffect(() => {
     if (!session) return;

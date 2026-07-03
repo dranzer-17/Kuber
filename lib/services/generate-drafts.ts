@@ -198,7 +198,10 @@ export async function generateOneDraft(
 
     const finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
 
-    const finalSubject = validated.data.subject;
+    // Follow-ups must thread as a reply in the original conversation, which
+    // Instantly does by leaving the subject empty — a hard rule, not left to
+    // the LLM's judgment (it will invent one anyway if not forced here).
+    const finalSubject = stepNumber > 1 ? "" : validated.data.subject;
 
     const finalStatus = humanInLoop ? "draft" : "approved";
     const now = new Date().toISOString();
@@ -211,11 +214,19 @@ export async function generateOneDraft(
       updated_at: now,
     }).eq("id", activeDraftId);
 
-    await db.from("campaign_leads").update({
-      draft_id: activeDraftId,
-      crm_status: finalStatus === "approved" ? "approved" : "draft",
-      updated_at: now,
-    }).eq("id", target.id);
+    // Only step 1 drives the lead's primary crm_status/draft_id — that's the
+    // pipeline the sidebar badge, "Certify all", and "draft-ready" counts read.
+    // A follow-up (step > 1) is generated for a lead whose step-1 email is
+    // already sent; it must not flip that lead back to looking like "draft"
+    // everywhere. Follow-up drafts live entirely in their own mini-panel,
+    // queried directly by step_number (see /drafts/[id]/siblings).
+    if (stepNumber === 1) {
+      await db.from("campaign_leads").update({
+        draft_id: activeDraftId,
+        crm_status: finalStatus === "approved" ? "approved" : "draft",
+        updated_at: now,
+      }).eq("id", target.id);
+    }
 
     return { ok: true, draftId: activeDraftId, status: finalStatus };
   } catch (err) {
@@ -224,11 +235,13 @@ export async function generateOneDraft(
       status: "failed",
       updated_at: now,
     }).eq("id", activeDraftId);
-    await db.from("campaign_leads").update({
-      draft_id: activeDraftId,
-      crm_status: "draft",
-      updated_at: now,
-    }).eq("id", target.id);
+    if (stepNumber === 1) {
+      await db.from("campaign_leads").update({
+        draft_id: activeDraftId,
+        crm_status: "draft",
+        updated_at: now,
+      }).eq("id", target.id);
+    }
     return { ok: false, reason: (err as Error).message };
   }
 }

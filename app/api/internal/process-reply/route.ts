@@ -61,11 +61,20 @@ export async function POST(req: NextRequest) {
   // resolve campaign name + ai context
   let campaignName = "Campaign";
   let aiPromptContext: string | null = null;
-  if (b.master_campaign_id) {
+  let masterCampaignId = b.master_campaign_id ?? null;
+  if (!masterCampaignId && b.campaign_lead_id) {
+    const { data: cl } = await db
+      .from("campaign_leads")
+      .select("campaign_id")
+      .eq("id", b.campaign_lead_id)
+      .maybeSingle();
+    masterCampaignId = cl?.campaign_id ?? null;
+  }
+  if (masterCampaignId) {
     const { data: c } = await db
       .from("campaigns")
       .select("name, ai_prompt_context")
-      .eq("id", b.master_campaign_id)
+      .eq("id", masterCampaignId)
       .maybeSingle();
     if (c) { campaignName = c.name; aiPromptContext = c.ai_prompt_context ?? null; }
   }
@@ -76,7 +85,7 @@ export async function POST(req: NextRequest) {
     .insert({
       reply_event_id: b.reply_event_id,
       campaign_lead_id: b.campaign_lead_id ?? null,
-      campaign_id: b.master_campaign_id ?? null,
+      campaign_id: masterCampaignId ?? null,
       status: "generating",
       reply_to_uuid: b.email_id ?? null,
       eaccount,
@@ -90,7 +99,7 @@ export async function POST(req: NextRequest) {
 
   const result = await generateReplyDraft(db, {
     replyDraftId: rd.id,
-    masterCampaignId: b.master_campaign_id ?? null,
+    masterCampaignId: masterCampaignId,
     campaignName,
     replyText: b.reply_text,
     replySubject: b.reply_subject ?? null,

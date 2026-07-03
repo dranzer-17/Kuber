@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchDraftSchema } from "@/lib/validators/drafts";
+import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: { id: string };
@@ -17,19 +18,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { data: draft } = await db
     .from("email_drafts")
-    .select("id, status, lead_id, campaign_id")
+    .select("id, status, lead_id, campaign_id, step_number")
     .eq("id", id)
     .maybeSingle();
 
   if (!draft) return fail(404, "NOT_FOUND", "Draft not found");
 
   const now = new Date().toISOString();
+  const isFollowUp = (draft.step_number ?? 1) > 1;
 
   if (parsed.data.action === "approve") {
     if (draft.status !== "draft") return fail(409, "CONFLICT", `Cannot approve a draft with status '${draft.status}'`);
 
     await db.from("email_drafts").update({ status: "approved", approved_at: now, reviewed_by: user.id, updated_at: now }).eq("id", id);
+    // Follow-ups never own campaign_leads.draft_id (see generateOneDraft), so
+    // this naturally no-ops for them — only step 1 drives the primary status.
     await db.from("campaign_leads").update({ crm_status: "approved", updated_at: now }).eq("draft_id", id);
+    await syncApprovedDraftToInstantly(db, draft.lead_id, draft.campaign_id);
     return ok({ id, status: "approved" });
   }
 
@@ -76,11 +81,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       await db.from("email_drafts").update({ status: "draft", updated_at: now }).eq("id", id);
     }
 
-    await db.from("campaign_leads").update({
-      draft_id: id,
-      crm_status: target.status === "approved" ? "approved" : "draft",
-      updated_at: now,
-    }).eq("campaign_id", draft.campaign_id).eq("lead_id", draft.lead_id);
+    // Same rule as everywhere else: only a step-1 restore may move the lead's
+    // primary crm_status/draft_id — a follow-up's own version history must
+    // never touch it.
+    if (!isFollowUp) {
+      await db.from("campaign_leads").update({
+        draft_id: id,
+        crm_status: target.status === "approved" ? "approved" : "draft",
+        updated_at: now,
+      }).eq("campaign_id", draft.campaign_id).eq("lead_id", draft.lead_id);
+    }
 
     return ok({ id, status: target.status === "approved" ? "approved" : "draft" });
   }

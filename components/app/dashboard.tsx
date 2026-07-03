@@ -10,7 +10,6 @@ import {
   TrendingUp, Users, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { STATUS_ORDER, type Lead } from "@/lib/leads";
 import { getBatchColor } from "@/lib/constants";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import type { ImportBatch } from "@/lib/api-client";
@@ -81,64 +80,39 @@ function StatCard({
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 interface DashboardViewProps {
-  leads: Lead[];
   campaigns: Campaign[];
   imports: ImportBatch[];
-  hotCount: number | null;
   loading?: boolean;
+  totalLeads: number;
+  enrichedLeads: number;
+  hotCount: number;
+  pipelineGrowth: Array<{ month: string; leads: number }>;
+  stageDonutData: Array<{ name: string; value: number; color: string }>;
   temperatureBreakdown: { hot: number; cold: number; ooo: number; unsubscribed: number; unclassified: number } | null;
   pendingReplies: Array<{ id: string; campaignId: string; campaignName: string; leadEmail: string | null; preview: string; createdAt: string }>;
   onNavigate: (view: "lead-generation" | "leads" | "campaigns") => void;
   onSelectBatch: (label: string) => void;
 }
 
-export function DashboardView({ leads, campaigns, imports, hotCount, loading = false, temperatureBreakdown, pendingReplies, onNavigate, onSelectBatch }: DashboardViewProps) {
-  const totalLeads    = leads.length;
-  // hotCount comes from campaign_leads.lead_temperature (the real classification
-  // source used everywhere else in the app) rather than the unused lead.score field,
-  // which is never populated by any part of the ingestion/enrichment pipeline.
-  const hotLeads      = hotCount ?? 0;
-  const enrichedLeads = leads.filter((l) => STATUS_ORDER[l.status] >= 2).length;
+export function DashboardView({
+  campaigns,
+  imports,
+  loading = false,
+  totalLeads,
+  enrichedLeads,
+  hotCount,
+  pipelineGrowth,
+  stageDonutData,
+  temperatureBreakdown,
+  pendingReplies,
+  onNavigate,
+  onSelectBatch,
+}: DashboardViewProps) {
+  const hotLeads      = hotCount;
   const liveCampaigns = campaigns.filter((c) => c.status === "Live").length;
   const totalSent     = campaigns.reduce((a, c) => a + c.sent, 0);
   const totalReplied  = campaigns.reduce((a, c) => a + c.replied, 0);
   const replyRate     = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0;
-
-  // Pipeline growth — cumulative leads added per month (last 6 months)
-  const now = new Date();
-  const monthLabels = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return d.toLocaleDateString("en-US", { month: "short" });
-  });
-  const monthKeys = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
-  const monthlyCounts: Record<string, number> = {};
-  for (const lead of leads) {
-    const key = lead.createdAt.slice(0, 7);
-    monthlyCounts[key] = (monthlyCounts[key] ?? 0) + 1;
-  }
-  let cumulative = 0;
-  const pipelineGrowth = monthKeys.map((key, i) => {
-    cumulative += monthlyCounts[key] ?? 0;
-    return { month: monthLabels[i], leads: cumulative };
-  });
-
-  // Stage donut
-  const STAGE_NAMES = ["New","Input Required","Enriched","Won","Closed"] as const;
-  const STAGE_DONUT_COLORS = [
-    "#71717a","#ca8a04","#2563eb","#22c55e","#6b7280",
-  ];
-  const stageDonutData = STAGE_NAMES
-    .map((name, i) => ({
-      name,
-      value: name === "Won"
-        ? leads.filter((l) => l.status === "Open").length
-        : leads.filter((l) => l.status === name).length,
-      color: STAGE_DONUT_COLORS[i],
-    }))
-    .filter((d) => d.value > 0);
 
   return (
     <div className="p-8 space-y-6 max-w-7xl mx-auto">

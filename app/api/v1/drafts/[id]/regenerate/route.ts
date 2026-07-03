@@ -23,7 +23,7 @@ export async function POST(
 
   const { data: oldDraft } = await db
     .from("email_drafts")
-    .select("id, status, lead_id, campaign_id, version")
+    .select("id, status, lead_id, campaign_id, version, step_number")
     .eq("id", id)
     .maybeSingle();
 
@@ -72,6 +72,7 @@ export async function POST(
       status: "generating",
       version: nextVersion,
       parent_draft_id: oldDraft.id,
+      step_number: oldDraft.step_number,
       created_at: new Date().toISOString(),
     })
     .select("id")
@@ -94,6 +95,7 @@ export async function POST(
     parsed.data.custom_instruction,
     campaign.ai_prompt_context ?? undefined,
     newDraftRow.id,
+    oldDraft.step_number ?? 1,
   );
 
   if (!result.ok) return fail(500, "GENERATION_FAILED", result.reason);
