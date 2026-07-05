@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .select(
       `*, attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
        email_drafts(id, subject, body, status, created_at, step_number),
-       leads(first_name, last_name, email, title, country)`,
+       leads(first_name, last_name, email, title, country, organizations(name))`,
       { count: "exact" }
     )
     .eq("campaign_id", id);
@@ -39,9 +39,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data, error, count } = await q;
   if (error) return fail(500, "INTERNAL", error.message);
 
+  function mapLeadRow(
+    raw: Record<string, unknown> | null,
+  ): { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null; company_name: string | null } | null {
+    if (!raw) return null;
+    const org = raw.organizations as { name?: string | null } | { name?: string | null }[] | null | undefined;
+    const company_name = (Array.isArray(org) ? org[0]?.name : org?.name) ?? null;
+    const { organizations: _org, ...lead } = raw;
+    return { ...lead, company_name } as ReturnType<typeof mapLeadRow>;
+  }
+
   // Compute resolved attachment per lead
   const items = (data ?? []).map((cl: Record<string, unknown>) => ({
     ...cl,
+    leads: mapLeadRow(cl.leads as Record<string, unknown> | null),
     attachment: {
       perLead: cl.attachment_name
         ? { name: cl.attachment_name, size: cl.attachment_size, mime: cl.attachment_mime }

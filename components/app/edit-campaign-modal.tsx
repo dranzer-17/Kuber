@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { DAY_LABELS, type Campaign } from "@/components/app/create-campaign-modal";
+import { extractFollowupWaitsFromSteps, rebuildStepsWithFollowupWaits } from "@/lib/constants";
 import { fetchCampaignSteps, patchCampaignConfig, saveCampaignSteps } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -62,16 +63,14 @@ function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 type FollowupStep = { delay: number; delay_unit: "minutes" | "hours" | "days" };
 
-export function EditCampaignModal({
-  open,
-  onClose,
+export function EditCampaignForm({
   campaign,
   onSaved,
+  className,
 }: {
-  open: boolean;
-  onClose: () => void;
   campaign: Campaign;
   onSaved?: (patch: Partial<Campaign>) => void;
+  className?: string;
 }) {
   const [senderName, setSenderName] = useState(campaign.senderName ?? "");
   const [aiPromptContext, setAiPromptContext] = useState(campaign.aiPromptContext ?? "");
@@ -86,9 +85,8 @@ export function EditCampaignModal({
   const [saving, setSaving] = useState(false);
   const [stepsLoading, setStepsLoading] = useState(true);
 
-  // Reset + load steps whenever modal opens
+  // Reset + load steps whenever campaign changes
   useEffect(() => {
-    if (!open) return;
     setSenderName(campaign.senderName ?? "");
     setAiPromptContext(campaign.aiPromptContext ?? "");
     setDailyLimit(campaign.dailyLimit ?? 30);
@@ -103,13 +101,7 @@ export function EditCampaignModal({
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) return;
         const { steps } = await fetchCampaignSteps(session.access_token, campaign.id);
-        const followups = steps
-          .filter((s) => s.step_order > 1)
-          .sort((a, b) => a.step_order - b.step_order)
-          .map((s) => ({
-            delay: s.delay,
-            delay_unit: (s.delay_unit ?? "days") as FollowupStep["delay_unit"],
-          }));
+        const followups = extractFollowupWaitsFromSteps(steps);
         setFollowupSteps(followups.length > 0 ? followups : [{ delay: 30, delay_unit: "days" }]);
       } catch {
         setFollowupSteps([{ delay: 30, delay_unit: "days" }]);
@@ -118,7 +110,7 @@ export function EditCampaignModal({
       }
     }
     void loadSteps();
-  }, [open, campaign.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [campaign.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSave() {
     setSaving(true);
@@ -137,32 +129,9 @@ export function EditCampaignModal({
         ai_prompt_context: aiPromptContext || undefined,
       });
 
-      // 2. Rebuild and save all steps (step 1 stays as-is, only follow-up delays change)
+      // 2. Rebuild steps — Instantly stores delay on step N as wait before step N+1
       const { steps: currentSteps } = await fetchCampaignSteps(session.access_token, campaign.id);
-      const sortedCurrent = [...currentSteps].sort((a, b) => a.step_order - b.step_order);
-
-      const updatedSteps = sortedCurrent.map((s, idx) => {
-        if (s.step_order === 1) return s;
-        const followupIdx = s.step_order - 2; // step 2 → followupSteps[0], etc.
-        const fu = followupSteps[followupIdx];
-        // Delay is stored on the PREVIOUS step (the wait before THIS step sends)
-        // so step N's delay comes from followupSteps[N-2]
-        const prevStep = sortedCurrent[idx - 1];
-        const prevFollowupIdx = prevStep ? prevStep.step_order - 2 : followupIdx;
-        return { ...s, delay: followupSteps[prevFollowupIdx]?.delay ?? s.delay, delay_unit: followupSteps[prevFollowupIdx]?.delay_unit ?? s.delay_unit };
-      });
-
-      // Simpler: rebuild delays by iterating follow-up steps directly
-      // step_order 1 carries delay = followupSteps[0].delay (wait before step 2)
-      // step_order 2 carries delay = followupSteps[1].delay (wait before step 3), etc.
-      const rebuilt = sortedCurrent.map((s) => {
-        if (s.step_order === 1) {
-          return { ...s, delay: followupSteps[0]?.delay ?? s.delay, delay_unit: followupSteps[0]?.delay_unit ?? s.delay_unit };
-        }
-        const fuIdx = s.step_order - 1; // step 2 → followupSteps[1], step 3 → followupSteps[2]
-        const fu = followupSteps[fuIdx];
-        return { ...s, delay: fu?.delay ?? s.delay, delay_unit: fu?.delay_unit ?? s.delay_unit };
-      });
+      const rebuilt = rebuildStepsWithFollowupWaits(currentSteps, followupSteps);
 
       await saveCampaignSteps(session.access_token, campaign.id, rebuilt);
 
@@ -173,7 +142,6 @@ export function EditCampaignModal({
       }
 
       onSaved?.({ senderName, aiPromptContext, dailyLimit, windowFrom, windowTo, timezone, sendDays });
-      onClose();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -182,31 +150,23 @@ export function EditCampaignModal({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-3xl overflow-hidden border-border bg-background p-0 shadow-2xl">
-        <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
-          <p className="text-xs text-muted-foreground mb-1">Editing · {campaign.name}</p>
-          <DialogTitle className="text-xl">Edit campaign</DialogTitle>
-        </DialogHeader>
+    <div className={cn("space-y-6", className)}>
+      <div className="space-y-1.5">
+        <Label className="text-sm font-medium">Sender name</Label>
+        <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+      </div>
 
-        <div className="max-h-[68vh] space-y-6 overflow-y-auto px-6 py-5">
+      <div className="space-y-1.5">
+        <Label className="text-sm font-medium">Additional context for AI</Label>
+        <Textarea
+          value={aiPromptContext}
+          onChange={(e) => setAiPromptContext(e.target.value)}
+          placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
+          rows={3}
+        />
+      </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Sender name</Label>
-            <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Additional context for AI</Label>
-            <Textarea
-              value={aiPromptContext}
-              onChange={(e) => setAiPromptContext(e.target.value)}
-              placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
-              rows={3}
-            />
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden divide-y divide-border">
+      <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden divide-y divide-border">
 
             {/* Daily limit */}
             <div className="flex items-center justify-between gap-4 px-5 py-4">
@@ -358,16 +318,47 @@ export function EditCampaignModal({
               )}
             </div>
           </div>
-        </div>
 
-        <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
-          <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
-            {saving ? (
-              <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
-            ) : (
-              <>Save changes <ChevronRight className="size-3.5" /></>
-            )}
-          </Button>
+      <div className="flex justify-end">
+        <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
+          {saving ? (
+            <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
+          ) : (
+            <>Save changes <ChevronRight className="size-3.5" /></>
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function EditCampaignModal({
+  open,
+  onClose,
+  campaign,
+  onSaved,
+}: {
+  open: boolean;
+  onClose: () => void;
+  campaign: Campaign;
+  onSaved?: (patch: Partial<Campaign>) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-3xl overflow-hidden border-border bg-background p-0 shadow-2xl">
+        <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
+          <p className="text-xs text-muted-foreground mb-1">Editing · {campaign.name}</p>
+          <DialogTitle className="text-xl">Edit campaign</DialogTitle>
+        </DialogHeader>
+
+        <div className="max-h-[68vh] overflow-y-auto px-6 py-5">
+          <EditCampaignForm
+            campaign={campaign}
+            onSaved={(patch) => {
+              onSaved?.(patch);
+              onClose();
+            }}
+          />
         </div>
       </DialogContent>
     </Dialog>

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { CampaignDetail } from "@/components/app/campaign-drawer";
 import { useApp } from "@/lib/app-context";
-import type { Campaign } from "@/lib/types";
+import type { Campaign } from "@/components/app/create-campaign-modal";
 
 interface Props {
   campaignId: string;

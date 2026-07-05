@@ -347,6 +347,36 @@ export function buildDefaultCampaignSteps(followupSteps: FollowupStepInput[]): C
   return steps;
 }
 
+/** Read follow-up wait times from stored steps (Instantly: delay on step N = wait before step N+1). */
+export function extractFollowupWaitsFromSteps(
+  steps: Array<{ step_order: number; delay: number; delay_unit?: string | null }>,
+): FollowupStepInput[] {
+  const sorted = [...steps].sort((a, b) => a.step_order - b.step_order);
+  if (sorted.length <= 1) return [];
+  return sorted.slice(0, -1).map((s) => ({
+    delay: s.delay ?? 0,
+    delay_unit: (s.delay_unit ?? "days") as FollowupStepInput["delay_unit"],
+  }));
+}
+
+/** Apply follow-up waits onto existing steps, preserving subjects/bodies. Adds or removes steps as needed. */
+export function rebuildStepsWithFollowupWaits<T extends CampaignStepInput>(
+  existingSteps: T[],
+  followupWaits: FollowupStepInput[],
+): T[] {
+  const sorted = [...existingSteps].sort((a, b) => a.step_order - b.step_order);
+  const defaults = buildDefaultCampaignSteps(
+    followupWaits.length > 0 ? followupWaits : [{ delay: 30, delay_unit: "days" }],
+  );
+  return defaults.map((def) => {
+    const existing = sorted.find((s) => s.step_order === def.step_order);
+    if (existing) {
+      return { ...existing, delay: def.delay, delay_unit: def.delay_unit };
+    }
+    return def as T;
+  });
+}
+
 export const BATCH_COLORS = [
   { name: "violet", bg: "bg-violet-400",  ring: "ring-violet-400",  text: "text-violet-400",  pill: "bg-violet-500/15 border-violet-500/30 text-violet-400"  },
   { name: "blue",   bg: "bg-blue-400",    ring: "ring-blue-400",    text: "text-blue-400",    pill: "bg-blue-500/15 border-blue-500/30 text-blue-400"         },
