@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
-import { replyToInstantlyEmail } from "@/lib/services/instantly";
+import { sendThreadReply } from "@/lib/services/unibox";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -19,20 +19,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     const bodyHtml = rd.body.replace(/\n/g, "<br>");
-    await replyToInstantlyEmail({
+    await sendThreadReply(db, {
       replyToUuid: rd.reply_to_uuid,
       eaccount: rd.eaccount,
       subject: rd.subject,
       bodyHtml,
       bodyText: rd.body,
+      campaignLeadId: rd.campaign_lead_id,
+      campaignId: rd.campaign_id,
+      replyEventId: rd.reply_event_id,
+      source: "campaign_replies",
+      replyDraftId: rd.id,
     });
-
-    const now = new Date().toISOString();
-    await db.from("reply_drafts").update({ status: "sent", sent_at: now, updated_at: now }).eq("id", id);
-
-    if (rd.campaign_lead_id) {
-      await db.from("campaign_leads").update({ updated_at: now }).eq("id", rd.campaign_lead_id);
-    }
     return ok({ sent: true });
   } catch (err) {
     return fail(502, "INSTANTLY_ERROR", (err as Error).message);

@@ -672,3 +672,91 @@ export async function sendReplyDraft(token: string, id: string): Promise<{ sent:
 export async function regenerateReplyDraft(token: string, id: string, instruction?: string): Promise<ReplyDraft> {
   return apiFetch(`/api/v1/reply-drafts/${id}/regenerate`, { method: "POST", body: JSON.stringify({ instruction }) }, token);
 }
+
+// ─── Unibox ──────────────────────────────────────────────────────────────────
+
+export type UniboxThreadSummary = {
+  thread_id: string;
+  lead_email: string | null;
+  lead: { first_name: string | null; last_name: string | null; title: string | null; email: string | null } | null;
+  campaign: { id: string; name: string } | null;
+  eaccount: string | null;
+  subject: string | null;
+  preview: string | null;
+  latest_at: string;
+  latest_direction: string;
+  unread_count: number;
+  message_count: number;
+  interest_status: number | null;
+  lead_temperature: string | null;
+  campaign_lead_id: string | null;
+};
+
+export type UniboxMessage = {
+  id: string;
+  instantly_email_id: string;
+  direction: string;
+  subject: string | null;
+  from_email: string | null;
+  to_emails: string | null;
+  cc_emails: string | null;
+  body_html: string | null;
+  body_text: string | null;
+  step: string | null;
+  timestamp_email: string;
+  is_unread: boolean;
+  attachments: unknown;
+};
+
+export async function fetchUniboxThreads(
+  token: string,
+  params: Record<string, string | undefined> = {},
+): Promise<{ threads: UniboxThreadSummary[]; next_cursor: string | null; counts: { by_status: Record<string, number>; unread_total: number } }> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v) qs.set(k, v);
+  }
+  const q = qs.toString();
+  return apiFetch(`/api/v1/unibox/threads${q ? `?${q}` : ""}`, {}, token);
+}
+
+export async function fetchUniboxThread(token: string, threadId: string, hydrate = false): Promise<{
+  thread_id: string;
+  messages: UniboxMessage[];
+  reply_drafts: ReplyDraft[];
+  lead: Record<string, unknown> | null;
+  campaign: { id: string; name: string } | null;
+  reply_to_uuid: string | null;
+  eaccount: string | null;
+  campaign_lead_id: string | null;
+  interest_status: number | null;
+  lead_temperature: string | null;
+}> {
+  return apiFetch(`/api/v1/unibox/threads/${threadId}${hydrate ? "?hydrate=1" : ""}`, {}, token);
+}
+
+export async function sendUniboxReply(
+  token: string,
+  body: { thread_id: string; subject: string; body_html: string; body_text?: string; reply_draft_id?: string },
+) {
+  return apiFetch("/api/v1/unibox/reply", { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+export async function setThreadStatus(token: string, threadId: string, interest_value: number | null, lead_email?: string) {
+  return apiFetch(`/api/v1/unibox/threads/${threadId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ interest_value, lead_email }),
+  }, token);
+}
+
+export async function markThreadRead(token: string, threadId: string) {
+  return apiFetch(`/api/v1/unibox/threads/${threadId}/read`, { method: "POST" }, token);
+}
+
+export async function syncUnibox(token: string): Promise<{ ingested: number; pages: number }> {
+  return apiFetch("/api/v1/unibox/sync", { method: "POST" }, token);
+}
+
+export async function fetchUniboxUnread(token: string) {
+  return apiFetch<{ unread: number }>("/api/v1/unibox/unread-count", {}, token);
+}

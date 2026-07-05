@@ -926,6 +926,12 @@ const checkedDraftCount = campaignLeads.filter(
                 Replies · {threads.length}
               </p>
               <div className="flex items-center gap-3">
+                <a
+                  href={`/unibox?campaign_id=${campaign.id}`}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Open in Unibox
+                </a>
                 <button
                   type="button"
                   disabled={syncingReplies || refreshingReplies}

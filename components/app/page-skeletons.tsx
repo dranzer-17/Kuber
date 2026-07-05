@@ -88,6 +88,7 @@ export function SettingsSkeleton() {
 export function RouteSkeleton({ href }: { href: string }) {
   if (href.startsWith("/settings")) return <SettingsSkeleton />;
   if (href.startsWith("/campaigns")) return <CampaignsSkeleton />;
+  if (href.startsWith("/unibox")) return <CampaignsSkeleton />;
   if (href.startsWith("/leads")) return <LeadsSkeleton />;
   return <DashboardSkeleton />;
 }

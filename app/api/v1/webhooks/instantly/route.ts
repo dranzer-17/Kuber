@@ -3,6 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
+import { getInstantlyEmail } from "@/lib/services/instantly";
+import { ingestInstantlyEmail } from "@/lib/services/unibox";
 
 const CRM_BY_EVENT: Record<string, string | undefined> = {
   reply_received:    "replied",
@@ -207,9 +209,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 8) On a real prospect reply, classify + draft an AI reply (async, fire-and-forget).
-  // Only genuine replies trigger AI drafting. auto_reply_received (OOO autoresponders)
-  // still get logged in reply_events (above) but we deliberately do NOT draft a response.
+  // Unibox mirror ingest (non-fatal)
+  if ((p.event_type === "reply_received" || p.event_type === "email_sent") && p.email_id) {
+    try {
+      const email = await getInstantlyEmail(p.email_id);
+      const { data: ev } = await db.from("reply_events").select("id").eq("event_uid", eventUid).maybeSingle();
+      await ingestInstantlyEmail(db, email, {
+        replyEventId: ev?.id,
+        masterCampaignId: masterId,
+        campaignLeadId: campaignLeadId ?? undefined,
+      });
+    } catch (e) {
+      console.error("Unibox ingest failed:", (e as Error).message);
+    }
+  }
+
   if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET) {
     // we need the reply_events row id we just upserted
     const { data: ev } = await db

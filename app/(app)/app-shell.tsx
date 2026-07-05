@@ -5,14 +5,14 @@ import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
-  LayoutDashboard, Users, Megaphone, Settings,
+  LayoutDashboard, Users, Megaphone, Settings, Inbox,
   RefreshCw, Trash2, AlertTriangle,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { APP_LOGO_INITIAL, APP_NAME } from "@/lib/branding";
 import { isCampaignEligible, type Lead } from "@/lib/leads";
-import { deleteLead, fetchLogo } from "@/lib/api-client";
+import { deleteLead, fetchLogo, fetchUniboxUnread } from "@/lib/api-client";
 import { RouteSkeleton } from "@/components/app/page-skeletons";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +73,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard",  icon: LayoutDashboard, exact: true  },
   { href: "/leads",     label: "Leads",      icon: Users,           exact: false },
   { href: "/campaigns", label: "Campaigns",  icon: Megaphone,       exact: false },
+  { href: "/unibox",    label: "Unibox",     icon: Inbox,           exact: false },
   { href: "/settings",  label: "Settings",   icon: Settings,        exact: false },
 ] as const;
 
@@ -88,6 +89,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   } = useApp();
 
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [uniboxUnread, setUniboxUnread] = useState<number | null>(null);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
@@ -100,6 +102,16 @@ function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!session) return;
     fetchLogo(session.access_token).then((r) => setLogoUrl(r.logo_url)).catch(() => setLogoUrl(null));
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const load = () => {
+      fetchUniboxUnread(session.access_token).then((r) => setUniboxUnread(r.unread)).catch(() => {});
+    };
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
   }, [session]);
 
   if (loadingSession) {
@@ -156,7 +168,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
           <nav className="flex-1 p-2 space-y-0.5">
             {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
               const active = isActive(href, exact);
-              const badge = label === "Leads" ? leadsTotal : null;
+              const badge = label === "Leads" ? leadsTotal : label === "Unibox" ? uniboxUnread : null;
               return (
                 <Link
                   key={href}
@@ -176,7 +188,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className="size-4 shrink-0" />
                   <span className="flex-1 text-left">{label}</span>
-                  {badge !== null && (
+                  {badge !== null && badge > 0 && (
                     <span className="text-[10px] font-semibold bg-secondary rounded-full px-1.5 py-0.5 tabular-nums">
                       {badge}
                     </span>
