@@ -332,8 +332,14 @@ export async function restoreDraftVersion(token: string, draftId: string): Promi
 export async function sendApprovedLeads(
   token: string,
   campaignId: string,
+  opts?: { campaignLeadIds?: string[] },
 ): Promise<{ buckets: number; sent: number }> {
-  return apiFetch(`/api/v1/campaigns/${campaignId}/send`, { method: "POST" }, token);
+  return apiFetch(`/api/v1/campaigns/${campaignId}/send`, {
+    method: "POST",
+    ...(opts?.campaignLeadIds?.length
+      ? { body: JSON.stringify({ campaign_lead_ids: opts.campaignLeadIds }) }
+      : {}),
+  }, token);
 }
 
 export async function setCampaignLeadStatus(

@@ -134,6 +134,7 @@ export const CAMPAIGN_STATUS_HELP: Record<string, string> = {
 export const CAMPAIGN_ACTION_HELP = {
   certifyAll: "Approves all draft-ready emails at once without selecting each one.",
   certifySelected: "Approves only the leads you checked in the sidebar.",
+  sendSelected: "Sends only the certified leads you checked in the sidebar.",
   sendCertified: "Sends only certified leads to Instantly. Uncertified drafts are not sent.",
   humanInLoop: "When ON, every draft must be certified by you before it can be sent.",
   enrichmentColumn: "Green = enriched and campaign-ready. Red = failed. Yellow = in progress.",

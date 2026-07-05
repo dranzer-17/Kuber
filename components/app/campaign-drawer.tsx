@@ -399,10 +399,12 @@ export function CampaignDetail({
     .map((k) => DAY_SHORT[k] ?? k);
 
   const draftReadyLeads = campaignLeads.filter((cl) => cl.email_drafts?.status === "draft");
-  const certifiedCount = campaignLeads.filter((cl) =>
+  const sendReadyLeads = campaignLeads.filter((cl) =>
     (cl.email_drafts?.status === "approved" || cl.crm_status === "approved") &&
+    cl.email_drafts?.status !== "sent" &&
     cl.crm_status !== "sent"
-  ).length;
+  );
+  const certifiedCount = sendReadyLeads.length;
   const isGenerating = progress ? (progress.generating + progress.pending) > 0 : false;
   const progressPct = progress && progress.total > 0
     ? Math.round(((progress.draft + progress.approved + progress.sent + progress.failed) / progress.total) * 100)
@@ -444,6 +446,12 @@ export function CampaignDetail({
 
   function toggleAllDraftReady() {
     const ids = draftReadyLeads.map((cl) => cl.id);
+    const allChecked = ids.every((id) => checkedIds.has(id));
+    setCheckedIds(allChecked ? new Set() : new Set(ids));
+  }
+
+  function toggleAllSendReady() {
+    const ids = sendReadyLeads.map((cl) => cl.id);
     const allChecked = ids.every((id) => checkedIds.has(id));
     setCheckedIds(allChecked ? new Set() : new Set(ids));
   }
@@ -639,33 +647,54 @@ export function CampaignDetail({
     }
   }
 
-  async function handleSend() {
+  async function handleSend(campaignLeadIds?: string[]) {
     setSending(true);
     setError("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const toSend = campaignLeads.filter((cl) =>
-        (cl.crm_status === "approved" || cl.email_drafts?.status === "approved") &&
-        cl.crm_status !== "sent"
-      ).length;
+      const toSend = campaignLeadIds?.length ?? sendReadyLeads.length;
       if (toSend === 0) {
         setError("No certified leads to send.");
         return;
       }
-      const result = await sendApprovedLeads(session.access_token, campaign.id);
+      const result = await sendApprovedLeads(
+        session.access_token,
+        campaign.id,
+        campaignLeadIds?.length ? { campaignLeadIds } : undefined,
+      );
       if (result.sent === 0) {
         toast.error("No leads were sent to Instantly. Check timezone and sending window settings.");
         return;
       }
       toast.success(`${result.sent} lead${result.sent !== 1 ? "s" : ""} sent to Instantly`);
-      await loadData();                                   // refresh this view's leads/drafts
-      await loadCampaigns(session.access_token);          // refresh header stats + status badge
+      setCheckedIds(new Set());
+      await loadData();
+      await loadCampaigns(session.access_token);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setSending(false);
     }
+  }
+
+  async function handlePrimaryAction() {
+    if (checkedDraftCount > 0) {
+      await handleBulkCertify(
+        campaignLeads
+          .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
+          .map((cl) => cl.email_drafts!.id),
+      );
+      return;
+    }
+    if (checkedSendCount > 0) {
+      const ids = campaignLeads
+        .filter((cl) => checkedIds.has(cl.id) && sendReadyLeads.some((s) => s.id === cl.id))
+        .map((cl) => cl.id);
+      await handleSend(ids);
+      return;
+    }
+    await handleSend();
   }
 
   async function handleRetryOne(draftId: string, campaignLeadId: string) {
@@ -718,6 +747,30 @@ export function CampaignDetail({
 const checkedDraftCount = campaignLeads.filter(
     (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
   ).length;
+
+  const checkedSendCount = campaignLeads.filter(
+    (cl) => checkedIds.has(cl.id) && sendReadyLeads.some((s) => s.id === cl.id)
+  ).length;
+
+  const primaryAction =
+    checkedDraftCount > 0
+      ? { mode: "certify" as const, count: checkedDraftCount }
+      : checkedSendCount > 0
+        ? { mode: "send" as const, count: checkedSendCount }
+        : certifiedCount > 0
+          ? { mode: "sendAll" as const, count: certifiedCount }
+          : { mode: "none" as const, count: 0 };
+
+  const primaryBusy = primaryAction.mode === "certify" ? certifying : sending;
+  const primaryLabel = primaryBusy
+    ? primaryAction.mode === "certify" ? "Certifying…" : "Sending…"
+    : primaryAction.mode === "certify"
+      ? `Certify (${primaryAction.count})`
+      : primaryAction.mode === "send"
+        ? `Send (${primaryAction.count})`
+        : primaryAction.mode === "sendAll"
+          ? `Send all (${primaryAction.count})`
+          : "Send all (0)";
 
   const sortedCampaignLeads = sortCampaignLeads(campaignLeads, leadsSort);
 
@@ -783,11 +836,11 @@ const checkedDraftCount = campaignLeads.filter(
             )}
             <Button
               size="sm"
-              disabled={sending || certifiedCount === 0}
-              onClick={handleSend}
+              disabled={primaryBusy || certifying || sending || primaryAction.mode === "none"}
+              onClick={() => void handlePrimaryAction()}
             >
-              {sending ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
-              {sending ? "Sending…" : `Send (${certifiedCount})`}
+              {primaryBusy ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+              {primaryLabel}
             </Button>
           </div>
         </div>
@@ -1150,7 +1203,7 @@ const checkedDraftCount = campaignLeads.filter(
             <div className="flex items-center justify-between mb-1 gap-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground inline-flex items-center gap-1">
                 Leads ({campaign.leads})
-                <InfoTip text="Select leads to certify individually, or use Certify all in the header." />
+                <InfoTip text="Check leads below, then use the header button to Certify (n) or Send (n)." />
               </p>
               <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
                 <button
@@ -1176,7 +1229,7 @@ const checkedDraftCount = campaignLeads.filter(
               </div>
             </div>
             {(draftReadyLeads.length > 0 || checkedDraftCount > 0) && (
-              <div className="flex items-center justify-between gap-2 mt-2">
+              <div className="mt-2">
                 <button
                   type="button"
                   onClick={toggleAllDraftReady}
@@ -1184,25 +1237,17 @@ const checkedDraftCount = campaignLeads.filter(
                 >
                   {draftReadyLeads.every((cl) => checkedIds.has(cl.id)) ? "Deselect all" : "Select all draft-ready"}
                 </button>
-                {checkedDraftCount > 0 && (
-                  <div className="flex items-center gap-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] gap-1 px-2"
-                      disabled={certifying}
-                      onClick={() => handleBulkCertify(
-                        campaignLeads
-                          .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
-                          .map((cl) => cl.email_drafts!.id),
-                      )}
-                    >
-                      {certifying ? <Loader2 className="size-2.5 animate-spin" /> : <Check className="size-2.5" />}
-                      Certify selected ({checkedDraftCount})
-                    </Button>
-                    <InfoTip text={CAMPAIGN_ACTION_HELP.certifySelected} />
-                  </div>
-                )}
+              </div>
+            )}
+            {(sendReadyLeads.length > 0 || checkedSendCount > 0) && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={toggleAllSendReady}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  {sendReadyLeads.every((cl) => checkedIds.has(cl.id)) ? "Deselect all" : "Select all send-ready"}
+                </button>
               </div>
             )}
           </div>
@@ -1228,7 +1273,9 @@ const checkedDraftCount = campaignLeads.filter(
                 const lead = cl.leads;
                 const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
                 const isSelected = selectedId === cl.id;
-                const canCheck = ["draft", "approved"].includes(cl.email_drafts?.status ?? "");
+                const canCertifyCheck = cl.email_drafts?.status === "draft";
+                const canSendCheck = sendReadyLeads.some((s) => s.id === cl.id);
+                const showCheckbox = canCertifyCheck || canSendCheck;
                 return (
                   <button
                     key={cl.id}
@@ -1241,7 +1288,7 @@ const checkedDraftCount = campaignLeads.filter(
                         : "hover:bg-secondary/60 border border-transparent",
                     )}
                   >
-                    {canCheck ? (
+                    {showCheckbox ? (
                       <span
                         role="checkbox"
                         aria-checked={checkedIds.has(cl.id)}

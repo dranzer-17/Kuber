@@ -71,3 +71,7 @@ export const CampaignStepInput = z.object({
 export const CampaignStepsSchema = z.object({
   steps: z.array(CampaignStepInput).min(1).max(10),
 });
+
+export const SendCampaignSchema = z.object({
+  campaign_lead_ids: z.array(z.string().uuid()).min(1).optional(),
+});

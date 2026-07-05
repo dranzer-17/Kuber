@@ -69,6 +69,7 @@ function pickTimezone(
 export async function sendCampaign(
   campaignId: string,
   _actorId: string,
+  opts?: { campaignLeadIds?: string[] },
 ): Promise<{ buckets: number; sent: number }> {
   const db = createAdminClient();
 
@@ -117,7 +118,7 @@ export async function sendCampaign(
   }
 
   // 4) Eligible leads (certified, not yet pushed to Instantly)
-  const { data: cls } = await db
+  let eligibleQuery = db
     .from("campaign_leads")
     .select(`
       id, lead_id,
@@ -126,6 +127,17 @@ export async function sendCampaign(
     .eq("campaign_id", campaignId)
     .in("crm_status", ["approved", "draft_ready"])
     .is("instantly_campaign_id", null);
+
+  if (opts?.campaignLeadIds?.length) {
+    eligibleQuery = eligibleQuery.in("id", opts.campaignLeadIds);
+  }
+
+  const { data: cls, error: clsErr } = await eligibleQuery;
+  if (clsErr) throw new Error(clsErr.message);
+
+  if (opts?.campaignLeadIds?.length && (cls?.length ?? 0) !== opts.campaignLeadIds.length) {
+    throw new Error("Some selected leads are not eligible to send");
+  }
 
   let totalSent = 0;
   const bucketErrors: string[] = [];
