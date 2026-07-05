@@ -442,6 +442,30 @@ export async function fetchCampaignSteps(token: string, campaignId: string): Pro
   return apiFetch(`/api/v1/campaigns/${campaignId}/steps`, {}, token);
 }
 
+export async function saveCampaignSteps(
+  token: string,
+  campaignId: string,
+  steps: Array<{ step_order: number; delay: number; delay_unit: string; subject: string; body: string }>,
+): Promise<{ updated: boolean }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/steps`, { method: "PUT", body: JSON.stringify({ steps }) }, token);
+}
+
+export async function patchCampaignConfig(
+  token: string,
+  campaignId: string,
+  patch: {
+    daily_limit?: number;
+    window_from?: string;
+    window_to?: string;
+    send_days?: Record<string, boolean>;
+    schedule_timezone?: string;
+    sender_name?: string;
+    ai_prompt_context?: string;
+  },
+): Promise<{ updated: boolean; sync_errors: string[] }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/config`, { method: "PATCH", body: JSON.stringify(patch) }, token);
+}
+
 // Isolated from the step-1 draft's regenerate/generation pipeline entirely —
 // see app/api/v1/campaigns/[id]/followup-regenerate/route.ts.
 export async function regenerateFollowUpDraft(
@@ -623,6 +647,9 @@ export interface CampaignReplyThread {
 
 export async function fetchCampaignReplies(token: string, campaignId: string): Promise<{ threads: CampaignReplyThread[] }> {
   return apiFetch(`/api/v1/campaigns/${campaignId}/replies`, {}, token);
+}
+export async function syncCampaignReplies(token: string, campaignId: string): Promise<{ found: number; backfilled: number }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/sync-replies`, { method: "POST" }, token);
 }
 export async function editReplyDraft(token: string, id: string, subject: string, body: string): Promise<ReplyDraft> {
   return apiFetch(`/api/v1/reply-drafts/${id}`, { method: "PATCH", body: JSON.stringify({ action: "edit", subject, body }) }, token);

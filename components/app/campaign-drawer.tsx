@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
-  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, Check, Save, History, ChevronDown, ChevronRight,
+  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ChevronRight,
   List, LayoutGrid, BarChart2, Paperclip, FileText, Upload, Reply, Flame, Snowflake, ThumbsDown, X,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -34,6 +34,7 @@ import {
   uploadCampaignLeadAttachment,
   removeCampaignLeadAttachment,
   fetchCampaignReplies,
+  syncCampaignReplies,
   editReplyDraft,
   approveReplyDraft,
   rejectReplyDraft,
@@ -51,6 +52,7 @@ import { supabase } from "@/lib/supabase";
 import { useApp } from "@/lib/app-context";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import { CampaignConfigModal } from "@/components/app/campaign-config-modal";
+import { EditCampaignModal } from "@/components/app/edit-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { Lead } from "@/lib/leads";
 import {
@@ -74,10 +76,13 @@ function stripQuotedLines(text: string | null | undefined): string | null {
     const trimmed = lines[i].trimStart();
     if (trimmed.startsWith(">")) break;
     if (trimmed === "--" || trimmed === "\u2014") break;
-    // "On ... wrote:" on one line
+    // "On ... wrote:" spanning 1-3 lines (Gmail wraps address across lines)
     if (/^On .+wrote:\s*$/.test(trimmed)) break;
-    // "On ..." with "wrote:" on the very next line (Gmail multiline attribution)
-    if (/^On .+/.test(trimmed) && /^wrote:\s*$/.test(lines[i + 1]?.trimStart() ?? "")) break;
+    if (/^On .+/.test(trimmed)) {
+      const next1 = lines[i + 1]?.trimStart() ?? "";
+      const next2 = lines[i + 2]?.trimStart() ?? "";
+      if (/wrote:\s*$/.test(next1) || /wrote:\s*$/.test(next2)) break;
+    }
     kept.push(lines[i]);
   }
   return kept.join("\n").trim() || null;
@@ -196,6 +201,7 @@ export function CampaignDetail({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [leadsSort, setLeadsSort] = useState<CampaignLeadsSort>("az");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
@@ -221,6 +227,7 @@ export function CampaignDetail({
   const [threads, setThreads] = useState<CampaignReplyThread[]>([]);
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
   const [refreshingReplies, setRefreshingReplies] = useState(false);
+  const [syncingReplies, setSyncingReplies] = useState(false);
 
   const [systemPromptUpdatedAt, setSystemPromptUpdatedAt] = useState<string | null>(null);
 
@@ -449,9 +456,10 @@ export function CampaignDetail({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       await editDraft(session.access_token, selected.email_drafts.id, editSubject, editBody);
+      toast.success("Draft saved");
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -465,9 +473,10 @@ export function CampaignDetail({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       await reopenDraft(session.access_token, selected.email_drafts.id);
+      toast.success("Draft reopened for editing");
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setCertifying(false);
     }
@@ -481,9 +490,10 @@ export function CampaignDetail({
       if (!session) return;
       await restoreDraftVersion(session.access_token, versionId);
       setPreviewVersionId(null);
+      toast.success("Version restored");
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setRestoring(false);
     }
@@ -504,9 +514,10 @@ export function CampaignDetail({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       await approveDraft(session.access_token, draftId);
+      toast.success("Draft certified");
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setCertifying(false);
     }
@@ -523,10 +534,11 @@ export function CampaignDetail({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       await bulkApproveDrafts(session.access_token, ids);
+      toast.success(`${ids.length} draft${ids.length !== 1 ? "s" : ""} certified`);
       setCheckedIds(new Set());
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setCertifying(false);
     }
@@ -548,9 +560,10 @@ export function CampaignDetail({
       setEditSubject(draft.subject ?? "");
       setEditBody(draft.body ?? "");
       setRegenQuery("");
+      toast.success("Draft regenerated");
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setRegenerating(false);
     }
@@ -617,9 +630,10 @@ export function CampaignDetail({
       setFollowUpBody(draft.body ?? "");
       setFollowUpRegenOpen(false);
       setFollowUpRegenQuery("");
+      toast.success("Follow-up regenerated");
       await reloadSiblings();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setRegeneratingFollowUp(false);
     }
@@ -641,13 +655,14 @@ export function CampaignDetail({
       }
       const result = await sendApprovedLeads(session.access_token, campaign.id);
       if (result.sent === 0) {
-        setError("No leads were sent to Instantly. Check timezone and sending window settings.");
+        toast.error("No leads were sent to Instantly. Check timezone and sending window settings.");
         return;
       }
+      toast.success(`${result.sent} lead${result.sent !== 1 ? "s" : ""} sent to Instantly`);
       await loadData();                                   // refresh this view's leads/drafts
       await loadCampaigns(session.access_token);          // refresh header stats + status badge
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setSending(false);
     }
@@ -660,9 +675,10 @@ export function CampaignDetail({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       await regenerateDraft(session.access_token, draftId);
+      toast.success("Draft queued for regeneration");
       await loadData();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setRetryingId(null);
     }
@@ -676,9 +692,11 @@ export function CampaignDetail({
       if (!session) return;
       const { retried, errors } = await retryFailedDrafts(session.access_token, campaign.id);
       if (errors.length > 0 && retried === 0) {
-        setError(errors[0] ?? "Retry failed");
+        toast.error(errors[0] ?? "Retry failed");
       } else if (errors.length > 0) {
-        setError(`Retried ${retried}; ${errors.length} still failed`);
+        toast.warning(`Retried ${retried}; ${errors.length} still failed`);
+      } else {
+        toast.success(`${retried} draft${retried !== 1 ? "s" : ""} queued for regeneration`);
       }
       await loadData();
       if (viewTab === "report") {
@@ -697,7 +715,7 @@ export function CampaignDetail({
     setViewTab("list");
   }
 
-  const checkedDraftCount = campaignLeads.filter(
+const checkedDraftCount = campaignLeads.filter(
     (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
   ).length;
 
@@ -731,7 +749,7 @@ export function CampaignDetail({
     { id: "list" as const, label: "Leads", icon: List, count: campaign.leads },
     { id: "kanban" as const, label: "Kanban", icon: LayoutGrid },
     { id: "report" as const, label: "Report", icon: BarChart2 },
-    { id: "replies" as const, label: "Replies", icon: Reply, count: threads.length, alertCount: pendingReplyDrafts },
+    { id: "replies" as const, label: "Replies", icon: Reply, count: threads.length || undefined },
   ];
 
   return (
@@ -816,7 +834,7 @@ export function CampaignDetail({
             </div>
 
             <div className="ml-auto flex shrink-0 items-center rounded-lg border border-border bg-card p-0.5">
-            {campaignTabs.map(({ id, label, icon: Icon, count, alertCount }) => {
+            {campaignTabs.map(({ id, label, icon: Icon, count }) => {
               return (
               <button
                 key={id}
@@ -839,11 +857,6 @@ export function CampaignDetail({
                     {count}
                   </span>
                 )}
-                {typeof alertCount === "number" && alertCount > 0 && alertCount !== count && (
-                  <span className="min-w-4 rounded bg-amber-500/20 px-1 text-[10px] font-bold tabular-nums text-amber-500">
-                    {alertCount}
-                  </span>
-                )}
               </button>
               );
             })}
@@ -859,18 +872,46 @@ export function CampaignDetail({
               <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 Replies · {threads.length}
               </p>
-              <button
-                type="button"
-                disabled={refreshingReplies}
-                onClick={async () => {
-                  setRefreshingReplies(true);
-                  try { await loadReplies(); } finally { setRefreshingReplies(false); }
-                }}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                <RotateCcw className={cn("size-3.5", refreshingReplies && "animate-spin")} />
-                Refresh
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={syncingReplies || refreshingReplies}
+                  onClick={async () => {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) return;
+                    setSyncingReplies(true);
+                    try {
+                      const result = await syncCampaignReplies(session.access_token, campaign.id);
+                      if (result.backfilled > 0) {
+                        toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
+                        await loadReplies();
+                      } else {
+                        toast.success("Already up to date");
+                      }
+                    } catch (e) {
+                      toast.error((e as Error).message);
+                    } finally {
+                      setSyncingReplies(false);
+                    }
+                  }}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("size-3.5", syncingReplies && "animate-spin")} />
+                  Sync
+                </button>
+                <button
+                  type="button"
+                  disabled={refreshingReplies}
+                  onClick={async () => {
+                    setRefreshingReplies(true);
+                    try { await loadReplies(); } finally { setRefreshingReplies(false); }
+                  }}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw className={cn("size-3.5", refreshingReplies && "animate-spin")} />
+                  Refresh
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto divide-y divide-border/40">
               {threads.length === 0 ? (
@@ -1258,17 +1299,31 @@ export function CampaignDetail({
                 )}
               </div>
 
-              <div className="relative shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setConfigOpen((o) => !o)}
+                  onClick={() => setEditOpen(true)}
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
                 >
-                  <Gauge className="size-3.5" />
-                  Config
+                  Edit
                 </button>
-                {configOpen && <CampaignConfigModal campaign={campaign} open={configOpen} />}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setConfigOpen((o) => !o)}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  >
+                    <Gauge className="size-3.5" />
+                    Config
+                  </button>
+                  {configOpen && <CampaignConfigModal campaign={campaign} open={configOpen} />}
+                </div>
               </div>
+              <EditCampaignModal
+                open={editOpen}
+                onClose={() => setEditOpen(false)}
+                campaign={campaign}
+              />
             </div>
           </div>
         </div>
@@ -1488,7 +1543,7 @@ export function CampaignDetail({
                         once generated, it becomes an editable mini-panel (Save persists + approves
                         in one action — no separate Certify step here — plus Regenerate). Never a
                         "version" of the draft above — a different email later in the sequence. */}
-                    {selected.email_drafts?.status === "sent" && campaignSteps.some((s) => s.step_order > 1) && (
+                    {selected.email_drafts?.status === "sent" && selected.crm_status !== "replied" && campaignSteps.some((s) => s.step_order > 1) && (
                       <div className="space-y-2">
                         <div className="flex items-center gap-1.5">
                           <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">

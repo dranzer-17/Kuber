@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import {
   editReplyDraft,
   approveReplyDraft,
@@ -27,19 +28,14 @@ const DRAFT_STATUS_STYLE: Record<string, string> = {
 interface ReplyDraftBoxProps {
   draft: ReplyDraft;
   token: string;
-  onChanged: () => void; // parent re-fetches threads after any successful action
+  onChanged: () => void;
 }
 
 export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
-  // Local state, initialized directly from the draft prop. Because this component is
-  // rendered with key={draft.id} by the parent, React fully remounts it (and re-runs
-  // these useState initializers) whenever the draft changes — e.g. after Regenerate
-  // creates a new draft row with a new id. No manual sync effect needed.
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [body, setBody] = useState(draft.body ?? "");
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenQuery, setRegenQuery] = useState("");
   const [regenerating, setRegenerating] = useState(false);
@@ -61,6 +57,78 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
     );
   }
 
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await editReplyDraft(token, draft.id, subject, body);
+      toast.success("Reply draft saved");
+      onChanged();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleApprove() {
+    setSaving(true);
+    try {
+      await approveReplyDraft(token, draft.id, subject, body);
+      toast.success("Reply approved");
+      onChanged();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSend() {
+    setSending(true);
+    try {
+      await sendReplyDraft(token, draft.id);
+      toast.success("Reply sent");
+      onChanged();
+    } catch (e) {
+      const msg = (e as Error).message ?? "Failed to send reply";
+      toast.error(
+        msg.includes("MISSING_THREAD")
+          ? "Cannot send: the original email reference has expired in Instantly. Regenerate the reply to get a fresh thread reference."
+          : msg,
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleReject() {
+    setSaving(true);
+    try {
+      await rejectReplyDraft(token, draft.id);
+      toast.success("Reply rejected");
+      onChanged();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRegenerate() {
+    setRegenerating(true);
+    try {
+      await regenerateReplyDraft(token, draft.id, regenQuery || undefined);
+      setRegenOpen(false);
+      setRegenQuery("");
+      toast.success("Reply regenerated");
+      onChanged();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
   return (
     <div className="w-full rounded-2xl rounded-br-sm border border-primary/20 bg-primary/5 overflow-hidden">
       <div className="px-4 py-2.5 border-b border-primary/10 flex items-center justify-between">
@@ -77,51 +145,26 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
       <div className="p-4 space-y-3">
         <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm font-medium bg-background/60" />
         <RichTextEditor value={body} onChange={setBody} minHeight={180} />
-        {error && <p className="text-sm text-destructive">{error}</p>}
 
         <div className="flex items-center gap-2 flex-wrap">
-          <Button size="sm" variant="outline" disabled={saving} onClick={async () => {
-            setSaving(true); setError("");
-            try { await editReplyDraft(token, draft.id, subject, body); onChanged(); }
-            catch (e) { setError((e as Error).message); }
-            finally { setSaving(false); }
-          }} className="gap-1.5">
+          <Button size="sm" variant="outline" disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
             {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Save
           </Button>
 
           {draft.status !== "approved" && (
-            <Button size="sm" disabled={saving} onClick={async () => {
-              setSaving(true); setError("");
-              try { await approveReplyDraft(token, draft.id, subject, body); onChanged(); }
-              catch (e) { setError((e as Error).message); }
-              finally { setSaving(false); }
-            }} className="gap-1.5">
+            <Button size="sm" disabled={saving} onClick={() => void handleApprove()} className="gap-1.5">
               <Check className="size-3.5" /> Approve
             </Button>
           )}
 
           {draft.status === "approved" && (
-            <Button size="sm" disabled={sending} onClick={async () => {
-              setSending(true); setError("");
-              try { await sendReplyDraft(token, draft.id); onChanged(); }
-              catch (e) {
-                const msg = (e as Error).message ?? "Failed to send reply";
-                setError(msg.includes("MISSING_THREAD")
-                  ? "Cannot send: the original email reference has expired in Instantly. Regenerate the reply to get a fresh thread reference."
-                  : msg);
-              } finally { setSending(false); }
-            }} className="gap-1.5 bg-green-600 hover:bg-green-700">
+            <Button size="sm" disabled={sending} onClick={() => void handleSend()} className="gap-1.5 bg-green-600 hover:bg-green-700">
               {sending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Send reply
             </Button>
           )}
 
           {draft.status === "draft" && (
-            <Button size="sm" variant="outline" disabled={saving} onClick={async () => {
-              setSaving(true); setError("");
-              try { await rejectReplyDraft(token, draft.id); onChanged(); }
-              catch (e) { setError((e as Error).message); }
-              finally { setSaving(false); }
-            }} className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
+            <Button size="sm" variant="outline" disabled={saving} onClick={() => void handleReject()} className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
               <ThumbsDown className="size-3.5" /> Reject
             </Button>
           )}
@@ -134,28 +177,9 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
               onChange={(e) => setRegenQuery(e.target.value)}
               placeholder="Optional instruction, e.g. Make it shorter…"
               className="text-sm"
-              onKeyDown={(e) => {
-                if (e.key !== "Enter") return;
-                (async () => {
-                  setRegenerating(true); setError("");
-                  try {
-                    await regenerateReplyDraft(token, draft.id, regenQuery || undefined);
-                    setRegenOpen(false); setRegenQuery("");
-                    onChanged();
-                  } catch (e) { setError((e as Error).message); }
-                  finally { setRegenerating(false); }
-                })();
-              }}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleRegenerate(); }}
             />
-            <Button size="sm" disabled={regenerating} onClick={async () => {
-              setRegenerating(true); setError("");
-              try {
-                await regenerateReplyDraft(token, draft.id, regenQuery || undefined);
-                setRegenOpen(false); setRegenQuery("");
-                onChanged();
-              } catch (e) { setError((e as Error).message); }
-              finally { setRegenerating(false); }
-            }} className="gap-1.5">
+            <Button size="sm" disabled={regenerating} onClick={() => void handleRegenerate()} className="gap-1.5">
               {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />} Regenerate
             </Button>
           </div>

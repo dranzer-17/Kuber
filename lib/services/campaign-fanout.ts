@@ -230,13 +230,25 @@ export async function sendCampaign(
         // Build per-lead payloads (carry leadId so we can flip their drafts to 'sent')
         const payloads = b.rows.map((r) => {
           const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads;
+          const firstName = (lead?.first_name ?? "").trim() || "there";
+          const vars = buildCustomVariables(draftsForLead(r.lead_id), campaign.sender_name);
+          // Seed generic fallback for any follow-up step that has no personalized draft yet.
+          // The step template body is {{customBodyN}} — without a value here Instantly would
+          // render a blank email. When the user later saves a personalized draft, syncApprovedDraftToInstantly
+          // overwrites this variable on the lead.
+          for (let si = 1; si < steps.length; si++) {
+            const key = `customBody${si + 1}`;
+            if (!vars[key]) {
+              vars[key] = `Hi ${firstName},<br><br>Just following up on my previous note — would love your thoughts.<br><br>Best regards`;
+            }
+          }
           return {
             campaignLeadId: r.id,
             leadId: r.lead_id,
             email: lead!.email!,
             firstName: lead!.first_name ?? "",
             lastName: lead!.last_name ?? "",
-            customVariables: buildCustomVariables(draftsForLead(r.lead_id), campaign.sender_name),
+            customVariables: vars,
           };
         });
 

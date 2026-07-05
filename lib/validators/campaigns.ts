@@ -39,7 +39,8 @@ export const PatchCampaignSchema = z.object({
   send_days: z.record(z.string(), z.boolean()).optional(),
   schedule_timezone: z.string().optional(),
   daily_limit: z.number().int().min(1).max(500).optional(),
-
+  sender_name: z.string().optional(),
+  ai_prompt_context: z.string().optional(),
 });
 
 export const AddLeadsToCampaignSchema = z.object({

@@ -5,6 +5,7 @@ let cachedPrompt: { value: string; expiresAt: number } | null = null;
 let cachedClient: { value: ClientContext; expiresAt: number } | null = null;
 let cachedProductOfferings: { value: ProductOffering[]; expiresAt: number } | null = null;
 let cachedReplyPrompts: { value: ReplyPrompts; expiresAt: number } | null = null;
+let cachedCompanyContext: { value: string; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
 
 export type ClientContext = {
@@ -204,10 +205,26 @@ export async function getReplyPrompts(db: SupabaseClient): Promise<ReplyPrompts>
   return value;
 }
 
+export async function getCompanyContext(db: SupabaseClient): Promise<string> {
+  const now = Date.now();
+  if (cachedCompanyContext && cachedCompanyContext.expiresAt > now) return cachedCompanyContext.value;
+
+  const { data } = await db
+    .from("settings")
+    .select("value")
+    .eq("key", "company_context")
+    .maybeSingle();
+
+  const value = data?.value?.trim() ?? "";
+  cachedCompanyContext = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
+}
+
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;
   cachedProductOfferings = null;
   cachedReplyPrompts = null;
+  cachedCompanyContext = null;
 }
 

@@ -1,8 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
-import { KUBER_CONTEXT } from "@/lib/constants";
-import { resolveCampaignSignature, getReplyPrompts } from "@/lib/services/settings";
+import { resolveCampaignSignature, getReplyPrompts, getProductOfferings, getCompanyContext } from "@/lib/services/settings";
 import { listThreadEmails, type InstantlyEmail } from "@/lib/services/instantly";
 
 const ReplySchema = z.object({ subject: z.string(), body: z.string() });
@@ -65,9 +64,17 @@ export async function generateReplyDraft(
       }
     }
 
-    const { drafter } = await getReplyPrompts(db);
+    const [{ drafter }, products, companyContext] = await Promise.all([
+      getReplyPrompts(db),
+      getProductOfferings(db),
+      getCompanyContext(db),
+    ]);
+    const productBlock = products.length > 0
+      ? "\n\nPRODUCT REFERENCE LIBRARY:\n\n" + products.map((p) => `${p.name.toUpperCase()}\n${p.description}`).join("\n\n")
+      : "";
     const system = drafter
-      + `\n\nKuber context: ${KUBER_CONTEXT}`
+      + (companyContext ? `\n\nCompany context: ${companyContext}` : "")
+      + productBlock
       + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "");
 
     const user = [

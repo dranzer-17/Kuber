@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { FollowUpSaveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
+import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/instantly";
 
 // Save for a follow-up: persist + approve + sync to Instantly in one atomic
 // action, entirely separate from /drafts/[id] PATCH (whose "edit" action
@@ -74,6 +75,55 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const instantlySync = await syncApprovedDraftToInstantly(db, cl.lead_id, id);
+
+  // If the sequence step template in Instantly still has the old hardcoded body
+  // (not the {{customBodyN}} variable placeholder), patch it now so future sends
+  // actually use the per-lead variable. This covers campaigns created before the
+  // {{customBodyN}} template was introduced.
+  const expectedTemplate = `{{customBody${parsed.data.step_number}}}`;
+  const { data: stepRow } = await db
+    .from("campaign_steps")
+    .select("body")
+    .eq("campaign_id", id)
+    .eq("step_order", parsed.data.step_number)
+    .maybeSingle();
+
+  if (stepRow && stepRow.body !== expectedTemplate) {
+    // Update our DB first
+    await db
+      .from("campaign_steps")
+      .update({ body: expectedTemplate, updated_at: now })
+      .eq("campaign_id", id)
+      .eq("step_order", parsed.data.step_number);
+
+    // Re-fetch all steps and patch every Instantly sub-campaign
+    const { data: allSteps } = await db
+      .from("campaign_steps")
+      .select("step_order, subject, body, delay, delay_unit")
+      .eq("campaign_id", id)
+      .order("step_order");
+
+    const steps: InstantlyStep[] = (allSteps ?? []).map((s) => ({
+      subject: s.subject ?? "",
+      body: s.step_order === parsed.data.step_number ? expectedTemplate : (s.body ?? ""),
+      delay: s.delay ?? 0,
+      delayUnit: (s.delay_unit ?? "days") as InstantlyStep["delayUnit"],
+    }));
+
+    const { data: subs } = await db
+      .from("instantly_campaigns")
+      .select("instantly_campaign_id")
+      .eq("campaign_id", id)
+      .not("instantly_campaign_id", "is", null);
+
+    for (const sub of subs ?? []) {
+      if (sub.instantly_campaign_id) {
+        await patchInstantlySequences(sub.instantly_campaign_id, steps).catch((e) => {
+          console.error("followup-save: patchInstantlySequences failed:", e);
+        });
+      }
+    }
+  }
 
   const { data: finalDraft } = await db
     .from("email_drafts")

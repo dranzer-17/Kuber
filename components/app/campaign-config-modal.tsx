@@ -7,9 +7,7 @@ import { fetchCampaignSteps } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { formatOrdinal } from "@/lib/utils";
 
-// Read-only anchored popover (same style as the "i" InfoTip buttons) — this
-// just displays everything Create Campaign asks for, for reference. Nothing
-// here saves; use Send/Certify/the follow-up tabs to actually change behavior.
+// Read-only anchored popover — just displays everything for reference.
 export function CampaignConfigModal({ campaign, open }: { campaign: Campaign; open: boolean }) {
   const [steps, setSteps] = useState<Array<{ step_order: number; delay: number; delay_unit: string }>>([]);
   const [stepsLoading, setStepsLoading] = useState(true);

@@ -133,6 +133,36 @@ export async function createInstantlyCampaign(opts: {
   return data.id;
 }
 
+export async function patchInstantlyCampaignConfig(
+  instantlyCampaignId: string,
+  opts: {
+    dailyLimit?: number;
+    windowFrom?: string;
+    windowTo?: string;
+    timezone?: string;
+    sendDays?: Record<string, boolean>;
+  },
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (opts.dailyLimit !== undefined) body.daily_limit = opts.dailyLimit;
+  if (opts.windowFrom !== undefined || opts.windowTo !== undefined || opts.timezone !== undefined || opts.sendDays !== undefined) {
+    body.campaign_schedule = {
+      schedules: [{
+        name: "Default",
+        timing: { from: opts.windowFrom, to: opts.windowTo },
+        days: opts.sendDays ? toInstantlyDays(opts.sendDays) : undefined,
+        timezone: opts.timezone ? toInstantlyTimezone(opts.timezone) : undefined,
+      }],
+    };
+  }
+  const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}`, {
+    method: "PATCH",
+    headers: h(),
+    body: JSON.stringify(body),
+  });
+  await iJson<unknown>(res);
+}
+
 export async function patchInstantlySequences(
   instantlyCampaignId: string,
   steps: InstantlyStep[],
@@ -279,6 +309,49 @@ export async function listThreadEmails(threadId: string): Promise<InstantlyEmail
   const res = await fetch(url, { headers: h() });
   const data = await iJson<{ items?: InstantlyEmail[] }>(res);
   return data.items ?? [];
+}
+
+// List received emails (prospect replies) for a specific Instantly sub-campaign.
+// The Instantly API ignores ue_type as a query filter, so we filter client-side.
+// ue_type=2 = received from prospect. Excludes auto-replies.
+export async function listInstantlyCampaignReplies(
+  instantlyCampaignId: string,
+  limit = 100,
+): Promise<InstantlyEmail[]> {
+  const params = new URLSearchParams({
+    campaign_id: instantlyCampaignId,
+    limit: String(limit),
+    sort_order: "desc",
+  });
+  const res = await fetch(`${BASE}/emails?${params.toString()}`, { headers: h() });
+  const data = await iJson<{ items?: InstantlyEmail[] }>(res);
+  return (data.items ?? []).filter((e) => e.ue_type === 2 && !e.is_auto_reply);
+}
+
+// Fetch a lead's interest/status from Instantly by campaign + email.
+// Uses POST /api/v2/leads/list (the GET /leads endpoint does not support filtering).
+export async function getInstantlyLeadStatus(
+  instantlyCampaignId: string,
+  leadEmail: string,
+): Promise<{ interest_value?: number | null; pl_value?: number | null } | null> {
+  try {
+    const res = await fetch(`${BASE}/leads/list`, {
+      method: "POST",
+      headers: h(),
+      body: JSON.stringify({
+        campaign_id: instantlyCampaignId,
+        search: leadEmail,
+        limit: 5,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null) as { items?: Array<{ email?: string; interest_value?: number | null; pl_value?: number | null }> } | null;
+    // search is fuzzy, pin to exact email match
+    const match = (data?.items ?? []).find((l) => l.email?.toLowerCase() === leadEmail.toLowerCase());
+    return match ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Sending a threaded reply ─────────────────────────────────────────────────

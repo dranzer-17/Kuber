@@ -5,8 +5,8 @@ import {
   getDraftSystemPrompt,
   getEmailSignature,
   getProductOfferings,
+  getCompanyContext,
 } from "@/lib/services/settings";
-import { KUBER_CONTEXT } from "@/lib/constants";
 
 const DraftSchema = z.object({
   subject: z.string(),
@@ -83,6 +83,7 @@ function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProdu
 function buildUserPrompt(
   lead: LeadRow,
   campaignName: string,
+  companyContext: string,
   customInstruction?: string,
   aiPromptContext?: string,
   stepNumber = 1,
@@ -100,8 +101,8 @@ function buildUserPrompt(
     `What they do: ${org?.company_description ?? "Not available"}`,
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
-    `Kuber context: ${KUBER_CONTEXT}`,
   ];
+  if (companyContext) lines.push(`Company context: ${companyContext}`);
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
   if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
   return lines.join("\n");
@@ -164,9 +165,10 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const [baseSystemPrompt, products] = await Promise.all([
+    const [baseSystemPrompt, products, companyContext] = await Promise.all([
       getDraftSystemPrompt(db),
       getProductOfferings(db),
+      getCompanyContext(db),
     ]);
     const systemPrompt =
       baseSystemPrompt
@@ -175,7 +177,7 @@ export async function generateOneDraft(
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
-      user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext, stepNumber),
+      user: buildUserPrompt(lead, campaignName, companyContext, customInstruction, aiPromptContext, stepNumber),
     });
 
     const validated = DraftSchema.safeParse(json);

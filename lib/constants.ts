@@ -297,9 +297,6 @@ export const COUNTRY_TO_TIMEZONE: Record<string, string> = {
   Singapore: "Asia/Singapore",
 };
 
-export const KUBER_CONTEXT = `Kuber Polyplast is an ISO 9001:2015 certified Indian masterbatch and specialty-compound manufacturer. 30 years of experience, ~18,000 MT/year production capacity, exporting to 50+ countries. Product range: Black Masterbatch (carbon black up to 55%, UV/weather resistant, <50 PPM grit, PE/PP/PET/Nylon/PMMA/HIPS), White Masterbatch (TiO₂ up to 85%, food-contact compliant, milk pouch and packaging grade), Colour Masterbatch (RoHS & REACH compliant, pearlescent/marble/fluorescent effects, heavy-metal-free, 0.2% micro-granule dosage option), Additive Masterbatch (UV stabiliser, anti-block, slip, anti-static, flame retardant, anti-fog, oxo-biodegradable, silicon for HDPE pipes), Filler Masterbatch. Compatible across PE, PP, PET, PS, ABS, EVA, PBT, PC, Nylon, PMMA, GPPS, HIPS. Processing: film extrusion, injection/blow/roto molding, sheet extrusion.`;
-
-export type KuberProductMatch = "black" | "white" | "color" | "additive" | "none";
 
 export type CampaignStepInput = {
   step_order: number;
@@ -343,7 +340,7 @@ export function buildDefaultCampaignSteps(followupSteps: FollowupStepInput[]): C
       delay: next?.delay ?? 0,
       delay_unit: next?.delay_unit ?? "days",
       subject: "", // empty = Instantly threads it as a reply in the same conversation
-      body: "Hi {{firstName}},\n\nJust following up on my previous note — would love your thoughts.\n\nBest regards",
+      body: `{{customBody${idx + 2}}}`, // per-lead variable; seeded with generic fallback at lead-push time
     });
   });
 
