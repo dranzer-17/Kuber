@@ -96,7 +96,15 @@ export async function generateReplyDraft(
       .replace(/\n+\s*(best regards|regards|sincerely|thanks|thank you|cheers)[.,]?\s*$/i, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-    if (signatureBlock) body = `${body}\n\n${signatureBlock}`;
+    if (signatureBlock) {
+      const isHtml = /^\s*<(p|div|ul|ol|h[1-6])\b/i.test(body);
+      if (isHtml) {
+        const sigHtml = signatureBlock.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+        body = `${body}<br><br>${sigHtml}`;
+      } else {
+        body = `${body}\n\n${signatureBlock}`;
+      }
+    }
 
     await db.from("reply_drafts").update({
       subject: parsed.data.subject,
