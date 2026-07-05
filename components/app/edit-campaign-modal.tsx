@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, Loader2, Clock, Globe, Calendar, Gauge } from "lucide-react";
+import { ChevronRight, Loader2, Clock, Globe, Calendar, Gauge, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,10 +67,13 @@ export function EditCampaignForm({
   campaign,
   onSaved,
   className,
+  variant = "modal",
 }: {
   campaign: Campaign;
   onSaved?: (patch: Partial<Campaign>) => void;
   className?: string;
+  /** "modal" = boxed card (used in the narrow edit dialog). "page" = borderless, spread across full width (used in the campaign drawer). */
+  variant?: "modal" | "page";
 }) {
   const [senderName, setSenderName] = useState(campaign.senderName ?? "");
   const [aiPromptContext, setAiPromptContext] = useState(campaign.aiPromptContext ?? "");
@@ -149,6 +152,224 @@ export function EditCampaignForm({
     }
   }
 
+  const isPage = variant === "page";
+
+  const followupList = stepsLoading ? (
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Loader2 className="size-3 animate-spin" /> Loading steps…
+    </div>
+  ) : (
+    <div
+      className={cn(
+        isPage
+          ? "grid w-full grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+          : "space-y-2",
+      )}
+    >
+      {followupSteps.map((step, idx) => (
+        <div
+          key={idx}
+          className={cn("flex items-center shrink-0", isPage ? "gap-2" : "w-full")}
+        >
+          {isPage ? (
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary tabular-nums">
+              {idx + 1}
+            </span>
+          ) : null}
+          <div
+            className={cn(
+              "flex items-center rounded-lg border border-border bg-background",
+              isPage ? "w-fit gap-1 px-2 py-1.5" : "w-full flex-1 min-w-0 gap-1.5 px-3 py-2",
+            )}
+          >
+            <span className={cn("text-xs text-muted-foreground shrink-0 whitespace-nowrap", !isPage && "w-24")}>
+              Follow-up {idx + 1} after
+            </span>
+            <Input
+              type="number"
+              min={1}
+              max={365}
+              value={step.delay}
+              onChange={(e) => {
+                const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
+                setFollowupSteps((prev) => prev.map((s, i) => i === idx ? { ...s, delay: v } : s));
+              }}
+              className="h-7 w-9 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+            />
+            <Select
+              value={step.delay_unit}
+              onValueChange={(unit) =>
+                setFollowupSteps((prev) =>
+                  prev.map((s, i) => i === idx ? { ...s, delay_unit: unit as FollowupStep["delay_unit"] } : s),
+                )
+              }
+            >
+              <SelectTrigger className="h-7 w-fit min-w-0 justify-start gap-0 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="min-w-24">
+                <SelectItem value="minutes">minutes</SelectItem>
+                <SelectItem value="hours">hours</SelectItem>
+                <SelectItem value="days">days</SelectItem>
+              </SelectContent>
+            </Select>
+            {!isPage && <div className="flex-1" />}
+            {followupSteps.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setFollowupSteps((prev) => prev.filter((_, i) => i !== idx))}
+                className="shrink-0 rounded p-0.5 text-destructive hover:bg-destructive/10 transition-colors"
+                aria-label={`Remove follow-up ${idx + 1}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+      {followupSteps.length < 8 && (
+        <button
+          type="button"
+          onClick={() =>
+            setFollowupSteps((prev) => {
+              const last = prev[prev.length - 1];
+              return [...prev, { delay: (last?.delay ?? 0) + 30, delay_unit: last?.delay_unit ?? "days" }];
+            })
+          }
+          className={cn(
+            "text-xs font-medium text-primary hover:underline",
+            isPage && "col-span-full",
+          )}
+        >
+          + Add follow-up step
+        </button>
+      )}
+    </div>
+  );
+
+  if (isPage) {
+    const fieldBlock = "space-y-2";
+
+    return (
+      <div className={cn("space-y-8", className)}>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-10 gap-y-8">
+          {/* Col 1: identity & AI */}
+          <div className="space-y-8">
+            <div className={fieldBlock}>
+              <Label className="text-sm font-medium">Sender name</Label>
+              <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
+              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+            </div>
+
+            <div className={fieldBlock}>
+              <Label className="text-sm font-medium">Additional context for AI</Label>
+              <p className="text-xs text-muted-foreground">Extra guidance the AI uses when writing emails</p>
+              <Textarea
+                value={aiPromptContext}
+                onChange={(e) => setAiPromptContext(e.target.value)}
+                placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
+                rows={5}
+              />
+            </div>
+          </div>
+
+          {/* Col 2: volume & window */}
+          <div className="space-y-8">
+            <div className={fieldBlock}>
+              <div className="flex items-center gap-2">
+                <Gauge className="size-4 text-muted-foreground shrink-0" />
+                <Label className="text-sm font-medium">Daily limit</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">Emails sent per day across all senders</p>
+              <Input
+                type="number"
+                min={1}
+                max={500}
+                value={dailyLimit}
+                onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
+                className="h-9 w-24 text-center"
+              />
+            </div>
+
+            <div className={fieldBlock}>
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-muted-foreground shrink-0" />
+                <Label className="text-sm font-medium">Sending window</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">Local time of recipient</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <TimeSelect value={windowFrom} onChange={setWindowFrom} />
+                <span className="text-xs text-muted-foreground">to</span>
+                <TimeSelect value={windowTo} onChange={setWindowTo} />
+              </div>
+            </div>
+          </div>
+
+          {/* Col 3: timezone & days */}
+          <div className="space-y-8 md:col-span-2 xl:col-span-1">
+            <div className={fieldBlock}>
+              <div className="flex items-center gap-2">
+                <Globe className="size-4 text-muted-foreground shrink-0" />
+                <Label className="text-sm font-medium">Timezone</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">Applies to the sending window</p>
+              <Select value={timezone} onValueChange={setTimezone}>
+                <SelectTrigger className="h-9 w-full bg-transparent">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="start" className="min-w-45">
+                  {TIMEZONES.map((tz) => (
+                    <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className={fieldBlock}>
+              <div className="flex items-center gap-2">
+                <Calendar className="size-4 text-muted-foreground shrink-0" />
+                <Label className="text-sm font-medium">Send days</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">Days emails will be sent</p>
+              <div className="flex flex-wrap gap-2">
+                {DAYS.map((day) => (
+                  <DayPill
+                    key={day}
+                    day={DAY_LABELS[day]}
+                    active={sendDays[day] ?? false}
+                    onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Full width: follow-up schedule */}
+        <div className="space-y-3 pt-2 border-t border-border">
+          <div>
+            <div className="flex items-center gap-2">
+              <Clock className="size-4 text-muted-foreground shrink-0" />
+              <Label className="text-sm font-medium">Follow-up schedule</Label>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Wait time after the previous email before each follow-up sends</p>
+          </div>
+          {followupList}
+        </div>
+
+        <div className="flex justify-end">
+          <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
+            {saving ? (
+              <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
+            ) : (
+              <>Save changes <ChevronRight className="size-3.5" /></>
+            )}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("space-y-6", className)}>
       <div className="space-y-1.5">
@@ -166,158 +387,96 @@ export function EditCampaignForm({
         />
       </div>
 
-      <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden divide-y divide-border">
+      <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden">
+        <div className="grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0">
 
-            {/* Daily limit */}
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
-              <div className="flex items-center gap-2.5">
-                <Gauge className="size-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-sm font-medium leading-none">Daily limit</p>
-                  <p className="text-xs text-muted-foreground">Emails sent per day across all senders</p>
-                </div>
-              </div>
-              <Input
-                type="number"
-                min={1}
-                max={500}
-                value={dailyLimit}
-                onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                className="h-9 w-20 text-center"
-              />
-            </div>
-
-            {/* Sending window */}
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
-              <div className="flex items-center gap-2.5">
-                <Clock className="size-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-sm font-medium leading-none">Sending window</p>
-                  <p className="text-xs text-muted-foreground">Local time of recipient</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <TimeSelect value={windowFrom} onChange={setWindowFrom} />
-                <span className="text-xs text-muted-foreground">to</span>
-                <TimeSelect value={windowTo} onChange={setWindowTo} />
+          {/* Daily limit */}
+          <div className="flex flex-col gap-3 px-5 py-4 sm:border-r sm:border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <Gauge className="size-4 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-sm font-medium leading-none">Daily limit</p>
+                <p className="text-xs text-muted-foreground mt-1">Emails sent per day across all senders</p>
               </div>
             </div>
+            <Input
+              type="number"
+              min={1}
+              max={500}
+              value={dailyLimit}
+              onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
+              className="h-9 w-24 text-center"
+            />
+          </div>
 
-            {/* Timezone */}
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
-              <div className="flex items-center gap-2.5">
-                <Globe className="size-4 text-muted-foreground shrink-0" />
-                <p className="text-sm font-medium leading-none">Timezone</p>
-              </div>
-              <Select value={timezone} onValueChange={setTimezone}>
-                <SelectTrigger className="h-9 w-45 bg-transparent">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="end" className="min-w-45">
-                  {TIMEZONES.map((tz) => (
-                    <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Send days */}
-            <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2.5">
-                <Calendar className="size-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-sm font-medium leading-none">Send days</p>
-                  <p className="text-xs text-muted-foreground">Days emails will be sent</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2 sm:justify-end">
-                {DAYS.map((day) => (
-                  <DayPill
-                    key={day}
-                    day={DAY_LABELS[day]}
-                    active={sendDays[day] ?? false}
-                    onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
-                  />
-                ))}
+          {/* Sending window */}
+          <div className="flex flex-col gap-3 px-5 py-4 sm:border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <Clock className="size-4 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-sm font-medium leading-none">Sending window</p>
+                <p className="text-xs text-muted-foreground mt-1">Local time of recipient</p>
               </div>
             </div>
-
-            {/* Follow-up schedule */}
-            <div className="px-5 py-4 space-y-3">
-              <div className="flex items-center gap-2.5">
-                <Clock className="size-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-sm font-medium leading-none">Follow-up schedule</p>
-                  <p className="text-xs text-muted-foreground">Wait time after the previous email before each follow-up sends</p>
-                </div>
-              </div>
-              {stepsLoading ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-3 animate-spin" /> Loading steps…
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {followupSteps.map((step, idx) => (
-                    <div key={idx} className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
-                      <span className="text-xs text-muted-foreground shrink-0 w-24">Follow-up {idx + 1} after</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={365}
-                        value={step.delay}
-                        onChange={(e) => {
-                          const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
-                          setFollowupSteps((prev) => prev.map((s, i) => i === idx ? { ...s, delay: v } : s));
-                        }}
-                        className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
-                      />
-                      <Select
-                        value={step.delay_unit}
-                        onValueChange={(unit) =>
-                          setFollowupSteps((prev) =>
-                            prev.map((s, i) => i === idx ? { ...s, delay_unit: unit as FollowupStep["delay_unit"] } : s),
-                          )
-                        }
-                      >
-                        <SelectTrigger className="h-7 w-fit min-w-0 justify-start gap-1 border-0 bg-transparent px-1 text-xs text-muted-foreground shadow-none">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent align="start" className="min-w-24">
-                          <SelectItem value="minutes">minutes</SelectItem>
-                          <SelectItem value="hours">hours</SelectItem>
-                          <SelectItem value="days">days</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <div className="flex-1" />
-                      {followupSteps.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setFollowupSteps((prev) => prev.filter((_, i) => i !== idx))}
-                          className="text-xs text-muted-foreground hover:text-destructive transition-colors shrink-0"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {followupSteps.length < 8 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setFollowupSteps((prev) => {
-                          const last = prev[prev.length - 1];
-                          return [...prev, { delay: (last?.delay ?? 0) + 30, delay_unit: last?.delay_unit ?? "days" }];
-                        })
-                      }
-                      className="text-xs font-medium text-primary hover:underline"
-                    >
-                      + Add follow-up step
-                    </button>
-                  )}
-                </div>
-              )}
+            <div className="flex items-center gap-2">
+              <TimeSelect value={windowFrom} onChange={setWindowFrom} />
+              <span className="text-xs text-muted-foreground">to</span>
+              <TimeSelect value={windowTo} onChange={setWindowTo} />
             </div>
           </div>
+
+          {/* Timezone */}
+          <div className="flex flex-col gap-3 px-5 py-4 sm:border-r border-border">
+            <div className="flex items-center gap-2.5">
+              <Globe className="size-4 text-muted-foreground shrink-0" />
+              <p className="text-sm font-medium leading-none">Timezone</p>
+            </div>
+            <Select value={timezone} onValueChange={setTimezone}>
+              <SelectTrigger className="h-9 w-full sm:w-45 bg-transparent">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="start" className="min-w-45">
+                {TIMEZONES.map((tz) => (
+                  <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Send days */}
+          <div className="flex flex-col gap-3 px-5 py-4">
+            <div className="flex items-center gap-2.5">
+              <Calendar className="size-4 text-muted-foreground shrink-0" />
+              <div>
+                <p className="text-sm font-medium leading-none">Send days</p>
+                <p className="text-xs text-muted-foreground mt-1">Days emails will be sent</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {DAYS.map((day) => (
+                <DayPill
+                  key={day}
+                  day={DAY_LABELS[day]}
+                  active={sendDays[day] ?? false}
+                  onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Follow-up schedule */}
+        <div className="border-t border-border px-5 py-4 space-y-3">
+          <div className="flex items-center gap-2.5">
+            <Clock className="size-4 text-muted-foreground shrink-0" />
+            <div>
+              <p className="text-sm font-medium leading-none">Follow-up schedule</p>
+              <p className="text-xs text-muted-foreground">Wait time after the previous email before each follow-up sends</p>
+            </div>
+          </div>
+          {followupList}
+        </div>
+      </div>
 
       <div className="flex justify-end">
         <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">

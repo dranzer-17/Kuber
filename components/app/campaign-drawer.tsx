@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
-  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ChevronRight, ArrowLeft,
-  List, LayoutGrid, BarChart2, Paperclip, FileText, Upload, Reply, Flame, Snowflake, ThumbsDown, X, Search, Layers,
+  Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
+  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -28,8 +28,6 @@ import {
   reopenDraft,
   fetchCampaignReport,
   retryFailedDrafts,
-  uploadCampaignLeadAttachment,
-  removeCampaignLeadAttachment,
   fetchCampaignReplies,
   syncCampaignReplies,
   editReplyDraft,
@@ -52,6 +50,7 @@ import type { Campaign } from "@/components/app/create-campaign-modal";
 import { CampaignConfigModal } from "@/components/app/campaign-config-modal";
 import { EditCampaignForm } from "@/components/app/edit-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Lead } from "@/lib/leads";
 import {
   DRAFT_BADGE_SHORT,
@@ -222,7 +221,7 @@ function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
   return "—";
 }
 
-type CampaignViewTab = "analytics" | "leads" | "kanban" | "drafts" | "sequences" | "options" | "replies";
+type CampaignViewTab = "analytics" | "leads" | "kanban" | "outbox" | "sequences" | "options";
 
 function DraftStatusBadge({
   label,
@@ -280,12 +279,10 @@ export function CampaignDetail({
   const [reportLoading, setReportLoading] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryingAll, setRetryingAll] = useState(false);
-  const leadFileRef = useRef<HTMLInputElement>(null);
-  const [uploadingLeadAtt, setUploadingLeadAtt] = useState(false);
   const [drawerLead, setDrawerLead] = useState<Lead | null>(null);
   const [drawerOrgId, setDrawerOrgId] = useState<string | null>(null);
   const [threads, setThreads] = useState<CampaignReplyThread[]>([]);
-  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null);
+  const [outboxFilter, setOutboxFilter] = useState<"all" | "action" | "certified" | "sent" | "replied">("all");
   const [syncingReplies, setSyncingReplies] = useState(false);
   const syncHitTimesRef = useRef<number[]>([]);
   const SYNC_RATE_LIMIT = 10;
@@ -435,27 +432,6 @@ export function CampaignDetail({
   }, [progress, loadData]);
 
   const selected = campaignLeads.find((cl) => cl.id === selectedId) ?? null;
-  const leadPanelOpen = selectedId !== null;
-  const [panelLead, setPanelLead] = useState<CampaignLead | null>(null);
-  useEffect(() => {
-    if (selected) setPanelLead(selected);
-  }, [selected]);
-  const panel = panelLead ?? selected;
-
-  useEffect(() => {
-    if (!leadPanelOpen) return;
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") setSelectedId(null);
-    }
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [leadPanelOpen]);
-
-  const promptChangedSinceDraft = !!(
-    systemPromptUpdatedAt &&
-    selected?.email_drafts?.created_at &&
-    new Date(systemPromptUpdatedAt) > new Date(selected.email_drafts.created_at)
-  );
 
   useEffect(() => {
     if (selected?.email_drafts) {
@@ -832,16 +808,7 @@ export function CampaignDetail({
     return name.includes(q) || email.includes(q);
   });
 
-  const selectedLead = panel?.leads;
-  const selectedName = selectedLead
-    ? [selectedLead.first_name, selectedLead.last_name].filter(Boolean).join(" ") || "Unknown"
-    : "";
-
-  const selectedThread = threads.find((t) => t.thread_key === selectedThreadKey) ?? null;
-  const selectedThreadLead = selectedThread?.lead;
-  const selectedReplyName = selectedThreadLead
-    ? [selectedThreadLead.first_name, selectedThreadLead.last_name].filter(Boolean).join(" ") || selectedThread?.lead_email || "Unknown"
-    : selectedThread?.lead_email || "Unknown";
+  const selectedThread = threads.find((t) => t.campaign_lead_id === selectedId) ?? null;
 
   const TEMP_BADGE: Record<string, { label: string; cls: string; icon?: React.ReactNode }> = {
     hot:          { label: "HOT",          cls: "bg-red-500/15 text-red-400 border-red-500/30",     icon: <Flame className="size-3" /> },
@@ -857,13 +824,57 @@ export function CampaignDetail({
     0
   );
 
+  const outboxActionableCount = draftReadyLeads.length + threads.filter((t) => {
+    const latestMsg = t.messages[t.messages.length - 1];
+    return latestMsg?.reply_drafts[latestMsg.reply_drafts.length - 1]?.status === "draft";
+  }).length;
+
+  const outboxThreadByLeadId = new Map(threads.filter((t) => t.campaign_lead_id).map((t) => [t.campaign_lead_id as string, t]));
+
+  const OUTBOX_FILTERS: Array<{ id: typeof outboxFilter; label: string }> = [
+    { id: "all",       label: "All" },
+    { id: "action",    label: "Needs action" },
+    { id: "certified", label: "Certified" },
+    { id: "sent",      label: "Sent" },
+    { id: "replied",   label: "Replied" },
+  ];
+
+  const outboxFilteredLeads = sortCampaignLeads(campaignLeads.filter((cl) => {
+    if (outboxFilter === "all") return true;
+    const thread = outboxThreadByLeadId.get(cl.id) ?? null;
+    if (outboxFilter === "replied") return !!thread;
+    if (outboxFilter === "action") {
+      if (thread) {
+        const latestMsg = thread.messages[thread.messages.length - 1];
+        return latestMsg?.reply_drafts[latestMsg.reply_drafts.length - 1]?.status === "draft";
+      }
+      return cl.email_drafts?.status === "draft";
+    }
+    if (outboxFilter === "certified") return cl.email_drafts?.status === "approved";
+    if (outboxFilter === "sent") return cl.email_drafts?.status === "sent";
+    return true;
+  }), leadsSort);
+
+  const outboxSelectableFilteredLeads = outboxFilteredLeads.filter((cl) => {
+    if (outboxThreadByLeadId.get(cl.id)) return false;
+    return (cl.email_drafts?.status ?? "none") !== "sent";
+  });
+
+  const outboxCheckedCount = outboxSelectableFilteredLeads.filter((cl) => checkedIds.has(cl.id)).length;
+  const outboxCheckedDraftIds = outboxSelectableFilteredLeads
+    .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
+    .map((cl) => cl.email_drafts!.id);
+  const outboxFilteredDraftIds = outboxFilteredLeads
+    .filter((cl) => !outboxThreadByLeadId.get(cl.id) && cl.email_drafts?.status === "draft")
+    .map((cl) => cl.email_drafts!.id);
+  const outboxCertifyDraftIds = outboxCheckedDraftIds.length > 0 ? outboxCheckedDraftIds : outboxFilteredDraftIds;
+
   const campaignTabs: Array<{ id: CampaignViewTab; label: string; icon?: React.ComponentType<{ className?: string }>; count?: number }> = [
     { id: "analytics", label: "Analytics", icon: BarChart2 },
     { id: "leads",     label: "Leads",     icon: List,        count: campaign.leads },
-    { id: "drafts",    label: "Drafts",    icon: FileText },
+    { id: "outbox",    label: "Outbox",    icon: Send,        count: outboxActionableCount || undefined },
     { id: "sequences", label: "Sequences", icon: Layers },
     { id: "options",   label: "Options",   icon: Gauge },
-    { id: "replies",   label: "Replies",   icon: Reply,       count: threads.length || undefined },
   ];
 
   // Computed for sequences tab (follow-up steps only)
@@ -1123,9 +1134,8 @@ export function CampaignDetail({
         </div>
       )}
 
-      {/* ── Leads (full-width table + LeadDrawer-style panel) ─────────────── */}
+      {/* ── Leads ─────────────────────────────────────────────────────────── */}
       {viewTab === "leads" && (
-        <>
         <div className="flex flex-col flex-1 min-h-0">
           {/* Header row */}
           <div className="px-6 py-3 border-b border-border shrink-0 flex items-center gap-3 flex-wrap bg-background">
@@ -1185,31 +1195,32 @@ export function CampaignDetail({
           </div>
 
           {/* Table */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto bg-secondary/20 px-6 py-4">
               {loading ? (
-                <div className="p-4 space-y-2 animate-pulse">
+                <div className="rounded-xl border border-border bg-card shadow-sm p-4 space-y-2 animate-pulse">
                   {Array.from({ length: 8 }).map((_, i) => (
                     <div key={i} className="h-10 bg-muted rounded" />
                   ))}
                 </div>
               ) : filteredLeads.length === 0 ? (
-                <div className="py-16 text-center text-sm text-muted-foreground">
+                <div className="rounded-xl border border-border bg-card shadow-sm py-16 text-center text-sm text-muted-foreground">
                   {leadsSearch ? "No leads match your search." : "No leads yet."}
                 </div>
               ) : (
+                <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
                 <table className="w-full text-sm border-collapse">
-                  <thead className="sticky top-0 bg-background z-10">
+                  <thead className="sticky top-0 z-10 bg-secondary/60 backdrop-blur-sm">
                     <tr className="border-b border-border">
                       <th className="w-10 px-3 py-2.5 text-left" />
-                      <th className="w-10 px-2 py-2.5 text-left text-xs text-muted-foreground font-medium">#</th>
-                      <th className="px-3 py-2.5 text-left text-xs text-muted-foreground font-medium">NAME</th>
-                      <th className="px-3 py-2.5 text-left text-xs text-muted-foreground font-medium">EMAIL</th>
-                      <th className="px-3 py-2.5 text-left text-xs text-muted-foreground font-medium">JOB TITLE</th>
-                      <th className="px-3 py-2.5 text-left text-xs text-muted-foreground font-medium">STATUS</th>
-                      <th className="px-3 py-2.5 text-left text-xs text-muted-foreground font-medium">COMPANY</th>
+                      <th className="w-10 px-2 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">#</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Name</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Email</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Job Title</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Status</th>
+                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Company</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-border">
                     {filteredLeads.map((cl, index) => {
                       const lead = cl.leads;
                       const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
@@ -1222,8 +1233,8 @@ export function CampaignDetail({
                           key={cl.id}
                           onClick={() => setSelectedId(isSelected ? null : cl.id)}
                           className={cn(
-                            "border-b border-border/40 cursor-pointer transition-colors",
-                            isSelected ? "bg-primary/10" : "hover:bg-muted/40",
+                            "cursor-pointer transition-colors",
+                            isSelected ? "bg-primary/10" : "hover:bg-secondary/40",
                           )}
                         >
                           <td className="w-10 px-3 py-3">
@@ -1233,8 +1244,8 @@ export function CampaignDetail({
                                 aria-checked={checkedIds.has(cl.id)}
                                 onClick={(e) => toggleCheck(cl.id, e)}
                                 className={cn(
-                                  "size-4 rounded border flex items-center justify-center shrink-0 transition-colors cursor-pointer",
-                                  checkedIds.has(cl.id) ? "bg-primary border-primary" : "border-border hover:border-muted-foreground",
+                                  "flex size-4 rounded items-center justify-center shrink-0 transition-colors cursor-pointer",
+                                  checkedIds.has(cl.id) ? "bg-primary ring-2 ring-primary" : "bg-transparent ring-2 ring-muted-foreground/70",
                                 )}
                               >
                                 {checkedIds.has(cl.id) && <Check className="size-2.5 text-primary-foreground" />}
@@ -1310,384 +1321,187 @@ export function CampaignDetail({
                     })}
                   </tbody>
                 </table>
+                </div>
               )}
           </div>
-
         </div>
-
-        {/* Transparent click-catcher — no dimming; drawer overlays search/tabs/table as-is */}
-        <div
-          className={cn(
-            "fixed inset-0 z-40 bg-transparent transition-opacity duration-200",
-            leadPanelOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
-          )}
-          onClick={() => setSelectedId(null)}
-          aria-hidden={!leadPanelOpen}
-        />
-
-        {/* Drawer — same as LeadDrawer */}
-        <div
-          className={cn(
-            "fixed top-0 right-0 z-50 h-full w-[520px] max-w-[95vw] bg-card border-l border-border shadow-2xl",
-            "flex flex-col overflow-hidden transition-transform duration-300 ease-in-out",
-            leadPanelOpen ? "translate-x-0" : "translate-x-full pointer-events-none",
-          )}
-        >
-            {panel && (
-              <>
-                {/* Panel header */}
-                <div className="shrink-0 border-b border-border px-6 py-3 bg-background">
-                  <div className="flex items-center justify-end mb-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedId(null)}
-                      className="text-muted-foreground hover:text-foreground p-1 rounded-md hover:bg-muted transition-colors"
-                    >
-                      <X className="size-4" />
-                    </button>
-                  </div>
-                  {/* Lead name card */}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      if (!selectedLead) return;
-                      setDrawerLead({
-                        id: panel.lead_id,
-                        firstName: selectedLead.first_name ?? "",
-                        lastName: selectedLead.last_name ?? "",
-                        email: selectedLead.email ?? "",
-                        company: "", domain: "", phone: "",
-                        jobTitle: selectedLead.title ?? "",
-                        country: selectedLead.country ?? "",
-                        status: "Enriched", score: "—", source: "Apollo",
-                        campaign: "", campaigns: [], createdAt: panel.created_at,
-                        orgId: null, enrichmentStage: null, companyDescription: null,
-                        sellsTo: null, lastError: null, hasScraped: false,
-                        importId: null, batchLabel: null, batchColor: null,
-                      });
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") e.currentTarget.click(); }}
-                    className="w-full flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-secondary/40 hover:border-primary/30 transition-all group cursor-pointer"
-                  >
-                    <Avatar name={selectedName} size="md" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-base font-bold group-hover:text-primary transition-colors">{selectedName}</span>
-                        <DraftStatusBadge
-                          label={getDisplayStatus(panel)}
-                          styleClass={getStatusStyle(panel)}
-                          helpText={
-                            panel.email_drafts?.status
-                              ? (CAMPAIGN_STATUS_HELP[panel.email_drafts.status] ?? CAMPAIGN_STATUS_HELP.none)
-                              : undefined
-                          }
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground flex-wrap">
-                        {selectedLead?.title && <span>{selectedLead.title}</span>}
-                        {selectedLead?.title && selectedLead?.country && <span>·</span>}
-                        {selectedLead?.country && <span>{selectedLead.country}</span>}
-                        {selectedLead?.email && (
-                          <>
-                            {(selectedLead.title || selectedLead.country) && <span>·</span>}
-                            <span className="font-mono">{selectedLead.email}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <ChevronRight className="size-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                  </div>
-                </div>
-
-                {/* Scrollable draft content */}
-                <div className="flex-1 overflow-y-auto px-6 py-4">
-                  <div className="space-y-4">
-                    {panel.email_drafts?.status === "generating" || regenerating ? (
-                      <div className="flex flex-col items-center py-20 gap-3 rounded-lg border border-border bg-card">
-                        <Loader2 className="size-6 text-muted-foreground animate-spin" />
-                        <p className="text-sm text-muted-foreground">Generating personalised email…</p>
-                      </div>
-                    ) : panel.email_drafts ? (
-                      <div className="space-y-4 rounded-lg border border-border bg-card p-5">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
-                          <Input
-                            value={editSubject}
-                            onChange={(e) => setEditSubject(e.target.value)}
-                            disabled={isPreviewingHistory || panel.email_drafts.status === "approved" || panel.email_drafts.status === "sent"}
-                            className="font-medium text-base"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Body</Label>
-                          <RichTextEditor
-                            value={editBody}
-                            onChange={setEditBody}
-                            disabled={isPreviewingHistory || panel.email_drafts.status === "approved" || panel.email_drafts.status === "sent"}
-                            minHeight={520}
-                          />
-                        </div>
-
-                        <div className="flex flex-wrap gap-2 pt-2">
-                          {panel.email_drafts.status === "draft" && !isPreviewingHistory && (
-                            <>
-                              <Button variant="outline" className="gap-1.5" disabled={saving} onClick={handleSaveEdit}>
-                                {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                                Save edits
-                              </Button>
-                              <Button className="gap-1.5" disabled={certifying} onClick={() => handleCertifyOne(panel.email_drafts!.id)}>
-                                {certifying ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                                Certify draft
-                              </Button>
-                            </>
-                          )}
-                          {panel.email_drafts.status === "approved" && !isPreviewingHistory && (
-                            <>
-                              <p className="text-sm text-green-400 flex items-center gap-1.5">
-                                <CheckCircle2 className="size-4" /> Certified — ready to send
-                              </p>
-                              <Button variant="outline" className="gap-1.5" disabled={certifying} onClick={handleReopen}>
-                                <RotateCcw className="size-3.5" /> Reopen for editing
-                              </Button>
-                            </>
-                          )}
-                          {["draft", "failed", "rejected"].includes(panel.email_drafts.status) && !isPreviewingHistory && (
-                            <Button variant="outline" className="gap-1.5" onClick={() => setRegenOpen((o) => !o)}>
-                              <RotateCcw className="size-3.5" /> Regenerate
-                            </Button>
-                          )}
-                          {["draft", "failed", "rejected"].includes(panel.email_drafts.status) && !isPreviewingHistory && promptChangedSinceDraft && (
-                            <Button
-                              variant="outline"
-                              className="gap-1.5 border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
-                              disabled={regenerating}
-                              onClick={async () => {
-                                setRegenerating(true); setError("");
-                                try {
-                                  const { data: { session } } = await supabase.auth.getSession();
-                                  if (!session || !panel?.email_drafts?.id) return;
-                                  const { draft } = await regenerateDraft(session.access_token, panel.email_drafts.id);
-                                  setEditSubject(draft.subject ?? "");
-                                  setEditBody(draft.body ?? "");
-                                  await loadData();
-                                } catch (e) { setError((e as Error).message); }
-                                finally { setRegenerating(false); }
-                              }}
-                            >
-                              <RotateCcw className="size-3.5" /> Regenerate using new System Prompt
-                            </Button>
-                          )}
-                          {versions.length > 1 && (
-                            <Button
-                              variant="outline"
-                              className="gap-1.5"
-                              onClick={() => setHistoryOpen((o) => !o)}
-                            >
-                              <History className="size-3.5" />
-                              Version history
-                              <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
-                            </Button>
-                          )}
-                        </div>
-
-                        {historyOpen && versions.length > 1 && (
-                          <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
-                            <div className="flex flex-wrap gap-2">
-                              {versions.map((v) => (
-                                <button
-                                  key={v.id}
-                                  type="button"
-                                  onClick={() => loadVersionPreview(v)}
-                                  className={cn(
-                                    "text-xs rounded-lg border px-2.5 py-1.5 transition-colors",
-                                    (previewVersionId === v.id || (!previewVersionId && v.id === panel.email_drafts?.id))
-                                      ? "border-primary bg-primary/10 text-primary"
-                                      : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
-                                  )}
-                                >
-                                  v{v.version} · {format(new Date(v.created_at), "MMM d")}
-                                </button>
-                              ))}
-                            </div>
-                            {isPreviewingHistory && (
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="text-xs text-amber-400">Viewing historical version (read-only)</p>
-                                <Button size="sm" variant="outline" disabled={restoring} onClick={() => handleRestoreVersion(previewVersionId!)}>
-                                  {restoring ? <Loader2 className="size-3 animate-spin" /> : "Restore this version"}
-                                </Button>
-                                <Button size="sm" variant="ghost" onClick={() => {
-                                  setPreviewVersionId(null);
-                                  setEditSubject(panel.email_drafts?.subject ?? "");
-                                  setEditBody(panel.email_drafts?.body ?? "");
-                                }}>
-                                  Back to current
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {regenOpen && (
-                          <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
-                            <Input
-                              value={regenQuery}
-                              onChange={(e) => setRegenQuery(e.target.value)}
-                              placeholder="Optional instruction, e.g. Make it shorter…"
-                              onKeyDown={(e) => e.key === "Enter" && handleRegenerate()}
-                            />
-                            <Button size="sm" onClick={handleRegenerate} disabled={regenerating} className="gap-1.5">
-                              <RotateCcw className="size-3.5" /> Regenerate
-                            </Button>
-                          </div>
-                        )}
-
-                        {/* Attachment panel */}
-                        <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
-                          <div className="flex items-center gap-2">
-                            <Paperclip className="size-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Attachment</span>
-                          </div>
-
-                          {panel.attachment?.effective ? (
-                            <div className="flex items-center justify-between rounded-lg border border-border bg-background p-2.5">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <FileText className="size-4 text-muted-foreground shrink-0" />
-                                <span className="text-sm truncate">{panel.attachment.effective.name}</span>
-                                {panel.attachment.effective.size != null && (
-                                  <span className="text-xs text-muted-foreground shrink-0">
-                                    ({panel.attachment.effective.size >= 1024 * 1024
-                                      ? (panel.attachment.effective.size / 1024 / 1024).toFixed(1) + " MB"
-                                      : Math.round(panel.attachment.effective.size / 1024) + " KB"})
-                                  </span>
-                                )}
-                                <span className={cn(
-                                  "ml-1 shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                                  panel.attachment.effective.source === "lead"
-                                    ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
-                                    : "bg-zinc-500/15 text-zinc-400 border-zinc-500/30"
-                                )}>
-                                  {panel.attachment.effective.source === "lead" ? "This lead only" : "Campaign default"}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {panel.attachment.effective.url && (
-                                  <button type="button"
-                                          onClick={() => window.open(panel.attachment!.effective!.url!, "_blank")}
-                                          className="text-xs text-blue-400 hover:text-blue-300 border border-blue-500/40 hover:border-blue-400/60 rounded-md px-2.5 py-1 transition-colors">
-                                    View
-                                  </button>
-                                )}
-                                <button type="button" onClick={() => leadFileRef.current?.click()}
-                                        className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-border/80 rounded-md px-2.5 py-1 transition-colors">
-                                  Change
-                                </button>
-                                {panel.attachment.perLead && (
-                                  <button type="button" onClick={async () => {
-                                    const { data: { session } } = await supabase.auth.getSession();
-                                    if (!session) return;
-                                    await removeCampaignLeadAttachment(session.access_token, panel.id);
-                                    void loadData();
-                                  }}
-                                  className="text-xs text-red-400 hover:text-red-300 border border-red-500/40 hover:border-red-400/60 rounded-md px-2.5 py-1 transition-colors">
-                                    Use campaign default
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">No attachment will be sent with this email.</p>
-                          )}
-
-                          <input ref={leadFileRef} type="file" className="hidden"
-                                 accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
-                                 onChange={async (e) => {
-                                   const file = e.target.files?.[0];
-                                   if (!file) return;
-                                   if (file.size > 10 * 1024 * 1024) { setError("File exceeds 10MB"); return; }
-                                   setUploadingLeadAtt(true);
-                                   try {
-                                     const { data: { session } } = await supabase.auth.getSession();
-                                     if (!session) return;
-                                     await uploadCampaignLeadAttachment(session.access_token, panel.id, file);
-                                     void loadData();
-                                   } catch (err) {
-                                     setError((err as Error).message);
-                                   } finally {
-                                     setUploadingLeadAtt(false);
-                                     if (leadFileRef.current) leadFileRef.current.value = "";
-                                   }
-                                 }} />
-                          <Button variant="outline" size="sm" disabled={uploadingLeadAtt}
-                                  onClick={() => leadFileRef.current?.click()}
-                                  className="gap-1.5">
-                            {uploadingLeadAtt ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
-                            {panel.attachment?.perLead ? "Replace file for this lead" : "Use a different file for this lead"}
-                          </Button>
-                          <p className="text-[11px] text-muted-foreground">
-                            Overrides the campaign attachment for this lead only. PDF, DOC, XLS, PNG, JPG · max 10MB.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-xl border border-border bg-card p-12 text-center">
-                        <p className="text-sm text-muted-foreground">
-                          {isGenerating ? "Draft is being generated…" : "No draft available for this lead."}
-                        </p>
-                      </div>
-                    )}
-
-                    {error && <p className="text-sm text-destructive">{error}</p>}
-                  </div>
-                </div>
-              </>
-            )}
-        </div>
-        </>
       )}
 
       {/* ── Kanban ────────────────────────────────────────────────────────── */}
 
-      {/* ── Drafts ────────────────────────────────────────────────────────── */}
-      {viewTab === "drafts" && (
+      {/* ── Outbox ────────────────────────────────────────────────────────── */}
+      {viewTab === "outbox" && (
         <div className="flex flex-1 min-h-0">
-          {/* Left: lead list */}
-          <div className="w-64 shrink-0 border-r border-border bg-card flex flex-col">
+          {/* Left: unified lead list */}
+          <div className="w-[266px] shrink-0 border-r border-border bg-card flex flex-col">
             {/* Header */}
-            <div className="px-4 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Leads · {campaignLeads.length}
-              </p>
-              {(() => {
-                const draftLeads = campaignLeads.filter((cl) => cl.email_drafts?.status === "draft");
-                const allSelected = draftLeads.length > 0 && draftLeads.every((cl) => checkedIds.has(cl.id));
-                if (draftLeads.length === 0) return null;
-                return (
+            <div className="border-b border-border shrink-0">
+              <div className="px-3 py-2 flex items-center gap-1.5 flex-wrap">
+                <Select value={outboxFilter} onValueChange={(v) => setOutboxFilter(v as typeof outboxFilter)}>
+                  <SelectTrigger className="h-7 w-auto gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OUTBOX_FILTERS.map(({ id, label }) => (
+                      <SelectItem key={id} value={id} className="text-[11px]">{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={leadsSort} onValueChange={(v) => setLeadsSort(v as CampaignLeadsSort)}>
+                  <SelectTrigger className="h-7 w-auto gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="az" className="text-[11px]">A–Z</SelectItem>
+                    <SelectItem value="newest" className="text-[11px]">Newest</SelectItem>
+                  </SelectContent>
+                </Select>
+                {outboxCertifyDraftIds.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 px-2 text-[11px]"
+                    disabled={certifying}
+                    onClick={() => void handleBulkCertify(outboxCertifyDraftIds)}
+                  >
+                    {certifying ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                    Certify ({outboxCertifyDraftIds.length})
+                  </Button>
+                )}
+              </div>
+              <div className="px-3 pb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {outboxSelectableFilteredLeads.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const selectableLeads = outboxSelectableFilteredLeads;
+                        const ids = selectableLeads.map((cl) => cl.id);
+                        const allSelected = selectableLeads.every((cl) => checkedIds.has(cl.id));
+                        if (allSelected) {
+                          setCheckedIds((prev) => {
+                            const next = new Set(prev);
+                            for (const id of ids) next.delete(id);
+                            return next;
+                          });
+                        } else {
+                          setCheckedIds((prev) => {
+                            const next = new Set(prev);
+                            for (const id of ids) next.add(id);
+                            return next;
+                          });
+                        }
+                      }}
+                      className="text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      {outboxSelectableFilteredLeads.every((cl) => checkedIds.has(cl.id))
+                        ? "Deselect all"
+                        : `Select all (${outboxSelectableFilteredLeads.length})`}
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => {
-                      if (allSelected) {
-                        setCheckedIds(new Set());
-                      } else {
-                        setCheckedIds(new Set(draftLeads.map((cl) => cl.id)));
+                    disabled={syncingReplies}
+                    title="Sync replies"
+                    onClick={async () => {
+                      const now = Date.now();
+                      syncHitTimesRef.current = syncHitTimesRef.current.filter(
+                        (t) => now - t < SYNC_RATE_WINDOW_MS,
+                      );
+                      if (syncHitTimesRef.current.length >= SYNC_RATE_LIMIT) {
+                        toast.warning("Please wait a few seconds before trying again.");
+                        return;
+                      }
+                      syncHitTimesRef.current.push(now);
+
+                      const { data: { session } } = await supabase.auth.getSession();
+                      if (!session) return;
+                      setSyncingReplies(true);
+                      try {
+                        const result = await syncCampaignReplies(session.access_token, campaign.id);
+                        await loadReplies();
+                        if (result.backfilled > 0) {
+                          toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
+                        } else {
+                          toast.success("Replies are up to date");
+                        }
+                      } catch (e) {
+                        toast.error((e as Error).message);
+                      } finally {
+                        setSyncingReplies(false);
                       }
                     }}
-                    className="text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 shrink-0"
                   >
-                    {allSelected ? "Deselect all" : "Select all"}
+                    <RefreshCw className={cn("size-3", syncingReplies && "animate-spin")} />
+                    Refresh
                   </button>
-                );
-              })()}
+                </div>
+                {outboxCheckedCount > 0 && (
+                  <span className="text-[11px] font-medium text-foreground shrink-0">
+                    {outboxCheckedCount} selected
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto divide-y divide-border/40">
-              {campaignLeads.length === 0 ? (
-                <p className="p-6 text-sm text-muted-foreground text-center">No leads yet.</p>
-              ) : campaignLeads.map((cl) => {
+              {outboxFilteredLeads.length === 0 ? (
+                <p className="p-6 text-sm text-muted-foreground text-center">
+                  {campaignLeads.length === 0 ? "No leads yet." : "No leads match this filter."}
+                </p>
+              ) : outboxFilteredLeads.map((cl) => {
                 const lead = cl.leads;
                 const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
-                const status = cl.email_drafts?.status ?? "none";
                 const isActive = selectedId === cl.id;
                 const isChecked = checkedIds.has(cl.id);
+                const thread = outboxThreadByLeadId.get(cl.id) ?? null;
+
+                if (thread) {
+                  const latestMsg = thread.messages[thread.messages.length - 1];
+                  const replyDraftStatus = latestMsg?.reply_drafts[latestMsg.reply_drafts.length - 1]?.status;
+                  const statusConfig: Record<string, { label: string; cls: string }> = {
+                    generating: { label: "Generating", cls: "bg-yellow-500/15 text-yellow-500 border-yellow-500/25" },
+                    draft:      { label: "Draft",       cls: "bg-primary/15 text-primary border-primary/25" },
+                    approved:   { label: "Certified",   cls: "bg-green-500/15 text-green-500 border-green-500/25" },
+                    sent:       { label: "Sent",        cls: "bg-muted text-muted-foreground border-border" },
+                    failed:     { label: "Failed",      cls: "bg-destructive/15 text-destructive border-destructive/25" },
+                  };
+                  const sc = replyDraftStatus ? statusConfig[replyDraftStatus] : null;
+                  return (
+                    <button
+                      key={cl.id}
+                      type="button"
+                      onClick={() => setSelectedId(cl.id)}
+                      className={cn(
+                        "w-full text-left pl-12 pr-4 py-3 transition-colors",
+                        isActive ? "bg-primary/8 border-l-2 border-l-primary" : "hover:bg-secondary/40 border-l-2 border-l-transparent",
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Avatar name={name} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className={cn("text-xs font-medium truncate", isActive ? "text-primary" : "text-foreground")}>{name}</p>
+                          <div className="mt-0.5 flex items-center gap-1 flex-wrap">
+                            <span className="inline-flex px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-blue-500/15 text-blue-600 border-blue-500/25">
+                              Reply received
+                            </span>
+                            {sc && (
+                              <span className={cn("inline-flex px-1.5 py-0.5 rounded border text-[10px] font-semibold", sc.cls)}>
+                                {sc.label}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {thread.messages.length > 1 && (
+                          <span className="text-[10px] text-muted-foreground/70 shrink-0">({thread.messages.length})</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                }
+
+                const status = cl.email_drafts?.status ?? "none";
                 const statusConfig: Record<string, { label: string; cls: string }> = {
                   generating: { label: "Generating", cls: "bg-yellow-500/15 text-yellow-500 border-yellow-500/25" },
                   draft:      { label: "Draft",       cls: "bg-primary/15 text-primary border-primary/25" },
@@ -1697,7 +1511,6 @@ export function CampaignDetail({
                   none:       { label: "No draft",    cls: "bg-muted text-muted-foreground border-border" },
                 };
                 const sc = statusConfig[status] ?? statusConfig.none;
-                const isDraft = status === "draft";
                 const showCheckbox = status !== "sent";
                 const canCheck = showCheckbox;
                 return (
@@ -1739,8 +1552,7 @@ export function CampaignDetail({
                         </span>
                       ) : null}
                     </div>
-                    <div className="flex items-center gap-2 flex-1 min-w-0 py-3 pl-3
-                     pr-3">
+                    <div className="flex items-center gap-2 flex-1 min-w-0 py-3 pl-3 pr-3">
                       <Avatar name={name} size="sm" />
                       <div className="flex-1 min-w-0">
                         <p className={cn("text-xs font-medium truncate", isActive ? "text-primary" : "text-foreground")}>{name}</p>
@@ -1755,42 +1567,56 @@ export function CampaignDetail({
             </div>
           </div>
 
-          {/* Right: draft viewer/editor */}
-          <div className="flex-1 overflow-y-auto">
+          {/* Right: unified thread view */}
+          <div className="flex-1 overflow-y-auto bg-secondary/10">
             {!selected ? (
               <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                Select a lead to view their draft
+                Select a lead to view their outbox
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto px-6 py-6 space-y-4">
+              <div className="w-full max-w-[1400px] mx-auto p-6 space-y-4">
                 {/* Lead header */}
-                <div className="flex items-center gap-3 pb-2 border-b border-border">
-                  <Avatar name={[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "?"} size="sm" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "Unknown"}</p>
-                    <p className="text-xs text-muted-foreground">{selected.leads?.email}</p>
+                <div className="flex items-center justify-between gap-3 pb-2 border-b border-border">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar name={[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "?"} size="sm" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "Unknown"}</p>
+                      <p className="text-xs text-muted-foreground truncate">{selected.leads?.email}</p>
+                    </div>
                   </div>
-                  {selected.email_drafts && (
-                    <DraftStatusBadge
-                      label={getDisplayStatus(selected)}
-                      styleClass={getStatusStyle(selected)}
-                    />
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {selected.email_drafts && (
+                      <DraftStatusBadge
+                        label={getDisplayStatus(selected)}
+                        styleClass={getStatusStyle(selected)}
+                      />
+                    )}
+                    {selectedThread && (() => {
+                      const temp = selectedThread.latest_temperature ?? "neutral";
+                      const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
+                      return (
+                        <span className={cn("text-xs font-semibold uppercase px-2.5 py-1 rounded-full border inline-flex items-center gap-1", badge.cls)}>
+                          {badge.icon}{badge.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
 
+                {/* Initial email — editor while pending, bubble once sent */}
                 {selected.email_drafts?.status === "generating" || regenerating ? (
-                  <div className="flex flex-col items-center py-20 gap-3 rounded-lg border border-border bg-card">
+                  <div className="max-w-2xl mx-auto flex flex-col items-center py-20 gap-3 rounded-lg border border-border bg-card">
                     <Loader2 className="size-6 text-muted-foreground animate-spin" />
                     <p className="text-sm text-muted-foreground">Generating personalised email…</p>
                   </div>
-                ) : selected.email_drafts ? (
-                  <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+                ) : selected.email_drafts && selected.email_drafts.status !== "sent" ? (
+                  <div className="max-w-2xl mx-auto rounded-lg border border-border bg-card p-5 space-y-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
                       <Input
                         value={editSubject}
                         onChange={(e) => setEditSubject(e.target.value)}
-                        disabled={isPreviewingHistory || selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
+                        disabled={isPreviewingHistory || selected.email_drafts.status === "approved"}
                         className="font-medium"
                       />
                     </div>
@@ -1799,7 +1625,7 @@ export function CampaignDetail({
                       <RichTextEditor
                         value={editBody}
                         onChange={setEditBody}
-                        disabled={isPreviewingHistory || selected.email_drafts.status === "approved" || selected.email_drafts.status === "sent"}
+                        disabled={isPreviewingHistory || selected.email_drafts.status === "approved"}
                         minHeight={360}
                       />
                     </div>
@@ -1895,11 +1721,96 @@ export function CampaignDetail({
                       </div>
                     )}
                   </div>
+                ) : selected.email_drafts?.status === "sent" ? (
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="max-w-[85%] space-y-1 items-end flex flex-col">
+                      <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
+                        {(selectedThread?.original_email?.subject ?? selected.email_drafts.subject) && (
+                          <p className="text-xs font-semibold text-primary mb-1.5">
+                            {selectedThread?.original_email?.subject ?? selected.email_drafts.subject}
+                          </p>
+                        )}
+                        <div
+                          className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
+                          dangerouslySetInnerHTML={{ __html: selectedThread?.original_email?.body ?? selected.email_drafts.body ?? "" }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 pr-1">
+                        <CheckCircle2 className="size-3 text-green-400" />
+                        <p className="text-[10px] text-green-400">Sent</p>
+                      </div>
+                    </div>
+                    <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
+                      K
+                    </div>
+                  </div>
                 ) : (
-                  <div className="rounded-lg border border-border bg-card p-12 text-center">
+                  <div className="max-w-2xl mx-auto rounded-lg border border-border bg-card p-12 text-center">
                     <p className="text-sm text-muted-foreground">No draft available for this lead.</p>
                   </div>
                 )}
+
+                {/* Reply thread — inbound messages + our reply drafts */}
+                {selectedThread && selectedThread.messages.map((msg) => {
+                  const latestDraft = msg.reply_drafts[msg.reply_drafts.length - 1] ?? null;
+                  const replyName = [selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || selectedThread.lead_email || "Unknown";
+                  return (
+                    <div key={msg.id} className="space-y-3">
+                      {/* Inbound message — LEFT bubble */}
+                      <div className="flex items-end gap-2">
+                        <div className="size-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-muted-foreground">
+                          {replyName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="max-w-[85%] space-y-1">
+                          <div className="rounded-2xl rounded-bl-sm bg-secondary border border-border px-4 py-3">
+                            <p className="text-sm whitespace-pre-wrap leading-relaxed text-foreground">
+                              {stripQuotedLines(msg.reply_body)}
+                            </p>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground/70 pl-1">
+                            {msg.received_at ? format(new Date(msg.received_at), "MMM d, h:mm a") : ""}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* AI reply draft — RIGHT bubble, with accept/reject */}
+                      <div className="flex flex-col items-end gap-1">
+                        {!latestDraft ? (
+                          <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft generated yet.</div>
+                        ) : latestDraft.status === "generating" ? (
+                          <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
+                            <Loader2 className="size-4 animate-spin" /> Generating reply draft…
+                          </div>
+                        ) : latestDraft.status === "sent" ? (
+                          <>
+                            <div className="max-w-[85%] space-y-1 items-end flex flex-col">
+                              <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
+                                <div
+                                  className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
+                                  dangerouslySetInnerHTML={{ __html: latestDraft.body ?? "" }}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1.5 pr-1">
+                                <CheckCircle2 className="size-3 text-green-400" />
+                                <p className="text-[10px] text-green-400">Sent</p>
+                              </div>
+                            </div>
+                            <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
+                              K
+                            </div>
+                          </>
+                        ) : (
+                          <ReplyDraftBox
+                            key={latestDraft.id}
+                            draft={latestDraft}
+                            token={appSession?.access_token ?? ""}
+                            onChanged={() => void loadReplies()}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2028,233 +1939,14 @@ export function CampaignDetail({
 
       {/* ── Options ───────────────────────────────────────────────────────── */}
       {viewTab === "options" && (
-        <div className="flex-1 overflow-y-auto px-8 py-6">
-          <div className="max-w-2xl mx-auto">
-            <EditCampaignForm
-              campaign={campaign}
-              onSaved={() => {
-                if (appSession?.access_token) void loadCampaigns(appSession.access_token);
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* ── Replies ───────────────────────────────────────────────────────── */}
-      {viewTab === "replies" && (
-        <div className="flex flex-1 min-h-0">
-          {/* Left: reply list */}
-          <div className="w-72 shrink-0 border-r border-border flex flex-col">
-            <div className="px-4 py-3 border-b border-border shrink-0 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Replies · {threads.length}
-              </p>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  disabled={syncingReplies}
-                  onClick={async () => {
-                    const now = Date.now();
-                    syncHitTimesRef.current = syncHitTimesRef.current.filter(
-                      (t) => now - t < SYNC_RATE_WINDOW_MS,
-                    );
-                    if (syncHitTimesRef.current.length >= SYNC_RATE_LIMIT) {
-                      toast.warning("Please wait a few seconds before trying again.");
-                      return;
-                    }
-                    syncHitTimesRef.current.push(now);
-
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (!session) return;
-                    setSyncingReplies(true);
-                    try {
-                      const result = await syncCampaignReplies(session.access_token, campaign.id);
-                      await loadReplies();
-                      if (result.backfilled > 0) {
-                        toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
-                      } else {
-                        toast.success("Replies are up to date");
-                      }
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    } finally {
-                      setSyncingReplies(false);
-                    }
-                  }}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  <RefreshCw className={cn("size-3.5", syncingReplies && "animate-spin")} />
-                  Sync
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto divide-y divide-border/40">
-              {threads.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  No replies received yet.
-                </div>
-              ) : threads.map((t) => {
-                const lead = t.lead;
-                const latestMsg = t.messages[t.messages.length - 1];
-                const name = lead ? [lead.first_name, lead.last_name].filter(Boolean).join(" ") || t.lead_email : t.lead_email;
-                const temp = t.latest_temperature ?? "neutral";
-                const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
-                const draftStatus = latestMsg?.reply_drafts[latestMsg.reply_drafts.length - 1]?.status;
-                const isActive = selectedThreadKey === t.thread_key;
-                return (
-                  <button
-                    key={t.thread_key}
-                    type="button"
-                    onClick={() => setSelectedThreadKey(t.thread_key)}
-                    className={cn(
-                      "w-full text-left px-4 py-3.5 transition-colors",
-                      isActive ? "bg-primary/8 border-l-2 border-l-primary" : "hover:bg-secondary/40 border-l-2 border-l-transparent",
-                    )}
-                  >
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <Avatar name={name ?? ""} size="sm" />
-                      <span className="text-sm font-semibold truncate flex-1">{name}</span>
-                      {t.messages.length > 1 && (
-                        <span className="text-[10px] text-muted-foreground/70 shrink-0">({t.messages.length})</span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-2 leading-relaxed">
-                      {stripQuotedLines(latestMsg?.reply_body)}
-                    </p>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-muted-foreground/70">
-                        {t.latest_received_at ? format(new Date(t.latest_received_at), "MMM d, h:mm a") : ""}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className={cn("text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border inline-flex items-center gap-0.5", badge.cls)}>
-                          {badge.icon}{badge.label}
-                        </span>
-                        {draftStatus && (
-                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", DRAFT_STATUS_STYLE[draftStatus] ?? "")}>
-                            {draftStatus === "generating" ? "Drafting…" : draftStatus === "draft" ? "Ready" : draftStatus === "approved" ? "Approved" : draftStatus === "sent" ? "Sent ✓" : draftStatus}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right: email thread */}
-          <div className="flex-1 overflow-y-auto bg-secondary/10">
-            {!selectedThread ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Select a reply to view the thread
-              </div>
-            ) : (
-              <div className="w-full max-w-[1400px] mx-auto p-6 space-y-3">
-                {/* Thread header */}
-                <div className="flex items-center justify-between gap-3 pb-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Avatar name={selectedReplyName} size="md" />
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm truncate">{selectedReplyName}</p>
-                      <p className="text-xs text-muted-foreground truncate">{selectedThread.lead_email}</p>
-                    </div>
-                  </div>
-                  {(() => {
-                    const temp = selectedThread.latest_temperature ?? "neutral";
-                    const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
-                    return (
-                      <span className={cn("text-xs font-semibold uppercase px-2.5 py-1 rounded-full border shrink-0 inline-flex items-center gap-1", badge.cls)}>
-                        {badge.icon}{badge.label}
-                      </span>
-                    );
-                  })()}
-                </div>
-
-                {/* Original outbound email — RIGHT bubble */}
-                {selectedThread.original_email && (
-                  <div className="flex flex-col items-end gap-1">
-                    <div className="max-w-[85%] space-y-1 items-end flex flex-col">
-                      <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
-                        {selectedThread.original_email.subject && (
-                          <p className="text-xs font-semibold text-primary mb-1.5">
-                            {selectedThread.original_email.subject}
-                          </p>
-                        )}
-                        <div
-                          className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
-                          dangerouslySetInnerHTML={{ __html: selectedThread.original_email.body ?? "" }}
-                        />
-                      </div>
-                    </div>
-                    <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
-                      K
-                    </div>
-                  </div>
-                )}
-
-                {/* Each inbound message + its reply draft */}
-                {selectedThread.messages.map((msg) => {
-                  const latestDraft = msg.reply_drafts[msg.reply_drafts.length - 1] ?? null;
-                  return (
-                    <div key={msg.id} className="space-y-3">
-                      {/* Inbound message — LEFT bubble */}
-                      <div className="flex items-end gap-2">
-                        <div className="size-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-muted-foreground">
-                          {selectedReplyName.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="max-w-[85%] space-y-1">
-                          <div className="rounded-2xl rounded-bl-sm bg-secondary border border-border px-4 py-3">
-                            <p className="text-sm whitespace-pre-wrap leading-relaxed text-foreground">
-                              {stripQuotedLines(msg.reply_body)}
-                            </p>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground/70 pl-1">
-                            {msg.received_at ? format(new Date(msg.received_at), "MMM d, h:mm a") : ""}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* AI Reply draft — RIGHT bubble */}
-                      <div className="flex flex-col items-end gap-1">
-                        {!latestDraft ? (
-                          <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft generated yet.</div>
-                        ) : latestDraft.status === "generating" ? (
-                          <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
-                            <Loader2 className="size-4 animate-spin" /> Generating reply draft…
-                          </div>
-                        ) : latestDraft.status === "sent" ? (
-                          <>
-                            <div className="max-w-[85%] space-y-1 items-end flex flex-col">
-                              <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
-                                <div
-                                  className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
-                                  dangerouslySetInnerHTML={{ __html: latestDraft.body ?? "" }}
-                                />
-                              </div>
-                              <div className="flex items-center gap-1.5 pr-1">
-                                <CheckCircle2 className="size-3 text-green-400" />
-                                <p className="text-[10px] text-green-400">Sent</p>
-                              </div>
-                            </div>
-                            <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
-                              K
-                            </div>
-                          </>
-                        ) : (
-                          <ReplyDraftBox
-                            key={latestDraft.id}
-                            draft={latestDraft}
-                            token={appSession?.access_token ?? ""}
-                            onChanged={() => void loadReplies()}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        <div className="flex-1 overflow-y-auto px-8 py-8">
+          <EditCampaignForm
+            variant="page"
+            campaign={campaign}
+            onSaved={() => {
+              if (appSession?.access_token) void loadCampaigns(appSession.access_token);
+            }}
+          />
         </div>
       )}
 
