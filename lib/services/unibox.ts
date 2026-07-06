@@ -528,7 +528,7 @@ export async function getThreads(db: Db, filters: {
   const effectiveReadState: UniboxReadState | undefined =
     filters.read_state ?? (filters.unread_only ? "unread" : undefined);
 
-  let visible = effectiveReadState
+  const visible = effectiveReadState
     ? summaries.filter((t) => matchesReadState(effectiveReadState, t))
     : summaries;
 

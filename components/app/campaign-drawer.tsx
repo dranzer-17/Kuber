@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
-  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers,
+  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -36,6 +36,8 @@ import {
   sendReplyDraft,
   regenerateReplyDraft,
   saveCampaignSteps,
+  uploadCampaignLeadAttachment,
+  removeCampaignLeadAttachment,
   type CampaignReplyThread,
   type ReplyDraft,
 } from "@/lib/api-client";
@@ -527,6 +529,42 @@ export function CampaignDetail({
     const ids = sendReadyLeads.map((cl) => cl.id);
     const allChecked = ids.every((id) => checkedIds.has(id));
     setCheckedIds(allChecked ? new Set() : new Set(ids));
+  }
+
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleLeadAttachmentUpload(file: File) {
+    if (!selected) return;
+    setAttaching(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await uploadCampaignLeadAttachment(session.access_token, selected.id, file);
+      toast.success(`${file.name} set for this lead — regenerate the draft to include the download link`);
+      await loadData();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAttaching(false);
+      if (attachInputRef.current) attachInputRef.current.value = "";
+    }
+  }
+
+  async function handleLeadAttachmentRemove() {
+    if (!selected) return;
+    setAttaching(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await removeCampaignLeadAttachment(session.access_token, selected.id);
+      toast.success("Per-lead attachment removed");
+      await loadData();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAttaching(false);
+    }
   }
 
   async function handleSaveEdit() {
@@ -1657,6 +1695,57 @@ export function CampaignDetail({
                         disabled={isPreviewingHistory || selected.email_drafts.status === "approved"}
                         minHeight={360}
                       />
+                    </div>
+
+                    {/* Attachment (delivered as a hosted download link — Instantly cannot send real attachments) */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        ref={attachInputRef}
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleLeadAttachmentUpload(f); }}
+                      />
+                      {selected.attachment?.effective ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-border bg-secondary/50 text-foreground max-w-full">
+                          <Paperclip className="size-3 shrink-0" />
+                          {selected.attachment.effective.url ? (
+                            <a href={selected.attachment.effective.url} target="_blank" rel="noopener" className="truncate underline underline-offset-2 hover:text-primary">
+                              {selected.attachment.effective.name}
+                            </a>
+                          ) : (
+                            <span className="truncate">{selected.attachment.effective.name}</span>
+                          )}
+                          <span className="text-muted-foreground">
+                            ({selected.attachment.effective.source === "lead" ? "this lead" : "campaign default"} · sent as link)
+                          </span>
+                          {selected.attachment.effective.source === "lead" && (
+                            <button
+                              type="button"
+                              disabled={attaching}
+                              onClick={() => void handleLeadAttachmentRemove()}
+                              className="text-muted-foreground hover:text-red-400"
+                              title="Remove per-lead attachment"
+                            >
+                              <X className="size-3" />
+                            </button>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                          <Paperclip className="size-3" /> No attachment — the email will not mention a brochure
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={attaching}
+                        onClick={() => attachInputRef.current?.click()}
+                        className="h-6 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
+                      >
+                        {attaching ? <Loader2 className="size-3 animate-spin" /> : <Paperclip className="size-3" />}
+                        {selected.attachment?.effective ? "Replace for this lead" : "Add for this lead"}
+                      </Button>
                     </div>
 
                     {/* Action buttons */}

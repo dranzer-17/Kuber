@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, CheckCircle2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, CheckCircle2, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -13,6 +13,7 @@ import {
   rejectReplyDraft,
   sendReplyDraft,
   regenerateReplyDraft,
+  uploadCampaignAttachment,
   type ReplyDraft,
 } from "@/lib/api-client";
 import { normalizeReplyBodyHtml } from "@/lib/reply-body-html";
@@ -40,6 +41,26 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenQuery, setRegenQuery] = useState("");
   const [regenerating, setRegenerating] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Instantly's reply API has no attachment support, so files are shared as a
+  // hosted download link appended to the reply body.
+  async function handleAttachFile(file: File) {
+    setAttaching(true);
+    try {
+      const up = await uploadCampaignAttachment(token, file);
+      if (!up.attachment_url) throw new Error("Upload succeeded but no link was returned");
+      const link = `<p>📎 <a href="${up.attachment_url}" target="_blank" rel="noopener">${up.attachment_name}</a></p>`;
+      setBody((prev) => `${prev}${link}`);
+      toast.success(`${up.attachment_name} added as a download link — remember to Save`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setAttaching(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   if (draft.status === "sent") {
     return (
@@ -148,6 +169,23 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
         <RichTextEditor value={body} onChange={setBody} minHeight={180} />
 
         <div className="flex items-center gap-2 flex-wrap">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAttachFile(f); }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={attaching}
+            onClick={() => fileInputRef.current?.click()}
+            className="gap-1.5"
+            title="Insert a file as a download link (Instantly cannot send real attachments)"
+          >
+            {attaching ? <Loader2 className="size-3.5 animate-spin" /> : <Paperclip className="size-3.5" />} Attach link
+          </Button>
           <Button size="sm" variant="outline" disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
             {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Save
           </Button>

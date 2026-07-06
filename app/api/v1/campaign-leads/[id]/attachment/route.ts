@@ -36,9 +36,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .upload(path, bytes, { contentType: file.type, upsert: false });
   if (upErr) return fail(500, "UPLOAD_FAILED", upErr.message);
 
+  // 1-year signed URL — embedded as a download link in the sent email.
   const { data: signed } = await db.storage
     .from("campaign-attachments")
-    .createSignedUrl(path, 60 * 60 * 24 * 7);
+    .createSignedUrl(path, 60 * 60 * 24 * 365);
 
   const { error: updErr } = await db.from("campaign_leads").update({
     attachment_path: path,

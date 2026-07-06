@@ -35,10 +35,11 @@ export async function POST(req: NextRequest) {
     .upload(path, bytes, { contentType: file.type, upsert: false });
   if (upErr) return fail(500, "INTERNAL", upErr.message);
 
-  // Signed URL valid 7 days (regenerate at send time for long-lived campaigns)
+  // Signed URL valid 1 year — the link is embedded in sent emails (Instantly has
+  // no attachment API), so recipients must be able to open it long after send.
   const { data: signed } = await db.storage
     .from("campaign-attachments")
-    .createSignedUrl(path, 60 * 60 * 24 * 7);
+    .createSignedUrl(path, 60 * 60 * 24 * 365);
 
   return ok({
     attachment_path: path,
