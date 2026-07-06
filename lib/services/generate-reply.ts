@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
 import { resolveCampaignSignature, getReplyPrompts, getProductOfferings, getCompanyContext } from "@/lib/services/settings";
+import { appendSignatureToBody } from "@/lib/reply-body-html";
 import { listThreadEmails, type InstantlyEmail } from "@/lib/services/instantly";
 
 const ReplySchema = z.object({ subject: z.string(), body: z.string() });
@@ -97,13 +98,7 @@ export async function generateReplyDraft(
       .replace(/\n{3,}/g, "\n\n")
       .trim();
     if (signatureBlock) {
-      const isHtml = /^\s*<(p|div|ul|ol|h[1-6])\b/i.test(body);
-      if (isHtml) {
-        const sigHtml = signatureBlock.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
-        body = `${body}<br><br>${sigHtml}`;
-      } else {
-        body = `${body}\n\n${signatureBlock}`;
-      }
+      body = appendSignatureToBody(body, signatureBlock);
     }
 
     await db.from("reply_drafts").update({

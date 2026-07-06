@@ -282,20 +282,112 @@ export async function createInstantlyWebhook(opts: {
 }
 
 // ─── Reading inbound emails / threads (Unibox) ────────────────────────────────
-// GET /emails is rate-limited to 20 req/min. Use sparingly.
+// GET /emails list is rate-limited to 20 req/min. Use sparingly.
 
 export interface InstantlyEmail {
   id: string;
-  thread_id: string;
-  subject: string | null;
-  from_address_email: string | null;
-  to_address_email_list: string | null;
-  body: { text?: string | null; html?: string | null } | null;
-  ue_type: number;        // 1=sent from campaign, 2=received, 3=sent manual, 4=scheduled
-  is_auto_reply?: boolean;
+  thread_id?: string | null;
+  message_id?: string | null;
+  subject?: string | null;
+  from_address_email?: string | null;
+  to_address_email_list?: string | null;
+  cc_address_email_list?: string | null;
+  bcc_address_email_list?: string | null;
+  body?: { text?: string | null; html?: string | null } | null;
+  ue_type: number;
+  is_auto_reply?: boolean | number;
+  is_unread?: boolean | number;
+  is_focused?: boolean | number;
   campaign_id?: string | null;
-  timestamp_email?: string | null;
+  lead?: string | null;
+  lead_id?: string | null;
   eaccount?: string | null;
+  step?: string | number | null;
+  i_status?: number | null;
+  ai_interest_value?: number | null;
+  content_preview?: string | null;
+  attachment_json?: unknown;
+  timestamp_email?: string | null;
+  timestamp_created?: string | null;
+}
+
+export interface ListEmailsParams {
+  limit?: number;
+  starting_after?: string;
+  min_timestamp_created?: string;
+  max_timestamp_created?: string;
+  sort_order?: "asc" | "desc";
+  campaign_id?: string;
+  eaccount?: string;
+  search?: string;
+}
+
+export interface ListEmailsResult {
+  items: InstantlyEmail[];
+  next_starting_after?: string | null;
+}
+
+// Token bucket: max 18 GET /emails list calls per minute
+let listEmailsTimestamps: number[] = [];
+const LIST_EMAILS_MAX_PER_MIN = 18;
+
+async function throttleListEmails(): Promise<void> {
+  const now = Date.now();
+  listEmailsTimestamps = listEmailsTimestamps.filter((t) => now - t < 60_000);
+  if (listEmailsTimestamps.length >= LIST_EMAILS_MAX_PER_MIN) {
+    const waitMs = 60_000 - (now - listEmailsTimestamps[0]) + 100;
+    await new Promise((r) => setTimeout(r, waitMs));
+    listEmailsTimestamps = listEmailsTimestamps.filter((t) => Date.now() - t < 60_000);
+  }
+  listEmailsTimestamps.push(Date.now());
+}
+
+async function fetchEmailsList(url: string, retries = 2): Promise<ListEmailsResult> {
+  await throttleListEmails();
+  const res = await fetch(url, { headers: h() });
+  if (res.status === 429 && retries > 0) {
+    const retryAfter = Number(res.headers.get("Retry-After") ?? "5");
+    await new Promise((r) => setTimeout(r, retryAfter * 1000));
+    return fetchEmailsList(url, retries - 1);
+  }
+  const data = await iJson<{ items?: InstantlyEmail[]; next_starting_after?: string | null }>(res);
+  return { items: data.items ?? [], next_starting_after: data.next_starting_after ?? null };
+}
+
+export async function listEmails(params: ListEmailsParams = {}): Promise<ListEmailsResult> {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.starting_after) qs.set("starting_after", params.starting_after);
+  if (params.min_timestamp_created) qs.set("min_timestamp_created", params.min_timestamp_created);
+  if (params.max_timestamp_created) qs.set("max_timestamp_created", params.max_timestamp_created);
+  if (params.sort_order) qs.set("sort_order", params.sort_order);
+  if (params.campaign_id) qs.set("campaign_id", params.campaign_id);
+  if (params.eaccount) qs.set("eaccount", params.eaccount);
+  if (params.search) qs.set("search", params.search);
+  const url = `${BASE}/emails?${qs.toString()}`;
+  return fetchEmailsList(url);
+}
+
+export async function markInstantlyThreadAsRead(threadId: string): Promise<void> {
+  const res = await fetch(`${BASE}/emails/threads/${encodeURIComponent(threadId)}/mark-as-read`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const data = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(`Instantly mark-as-read ${res.status}: ${data.message ?? "failed"}`);
+  }
+}
+
+export async function countInstantlyUnread(): Promise<number> {
+  try {
+    const res = await fetch(`${BASE}/emails/unread/count`, { headers: h() });
+    if (!res.ok) return 0;
+    const data = await res.json() as { count?: number; unread_count?: number };
+    return data.count ?? data.unread_count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export async function getInstantlyEmail(emailId: string): Promise<InstantlyEmail> {
@@ -364,7 +456,9 @@ export async function replyToInstantlyEmail(opts: {
   subject: string;
   bodyHtml: string;
   bodyText?: string;
-}): Promise<{ id?: string }> {
+  cc?: string[];
+  bcc?: string[];
+}): Promise<InstantlyEmail> {
   const res = await fetch(`${BASE}/emails/reply`, {
     method: "POST",
     headers: h(),
@@ -373,9 +467,11 @@ export async function replyToInstantlyEmail(opts: {
       eaccount: opts.eaccount,
       subject: opts.subject,
       body: { html: opts.bodyHtml, ...(opts.bodyText ? { text: opts.bodyText } : {}) },
+      ...(opts.cc?.length ? { cc_address_email_list: opts.cc } : {}),
+      ...(opts.bcc?.length ? { bcc_address_email_list: opts.bcc } : {}),
     }),
   });
-  return iJson<{ id?: string }>(res);
+  return iJson<InstantlyEmail>(res);
 }
 
 // ─── Interest status (CRM sync back to Instantly) ─────────────────────────────

@@ -1337,6 +1337,12 @@ export function CampaignDetail({
             {/* Header */}
             <div className="border-b border-border shrink-0">
               <div className="px-3 py-2 flex items-center gap-1.5 flex-wrap">
+                <a
+                  href={`/unibox?campaign_id=${campaign.id}`}
+                  className="text-[11px] text-primary hover:underline shrink-0"
+                >
+                  Open in Unibox
+                </a>
                 <Select value={outboxFilter} onValueChange={(v) => setOutboxFilter(v as typeof outboxFilter)}>
                   <SelectTrigger className="h-7 w-auto gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
                     <SelectValue />

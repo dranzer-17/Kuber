@@ -15,6 +15,7 @@ import {
   regenerateReplyDraft,
   type ReplyDraft,
 } from "@/lib/api-client";
+import { normalizeReplyBodyHtml } from "@/lib/reply-body-html";
 
 const DRAFT_STATUS_STYLE: Record<string, string> = {
   generating: "bg-secondary text-muted-foreground",
@@ -33,7 +34,7 @@ interface ReplyDraftBoxProps {
 
 export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
   const [subject, setSubject] = useState(draft.subject ?? "");
-  const [body, setBody] = useState(draft.body ?? "");
+  const [body, setBody] = useState(() => normalizeReplyBodyHtml(draft.body ?? ""));
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
@@ -45,7 +46,7 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
       <div className="flex items-end gap-2 justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-3">
           <div
-            className="text-sm leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
+            className="text-sm leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0 [&_p:last-child]:leading-snug"
             dangerouslySetInnerHTML={{ __html: draft.body ?? "" }}
           />
         </div>
