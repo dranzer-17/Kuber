@@ -2,6 +2,7 @@
 
 import type { Lead, LeadStatus, LeadScore, LeadSource, EnrichmentStage } from "@/lib/leads";
 import type { Campaign } from "@/components/app/create-campaign-modal";
+import type { CampaignStepInput } from "@/lib/constants";
 
 // ─── Token helper ─────────────────────────────────────────────────────────────
 
@@ -443,7 +444,7 @@ export async function fetchCampaigns(token: string): Promise<Campaign[]> {
 }
 
 export async function fetchCampaignSteps(token: string, campaignId: string): Promise<{
-  steps: Array<{ id: string; step_order: number; delay: number; delay_unit: string; subject: string; body: string }>;
+  steps: Array<CampaignStepInput & { id: string }>;
 }> {
   return apiFetch(`/api/v1/campaigns/${campaignId}/steps`, {}, token);
 }
@@ -451,7 +452,7 @@ export async function fetchCampaignSteps(token: string, campaignId: string): Pro
 export async function saveCampaignSteps(
   token: string,
   campaignId: string,
-  steps: Array<{ step_order: number; delay: number; delay_unit: string; subject: string; body: string }>,
+  steps: CampaignStepInput[],
 ): Promise<{ updated: boolean }> {
   return apiFetch(`/api/v1/campaigns/${campaignId}/steps`, { method: "PUT", body: JSON.stringify({ steps }) }, token);
 }

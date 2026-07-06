@@ -52,6 +52,7 @@ import { EditCampaignForm } from "@/components/app/edit-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Lead } from "@/lib/leads";
+import type { CampaignStepInput } from "@/lib/constants";
 import {
   DRAFT_BADGE_SHORT,
   CAMPAIGN_STATUS_HELP,
@@ -271,7 +272,7 @@ export function CampaignDetail({
   const [leadsSort, setLeadsSort] = useState<CampaignLeadsSort>("az");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
-  const [campaignSteps, setCampaignSteps] = useState<Array<{ step_order: number; subject: string; body: string; delay: number; delay_unit: string }>>([]);
+  const [campaignSteps, setCampaignSteps] = useState<CampaignStepInput[]>([]);
   const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [viewTab, setViewTab] = useState<CampaignViewTab>("analytics");
@@ -770,6 +771,12 @@ export function CampaignDetail({
     setViewTab("leads");
   }
 
+  function handleOpenInOutbox(campaignLeadId: string) {
+    setSelectedId(campaignLeadId);
+    setOutboxFilter("all");
+    setViewTab("outbox");
+  }
+
   const checkedDraftCount = campaignLeads.filter(
     (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
   ).length;
@@ -1218,6 +1225,7 @@ export function CampaignDetail({
                       <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Job Title</th>
                       <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Status</th>
                       <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Company</th>
+                      <th className="w-10 px-2 py-2.5" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1233,7 +1241,7 @@ export function CampaignDetail({
                           key={cl.id}
                           onClick={() => setSelectedId(isSelected ? null : cl.id)}
                           className={cn(
-                            "cursor-pointer transition-colors",
+                            "group cursor-pointer transition-colors",
                             isSelected ? "bg-primary/10" : "hover:bg-secondary/40",
                           )}
                         >
@@ -1315,6 +1323,21 @@ export function CampaignDetail({
                           </td>
                           <td className="px-3 py-3 text-xs text-muted-foreground">
                             <span className="truncate block max-w-[120px]">{lead?.company_name}</span>
+                          </td>
+                          <td className="w-10 px-2 py-3">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              title="Open in outbox"
+                              className="size-7 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-primary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenInOutbox(cl.id);
+                              }}
+                            >
+                              <Send className="size-3.5" />
+                            </Button>
                           </td>
                         </tr>
                       );
