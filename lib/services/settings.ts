@@ -74,7 +74,7 @@ function buildClientContextBlock(client: ClientContext): string {
 export async function getDraftSystemPrompt(db: SupabaseClient): Promise<string> {
   const base = await getSystemPrompt(db);
   const withJson =
-    /["']subject["']/.test(base) && /["']body["']/.test(base) && /["']product_match["']/.test(base)
+    /["']subject["']/.test(base) && /["']intro["']/.test(base) && /["']product_match["']/.test(base)
       ? base
       : `${base.trimEnd()}${DRAFT_JSON_SUFFIX}`;
   const client = await getClientContext(db);

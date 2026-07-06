@@ -8,9 +8,14 @@ import {
   getCompanyContext,
 } from "@/lib/services/settings";
 
+// The LLM is asked for the SUBJECT and a short personalised INTRO only — never
+// the fixed offerings/strengths/accolades/closing. Those are assembled in code
+// (see FIXED_OFFERINGS_BLOCK / CLOSING_* below) so bold formatting and the
+// brochure sentence are always exactly right instead of depending on the model
+// faithfully reproducing a verbatim template on every single call.
 const DraftSchema = z.object({
   subject: z.string(),
-  body: z.string(),
+  intro: z.string(),
   product_match: z.string(),
 });
 
@@ -55,11 +60,6 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
-// The base company intro, offerings, and closing are a client-approved fixed template
-// (editable in Settings, stored in the `settings` table) — the LLM only personalizes
-// the opening line and picks the best-fit product addendum, it does not write the
-// full email body.
-
 // Converts assembled plain-text body (with **bold** markers and \n newlines) to HTML
 // so the DB stores a renderable email and Instantly sends proper bold formatting.
 function plainToHtml(plain: string): string {
@@ -92,15 +92,51 @@ function pickSubjectPattern(leadId: string): string {
   return SUBJECT_PATTERNS[hash % SUBJECT_PATTERNS.length];
 }
 
+// Everything below the intro is identical on every step-1 email, so it is
+// assembled here in code — never authored by the LLM — guaranteeing the bold
+// markers, bullet structure, and figures are always exactly right.
+const KUBER_INTRO_SENTENCE =
+  "It is my pleasure to introduce Kuber Polyplast, a trusted name in the masterbatch industry with over 30 years of experience. As an ISO 9001:2015 certified company based in Delhi, we specialise in delivering top-quality products tailored to meet your needs.";
+
+const FIXED_OFFERINGS_BLOCK = `**Our Offerings:**
+• **Masterbatches**: Black, White, Colour and Additive Masterbatches
+• **Application Suitability**: Tested for film extrusion, sheet extrusion, injection molding, blow molding, and roto molding
+
+**Key Strengths:**
+• **Annual Production Capacity**: 18,000 MT
+• **Global Presence**: Serving 6,670+ clients across 40+ countries
+• **Proven Expertise**: Over 57,000 unique masterbatches developed with 1,042,440 hours of experience
+• **Impressive Revenue**: $2.4 billion (₹20,360 crore) client revenue achieved to date
+
+**Accolades & Clients:**
+• **Awards**: Udaan Award (Rising Star in Masterbatch)
+• **Trusted Partners**: APL Apollo, UFlex, Wipro, Phillips, BSNL, and more`;
+
+const CLOSING_NO_ATTACHMENT =
+  "If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.";
+const CLOSING_WITH_ATTACHMENT =
+  "Please find our brochure for further details on how we can support your needs. If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.";
+
 // Hard guardrails appended in code so they apply regardless of what the
 // editable settings prompt says.
-const DRAFT_GUARDRAILS = `
+function buildDraftGuardrails(stepNumber: number): string {
+  if (stepNumber > 1) {
+    return `
 
 NON-NEGOTIABLE RULES (override anything above if in conflict):
-1. ATTACHMENTS: The lead data below states whether this email includes a brochure/file. If it says "No attachment", you must NOT write "Please find attached", "attached brochure", or reference any attachment or brochure anywhere. Rewrite the closing paragraph without the attachment sentence. Never claim a file is attached when none exists.
-2. PERSONALISATION: The intro paragraph must reference at least one concrete, specific fact from the lead's company description, keywords, or end markets (e.g. what they manufacture, the products they sell, their market or country). Do not use vague filler such as "reliable materials for packaging, housings, and functional components" or "consistent material quality can be valuable for your operations". If the company clearly makes or packages physical products, name them. If it is a software/services company with no obvious plastics use, keep the intro honest: acknowledge what they do in one sentence, then bridge via their packaging, merchandise, or hardware suppliers rather than inventing a direct need.
-3. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally (e.g. white masterbatch for dairy packaging film) when the lead's industry plausibly uses it. Set product_match accordingly.
-4. SUBJECT: Use exactly the subject pattern given in the lead data, filling the bracketed part with the lead's real company name, industry, or country. Do not use a different pattern.`;
+1. This is a FOLLOW-UP to a cold email the prospect never replied to. Your "intro" field is the ENTIRE follow-up message body (2 to 4 short sentences) — a brief, low-pressure nudge referencing the earlier note. Do NOT re-introduce Kuber Polyplast, do NOT repeat the offerings/strengths/accolades, do NOT use bullet points, do NOT write a new sales pitch.
+2. ATTACHMENTS: never claim a file, brochure, or attachment is included unless the lead data explicitly says one is attached.
+3. Keep it personal and specific to the lead's business if a fact is available, but brevity matters more than detail here.`;
+  }
+  return `
+
+NON-NEGOTIABLE RULES (override anything above if in conflict):
+1. Your "intro" field must contain ONLY the 1-2 personalised opening sentences about the lead's business. Do NOT include the Kuber Polyplast introduction, the offerings list, key strengths, accolades, or closing paragraph — those are appended automatically in code. Do NOT write "Our Offerings", "Key Strengths", "Accolades" or any bullet points yourself.
+2. ATTACHMENTS: The lead data below states whether this email includes a brochure/file. Never reference an attachment or brochure in your intro text either way — the closing paragraph (appended in code) already handles that correctly.
+3. PERSONALISATION: The intro must reference at least one concrete, specific fact from the lead's company description, keywords, or end markets (e.g. what they manufacture, the products they sell, their market or country). Do not use vague filler such as "reliable materials for packaging, housings, and functional components" or "consistent material quality can be valuable for your operations". If the company clearly makes or packages physical products, name them. If it is a software/services company with no obvious plastics use, keep it honest: acknowledge what they do in one sentence, then bridge via their packaging, merchandise, or hardware suppliers rather than inventing a direct need.
+4. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally (e.g. white masterbatch for dairy packaging film) when the lead's industry plausibly uses it. Set product_match accordingly.
+5. SUBJECT: Use exactly the subject pattern given in the lead data, filling the bracketed part with the lead's real company name, industry, or country. Do not use a different pattern.`;
+}
 
 function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProductOfferings>>): string {
   if (products.length === 0) return "";
@@ -130,7 +166,7 @@ function buildUserPrompt(
     `What they do: ${org?.company_description ?? "Not available"}`,
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
-    `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email (as a download link) — you may reference our brochure in the closing` : "No attachment — do NOT mention any attachment or brochure anywhere in the email"}`,
+    `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email — this is handled in the closing, do not mention it yourself` : "No attachment — do NOT mention any attachment or brochure anywhere in your intro"}`,
     `Subject pattern to use: ${pickSubjectPattern(lead.id)}`,
   ];
   if (companyContext) lines.push(`Company context: ${companyContext}`);
@@ -218,7 +254,7 @@ export async function generateOneDraft(
       baseSystemPrompt
       + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
       + buildProductReferenceBlock(products)
-      + DRAFT_GUARDRAILS;
+      + buildDraftGuardrails(stepNumber);
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
@@ -228,8 +264,10 @@ export async function generateOneDraft(
     const validated = DraftSchema.safeParse(json);
     if (!validated.success) throw new Error("Draft shape mismatch");
 
-    // Strip any greeting/sign-off the LLM emitted despite instructions
-    let aiBody = validated.data.body
+    // Strip any greeting/sign-off/placeholder the LLM emitted despite instructions,
+    // and — defense in depth — any attachment/brochure mention it slipped into the
+    // intro even though the closing (assembled below, in code) already handles that.
+    const aiIntro = validated.data.intro
       .trim()
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
@@ -237,40 +275,34 @@ export async function generateOneDraft(
       .replace(/\[Your Company\]/gi, "")
       .replace(/^dear[^,\n]*,?\s*/i, "")
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
+      .replace(/[^.\n]*\b(please find (the\s+)?attached|find attached|attached (our|the|is|you will find)|our attached|brochure)\b[^.\n]*\.\s*/gi, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-
-    // Hard guarantee: an email with no attachment must never claim one is attached,
-    // even if the LLM ignores the instruction (the closing template historically
-    // contained a fixed "Please find attached our brochure" sentence).
-    if (!effectiveAttachmentName) {
-      aiBody = aiBody
-        .replace(/[^.\n]*\b(please find (the\s+)?attached|find attached|attached (our|the|is|you will find)|our attached)\b[^.\n]*\.\s*/gi, "")
-        .replace(/[^.\n]*\bbrochure\b[^.\n]*\.\s*/gi, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-    }
 
     const greetingName = lead.first_name?.trim();
     const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
 
+    // Step 1 = full cold intro: code-assembled fixed sections around the LLM's intro.
+    // Step > 1 = follow-up: the LLM's "intro" IS the entire short nudge, nothing appended.
+    const aiBody =
+      stepNumber > 1
+        ? aiIntro
+        : [
+            "I hope this message finds you well.",
+            aiIntro,
+            KUBER_INTRO_SENTENCE,
+            FIXED_OFFERINGS_BLOCK,
+            effectiveAttachmentName ? CLOSING_WITH_ATTACHMENT : CLOSING_NO_ATTACHMENT,
+          ].filter(Boolean).join("\n\n");
+
     let finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
 
-    // Instantly cannot send real attachments, so deliver the brochure as a link:
-    // linkify the first "brochure" mention; if the LLM never wrote one, append a
-    // download line before the signature-free closing.
-    if (effectiveAttachmentName && effectiveAttachmentUrl) {
+    // Instantly cannot send real attachments, so deliver the brochure as a link.
+    // Only the step-1 closing (code-assembled above) ever mentions a brochure —
+    // follow-ups stay a short nudge and never get a download line appended.
+    if (stepNumber === 1 && effectiveAttachmentName && effectiveAttachmentUrl) {
       const anchor = `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`;
-      if (/brochure/i.test(finalBody)) {
-        finalBody = finalBody.replace(/brochure/i, anchor);
-        // "Please find attached our <a>brochure</a>" reads wrong for a link — soften the verb.
-        finalBody = finalBody.replace(/Please find (the\s+)?attached our /i, "Please find our ");
-      } else {
-        finalBody = finalBody.replace(
-          /<\/p>\s*$/,
-          `<br><br>You can download our ${anchor} (${effectiveAttachmentName}) for further details.</p>`,
-        );
-      }
+      finalBody = finalBody.replace(/brochure/i, anchor);
     }
 
     // Follow-ups must thread as a reply in the original conversation, which
