@@ -37,6 +37,16 @@ export async function POST(req: NextRequest) {
   // Self-heal: mark reply drafts stuck in 'generating' for >5 minutes as failed
   try { await db.rpc("reset_stuck_reply_drafts", { stale_minutes: 5 }); } catch { /* non-fatal */ }
 
+  const { data: existing } = await db
+    .from("reply_drafts")
+    .select("id, status")
+    .eq("reply_event_id", b.reply_event_id)
+    .in("status", ["generating", "draft", "approved"])
+    .maybeSingle();
+  if (existing) {
+    return Response.json({ drafted: true, reply_draft_id: existing.id, skipped: true });
+  }
+
   // --- gather context: our original email + thread + eaccount (best-effort) ---
   let originalEmailText: string | null = null;
   let threadId: string | null = null;

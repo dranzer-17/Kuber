@@ -16,21 +16,7 @@ const HYDRATE_COOLDOWN_MS = 10 * 60 * 1000;
 const hydrateCooldown = new Map<string, number>();
 
 export type UniboxTab = "primary" | "others";
-export type UniboxStatusFilter =
-  | "lead" | "interested" | "meeting_booked" | "meeting_completed" | "won"
-  | "not_interested" | "wrong_person" | "lost" | "ooo";
-
-const STATUS_TO_INTEREST: Record<UniboxStatusFilter, number | "lead" | null> = {
-  lead: "lead",
-  interested: 1,
-  meeting_booked: 2,
-  meeting_completed: 3,
-  won: 4,
-  ooo: 0,
-  not_interested: -1,
-  wrong_person: -2,
-  lost: -3,
-};
+export type UniboxReadState = "unread" | "read" | "replied" | "needs_reply";
 
 export type UniboxThreadSummary = {
   thread_id: string;
@@ -63,6 +49,7 @@ export type UniboxMessage = {
   timestamp_email: string;
   is_unread: boolean;
   attachments: unknown;
+  reply_event_id: string | null;
 };
 
 type Db = SupabaseClient;
@@ -366,45 +353,78 @@ async function loadLeadInterestMap(db: Db, leadEmails: string[]): Promise<Map<st
   return map;
 }
 
-function matchesStatus(
-  filter: UniboxStatusFilter | undefined,
-  interest: number | null,
-  hasReceived: boolean,
-): boolean {
-  if (!filter) return true;
-  const want = STATUS_TO_INTEREST[filter];
-  if (want === "lead") return hasReceived && interest === null;
-  return interest === want;
-}
-
 function matchesTab(tab: UniboxTab, row: { is_focused: boolean; is_auto_reply: boolean }): boolean {
   if (tab === "primary") return row.is_focused && !row.is_auto_reply;
   return !row.is_focused || row.is_auto_reply;
 }
 
+function matchesReadState(
+  state: UniboxReadState,
+  summary: { unread_count: number; latest_direction: string },
+): boolean {
+  switch (state) {
+    case "unread": return summary.unread_count > 0;
+    case "read": return summary.unread_count === 0;
+    case "replied": return summary.latest_direction !== "received";
+    case "needs_reply": return summary.latest_direction === "received";
+    default: return true;
+  }
+}
+
+function matchesInterestFilter(
+  filter: number | "lead",
+  interestStatus: number | null,
+): boolean {
+  if (filter === "lead") return interestStatus === null;
+  return interestStatus === filter;
+}
+
+function campaignMatches(
+  rowCampaignId: string | null | undefined,
+  filters: { campaign_id?: string; campaign_ids?: string[] },
+): boolean {
+  if (filters.campaign_ids && filters.campaign_ids.length > 0) {
+    return !!rowCampaignId && filters.campaign_ids.includes(rowCampaignId);
+  }
+  if (filters.campaign_id) return rowCampaignId === filters.campaign_id;
+  return true;
+}
+
 export async function getThreads(db: Db, filters: {
   tab?: UniboxTab;
-  status?: UniboxStatusFilter;
   campaign_id?: string;
+  campaign_ids?: string[];
   eaccount?: string;
   q?: string;
   unread_only?: boolean;
+  read_state?: UniboxReadState;
+  interest_status?: number | "lead";
   cursor?: string;
   limit?: number;
 }): Promise<{
   threads: UniboxThreadSummary[];
   next_cursor: string | null;
-  counts: { by_status: Record<string, number>; unread_total: number };
+  counts: { unread_total: number };
 }> {
   const limit = filters.limit ?? 30;
   let query = db.from("unibox_emails").select("*").not("thread_id", "is", null);
 
-  if (filters.campaign_id) query = query.eq("campaign_id", filters.campaign_id);
+  if (filters.campaign_ids && filters.campaign_ids.length > 0) {
+    query = query.in("campaign_id", filters.campaign_ids);
+  } else if (filters.campaign_id) {
+    query = query.eq("campaign_id", filters.campaign_id);
+  }
   if (filters.eaccount) query = query.eq("eaccount", filters.eaccount);
-  if (filters.unread_only) query = query.eq("is_unread", true);
+
+  let nameMatchEmails = new Set<string>();
   if (filters.q?.trim()) {
     const q = filters.q.trim();
     query = query.or(`lead_email.ilike.%${q}%,subject.ilike.%${q}%,from_email.ilike.%${q}%`);
+    const { data: nameHits } = await db
+      .from("leads")
+      .select("email")
+      .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`);
+    nameMatchEmails = new Set((nameHits ?? []).map((l) => (l.email as string).toLowerCase()));
   }
 
   const { data: rows } = await query.order("timestamp_email", { ascending: false }).limit(2000);
@@ -413,28 +433,42 @@ export async function getThreads(db: Db, filters: {
   const threadMap = new Map<string, typeof all>();
   for (const r of all) {
     if (!r.thread_id) continue;
-    if (!matchesTab(filters.tab ?? "primary", { is_focused: r.is_focused, is_auto_reply: r.is_auto_reply })) continue;
+    if (filters.tab && !matchesTab(filters.tab, { is_focused: r.is_focused, is_auto_reply: r.is_auto_reply })) continue;
     if (!threadMap.has(r.thread_id)) threadMap.set(r.thread_id, []);
     threadMap.get(r.thread_id)!.push(r);
   }
 
-  const leadEmails = [...new Set(all.map((r) => r.lead_email).filter(Boolean))] as string[];
+  // Include threads whose lead email matches a name search even if email row didn't match query filter
+  if (nameMatchEmails.size > 0) {
+    const { data: extraRows } = await db
+      .from("unibox_emails")
+      .select("*")
+      .not("thread_id", "is", null)
+      .in("lead_email", [...nameMatchEmails]);
+    for (const r of extraRows ?? []) {
+      if (!r.thread_id) continue;
+      if (filters.tab && !matchesTab(filters.tab, { is_focused: r.is_focused, is_auto_reply: r.is_auto_reply })) continue;
+      if (!campaignMatches(r.campaign_id, filters)) continue;
+      if (filters.eaccount && r.eaccount !== filters.eaccount) continue;
+      if (!threadMap.has(r.thread_id)) threadMap.set(r.thread_id, []);
+      const existing = threadMap.get(r.thread_id)!;
+      if (!existing.some((e) => e.id === r.id)) existing.push(r);
+    }
+  }
+
+  const leadEmails = [...new Set([...all, ...Array.from(threadMap.values()).flat()].map((r) => r.lead_email).filter(Boolean))] as string[];
   const interestMap = await loadLeadInterestMap(db, leadEmails);
 
   const summaries: UniboxThreadSummary[] = [];
+  const latestUnreadAtByThread = new Map<string, string>();
   for (const [threadId, msgs] of threadMap) {
     msgs.sort((a, b) => String(a.timestamp_email).localeCompare(String(b.timestamp_email)));
     const latest = msgs[msgs.length - 1];
+    const hasReceived = msgs.some((m) => m.direction === "received");
+    if (!hasReceived) continue;
+
     const leadEmail = latest.lead_email;
     const interest = leadEmail ? interestMap.get(leadEmail) : undefined;
-    const hasReceived = msgs.some((m) => m.direction === "received");
-    if (!matchesStatus(filters.status, interest?.interest_status ?? null, hasReceived)) continue;
-
-    let campaign: { id: string; name: string } | null = null;
-    if (latest.campaign_id) {
-      const { data: c } = await db.from("campaigns").select("id, name").eq("id", latest.campaign_id).maybeSingle();
-      if (c) campaign = { id: c.id, name: c.name };
-    }
 
     let lead: UniboxThreadSummary["lead"] = null;
     if (leadEmail) {
@@ -442,7 +476,30 @@ export async function getThreads(db: Db, filters: {
       if (l) lead = l;
     }
 
-    summaries.push({
+    if (filters.q?.trim()) {
+      const q = filters.q.trim().toLowerCase();
+      const matches =
+        (leadEmail ?? "").toLowerCase().includes(q)
+        || msgs.some((m) => (m.subject ?? "").toLowerCase().includes(q))
+        || msgs.some((m) => (m.from_email ?? "").toLowerCase().includes(q))
+        || (lead?.first_name ?? "").toLowerCase().includes(q)
+        || (lead?.last_name ?? "").toLowerCase().includes(q)
+        || `${lead?.first_name ?? ""} ${lead?.last_name ?? ""}`.toLowerCase().includes(q);
+      if (!matches) continue;
+    }
+
+    const unreadInbound = msgs.filter((m) => m.direction === "received" && m.is_unread);
+    if (unreadInbound.length > 0) {
+      latestUnreadAtByThread.set(threadId, String(unreadInbound[unreadInbound.length - 1].timestamp_email));
+    }
+
+    let campaign: { id: string; name: string } | null = null;
+    if (latest.campaign_id) {
+      const { data: c } = await db.from("campaigns").select("id, name").eq("id", latest.campaign_id).maybeSingle();
+      if (c) campaign = { id: c.id, name: c.name };
+    }
+
+    const summary: UniboxThreadSummary = {
       thread_id: threadId,
       lead_email: leadEmail,
       lead,
@@ -452,38 +509,57 @@ export async function getThreads(db: Db, filters: {
       preview: latest.content_preview,
       latest_at: latest.timestamp_email,
       latest_direction: latest.direction,
-      unread_count: msgs.filter((m) => m.is_unread).length,
+      unread_count: unreadInbound.length,
       message_count: msgs.length,
       interest_status: interest?.interest_status ?? null,
       lead_temperature: interest?.lead_temperature ?? null,
       campaign_lead_id: latest.campaign_lead_id ?? interest?.campaign_lead_id ?? null,
-    });
-  }
+    };
 
-  summaries.sort((a, b) => b.latest_at.localeCompare(a.latest_at));
+    if (filters.interest_status !== undefined && !matchesInterestFilter(filters.interest_status, summary.interest_status)) {
+      continue;
+    }
 
-  const statusKeys: UniboxStatusFilter[] = [
-    "lead", "interested", "meeting_booked", "meeting_completed", "won",
-    "not_interested", "wrong_person", "lost", "ooo",
-  ];
-  const by_status: Record<string, number> = {};
-  for (const s of statusKeys) {
-    by_status[s] = summaries.filter((t) =>
-      matchesStatus(s, t.interest_status, true),
-    ).length;
+    summaries.push(summary);
   }
 
   const unread_total = summaries.reduce((n, t) => n + t.unread_count, 0);
 
+  const effectiveReadState: UniboxReadState | undefined =
+    filters.read_state ?? (filters.unread_only ? "unread" : undefined);
+
+  let visible = effectiveReadState
+    ? summaries.filter((t) => matchesReadState(effectiveReadState, t))
+    : summaries;
+
+  if (effectiveReadState === "unread") {
+    visible.sort((a, b) => {
+      const au = latestUnreadAtByThread.get(a.thread_id) ?? "";
+      const bu = latestUnreadAtByThread.get(b.thread_id) ?? "";
+      return bu.localeCompare(au);
+    });
+  } else if (effectiveReadState) {
+    visible.sort((a, b) => b.latest_at.localeCompare(a.latest_at));
+  } else {
+    visible.sort((a, b) => {
+      const aNeeds = a.latest_direction === "received";
+      const bNeeds = b.latest_direction === "received";
+      if (aNeeds && !bNeeds) return -1;
+      if (!aNeeds && bNeeds) return 1;
+      if (aNeeds && bNeeds) return a.latest_at.localeCompare(b.latest_at);
+      return b.latest_at.localeCompare(a.latest_at);
+    });
+  }
+
   let start = 0;
   if (filters.cursor) {
-    const idx = summaries.findIndex((t) => t.latest_at === filters.cursor);
+    const idx = visible.findIndex((t) => t.latest_at === filters.cursor);
     start = idx >= 0 ? idx + 1 : 0;
   }
-  const page = summaries.slice(start, start + limit);
-  const next_cursor = start + limit < summaries.length ? page[page.length - 1]?.latest_at ?? null : null;
+  const page = visible.slice(start, start + limit);
+  const next_cursor = start + limit < visible.length ? page[page.length - 1]?.latest_at ?? null : null;
 
-  return { threads: page, next_cursor, counts: { by_status, unread_total } };
+  return { threads: page, next_cursor, counts: { unread_total } };
 }
 
 export async function getThreadMessages(db: Db, threadId: string): Promise<{
@@ -560,6 +636,7 @@ export async function getThreadMessages(db: Db, threadId: string): Promise<{
       timestamp_email: m.timestamp_email,
       is_unread: m.is_unread,
       attachments: m.attachment_json,
+      reply_event_id: m.reply_event_id as string | null,
     })),
     reply_drafts,
     lead,

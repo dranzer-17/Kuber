@@ -706,12 +706,13 @@ export type UniboxMessage = {
   timestamp_email: string;
   is_unread: boolean;
   attachments: unknown;
+  reply_event_id: string | null;
 };
 
 export async function fetchUniboxThreads(
   token: string,
   params: Record<string, string | undefined> = {},
-): Promise<{ threads: UniboxThreadSummary[]; next_cursor: string | null; counts: { by_status: Record<string, number>; unread_total: number } }> {
+): Promise<{ threads: UniboxThreadSummary[]; next_cursor: string | null; counts: { unread_total: number } }> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v) qs.set(k, v);

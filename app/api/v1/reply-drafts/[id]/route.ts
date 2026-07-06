@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { normalizeReplyBodyHtml } from "@/lib/reply-body-html";
 import { z } from "zod";
 
 const PatchSchema = z.object({
@@ -31,14 +32,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const p = parsed.data;
 
   if (p.action === "edit") {
+    const body = p.body ? normalizeReplyBodyHtml(p.body) : p.body;
     await db.from("reply_drafts").update({
-      subject: p.subject, body: p.body, updated_at: now,
+      subject: p.subject, body, updated_at: now,
     }).eq("id", id);
   } else if (p.action === "approve") {
+    const body = p.body ? normalizeReplyBodyHtml(p.body) : p.body;
     await db.from("reply_drafts").update({
       status: "approved", reviewed_by: user.id, approved_at: now, updated_at: now,
       ...(p.subject ? { subject: p.subject } : {}),
-      ...(p.body ? { body: p.body } : {}),
+      ...(body ? { body } : {}),
     }).eq("id", id);
   } else if (p.action === "reject") {
     await db.from("reply_drafts").update({
