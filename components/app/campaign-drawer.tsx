@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
-  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X,
+  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X, Sparkles,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -608,6 +608,15 @@ export function CampaignDetail({
 
   const isPreviewingHistory = previewVersionId !== null && previewVersionId !== selected?.email_drafts?.id;
 
+  // The system prompt (Settings) can be edited after a draft was already generated.
+  // Only a not-yet-sent "draft" is safe to silently regenerate — anything approved/sent
+  // reflects a human decision and shouldn't be nudged.
+  const isPromptStaleForSelected =
+    selected?.email_drafts?.status === "draft" &&
+    !!systemPromptUpdatedAt &&
+    !!selected.email_drafts.created_at &&
+    new Date(systemPromptUpdatedAt).getTime() > new Date(selected.email_drafts.created_at).getTime();
+
   async function handleCertifyOne(draftId: string) {
     setCertifying(true);
     setError("");
@@ -662,6 +671,25 @@ export function CampaignDetail({
       setEditBody(draft.body ?? "");
       setRegenQuery("");
       toast.success("Draft regenerated");
+      await loadData();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
+  async function handleRegenerateWithNewPrompt() {
+    if (!selected?.email_drafts?.id) return;
+    setRegenerating(true);
+    setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { draft } = await regenerateDraft(session.access_token, selected.email_drafts.id);
+      setEditSubject(draft.subject ?? "");
+      setEditBody(draft.body ?? "");
+      toast.success("Draft regenerated with the updated system prompt");
       await loadData();
     } catch (e) {
       toast.error((e as Error).message);
@@ -1873,6 +1901,18 @@ export function CampaignDetail({
                             Certify
                           </Button>
                         </>
+                      )}
+                      {isPromptStaleForSelected && !isPreviewingHistory && (
+                        <Button
+                          variant="outline"
+                          className="gap-1.5 border-amber-500/50 text-amber-500 hover:bg-amber-500/10 hover:text-amber-500"
+                          disabled={regenerating}
+                          onClick={handleRegenerateWithNewPrompt}
+                          title="The system prompt was updated after this draft was generated"
+                        >
+                          {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                          Regenerate using new system prompt
+                        </Button>
                       )}
                       {selected.email_drafts.status === "approved" && !isPreviewingHistory && (
                         <>

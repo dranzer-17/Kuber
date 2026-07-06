@@ -8,15 +8,20 @@ import {
   getCompanyContext,
 } from "@/lib/services/settings";
 
-// The LLM is asked for the SUBJECT and a short personalised INTRO only — never
-// the fixed offerings/strengths/accolades/closing. Those are assembled in code
-// (see FIXED_OFFERINGS_BLOCK / CLOSING_* below) so bold formatting and the
-// brochure sentence are always exactly right instead of depending on the model
-// faithfully reproducing a verbatim template on every single call.
+// The LLM is asked for the SUBJECT, a short personalised INTRO, and (step 1 only)
+// which pre-approved KEY_STRENGTHS to feature — never the offerings/accolades/
+// closing text itself. The exact figures and claims are assembled in code (see
+// HIGHLIGHT_TEXT / OUR_OFFERINGS_BLOCK / ACCOLADES_BLOCK / CLOSING_* below) so
+// every number and certification sent to a real prospect is guaranteed accurate,
+// while the wording around them still varies per lead.
+const HIGHLIGHT_KEYS = ["capacity", "global", "expertise", "revenue"] as const;
+type HighlightKey = (typeof HIGHLIGHT_KEYS)[number];
+
 const DraftSchema = z.object({
   subject: z.string(),
   intro: z.string(),
   product_match: z.string(),
+  key_highlights: z.array(z.enum(HIGHLIGHT_KEYS)).optional(),
 });
 
 type DraftLLMOutput = z.infer<typeof DraftSchema>;
@@ -76,8 +81,18 @@ function plainToHtml(plain: string): string {
     "</p>"
   );
 }
-// Subject patterns rotated deterministically per lead so a batch of drafts
-// never converges on the same one or two subjects.
+// Deterministic per-lead rotation so a batch of drafts never converges on the
+// same wording — same lead always gets the same variant across regenerations,
+// but different leads spread across the list. `role` decorrelates which
+// variant each field gets for the same lead (so subject/opening/closing don't
+// all move in lockstep).
+function pickVariant<T>(leadId: string, role: string, arr: readonly T[]): T {
+  const seed = `${leadId}|${role}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return arr[hash % arr.length];
+}
+
 const SUBJECT_PATTERNS = [
   "Greetings from Kuber Polyplast | Exploring Opportunities with [Company Name]",
   "Introduction: Kuber Polyplast | Masterbatch Solutions for [Industry]",
@@ -87,35 +102,62 @@ const SUBJECT_PATTERNS = [
 ];
 
 function pickSubjectPattern(leadId: string): string {
-  let hash = 0;
-  for (let i = 0; i < leadId.length; i++) hash = (hash * 31 + leadId.charCodeAt(i)) >>> 0;
-  return SUBJECT_PATTERNS[hash % SUBJECT_PATTERNS.length];
+  return pickVariant(leadId, "subject", SUBJECT_PATTERNS);
 }
 
-// Everything below the intro is identical on every step-1 email, so it is
-// assembled here in code — never authored by the LLM — guaranteeing the bold
-// markers, bullet structure, and figures are always exactly right.
-const KUBER_INTRO_SENTENCE =
-  "It is my pleasure to introduce Kuber Polyplast, a trusted name in the masterbatch industry with over 30 years of experience. As an ISO 9001:2015 certified company based in Delhi, we specialise in delivering top-quality products tailored to meet your needs.";
+// Everything below the intro is assembled here in code — never authored by the
+// LLM — guaranteeing every figure, certification, and claim sent to a real
+// prospect is exactly right. Each piece rotates through a few pre-approved,
+// fact-equivalent phrasings so consecutive emails don't read as identical
+// boilerplate, without ever letting the model invent new claims.
+const OPENING_VARIANTS = [
+  "I hope this message finds you well.",
+  "I hope you're having a productive week.",
+  "Thank you for taking a moment to read this.",
+  "Reaching out because I think this could be genuinely useful for your team.",
+];
 
-const FIXED_OFFERINGS_BLOCK = `**Our Offerings:**
+const COMPANY_INTRO_VARIANTS = [
+  "It is my pleasure to introduce Kuber Polyplast, a trusted name in the masterbatch industry with over 30 years of experience. As an ISO 9001:2015 certified company based in Delhi, we specialise in delivering top-quality products tailored to meet your needs.",
+  "Kuber Polyplast has been a trusted masterbatch manufacturer for over 30 years, ISO 9001:2015 certified and based in Delhi, with a track record of tailoring products to what our clients actually need.",
+  "A quick introduction: Kuber Polyplast is an ISO 9001:2015 certified masterbatch manufacturer based in Delhi with 30+ years in the industry, built around tailoring products to each client's specific requirements.",
+  "For context, Kuber Polyplast is a Delhi-based, ISO 9001:2015 certified masterbatch manufacturer with over three decades of experience delivering products tailored to our clients' needs.",
+];
+
+const OUR_OFFERINGS_BLOCK = `**Our Offerings:**
 • **Masterbatches**: Black, White, Colour and Additive Masterbatches
-• **Application Suitability**: Tested for film extrusion, sheet extrusion, injection molding, blow molding, and roto molding
+• **Application Suitability**: Tested for film extrusion, sheet extrusion, injection molding, blow molding, and roto molding`;
 
-**Key Strengths:**
-• **Annual Production Capacity**: 18,000 MT
-• **Global Presence**: Serving 6,670+ clients across 40+ countries
-• **Proven Expertise**: Over 57,000 unique masterbatches developed with 1,042,440 hours of experience
-• **Impressive Revenue**: $2.4 billion (₹20,360 crore) client revenue achieved to date
+// The LLM picks which 2-3 of these to feature per lead (see key_highlights) —
+// the wording and figures themselves are fixed, never LLM-authored.
+const HIGHLIGHT_TEXT: Record<HighlightKey, string> = {
+  capacity: "**Annual Production Capacity**: 18,000 MT",
+  global: "**Global Presence**: Serving 6,670+ clients across 40+ countries",
+  expertise: "**Proven Expertise**: Over 57,000 unique masterbatches developed with 1,042,440 hours of experience",
+  revenue: "**Impressive Revenue**: $2.4 billion (₹20,360 crore) client revenue achieved to date",
+};
+const DEFAULT_HIGHLIGHTS: HighlightKey[] = ["global", "expertise"];
 
-**Accolades & Clients:**
+function buildKeyStrengthsBlock(selected: HighlightKey[] | undefined): string {
+  const unique = [...new Set(selected)].filter((k): k is HighlightKey => HIGHLIGHT_KEYS.includes(k));
+  const keys = unique.length >= 2 ? unique.slice(0, 3) : DEFAULT_HIGHLIGHTS;
+  return "**Key Strengths:**\n" + keys.map((k) => `• ${HIGHLIGHT_TEXT[k]}`).join("\n");
+}
+
+const ACCOLADES_BLOCK = `**Accolades & Clients:**
 • **Awards**: Udaan Award (Rising Star in Masterbatch)
 • **Trusted Partners**: APL Apollo, UFlex, Wipro, Phillips, BSNL, and more`;
 
-const CLOSING_NO_ATTACHMENT =
-  "If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.";
-const CLOSING_WITH_ATTACHMENT =
-  "Please find our brochure for further details on how we can support your needs. If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.";
+const CLOSING_NO_ATTACHMENT_VARIANTS = [
+  "If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.",
+  "Happy to share more detail or answer any questions if this would be useful to you.",
+  "Let me know if this is relevant to your work. Glad to share more detail or set up a quick call.",
+];
+const CLOSING_WITH_ATTACHMENT_VARIANTS = [
+  "Please find our brochure for further details on how we can support your needs. If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.",
+  "I've attached our brochure with more detail on how we could support you. Happy to answer any questions or set up a quick call.",
+  "Our brochure is attached and covers this in more depth. Let me know if you have questions or would like to set up a short call.",
+];
 
 // Hard guardrails appended in code so they apply regardless of what the
 // editable settings prompt says.
@@ -126,7 +168,10 @@ function buildDraftGuardrails(stepNumber: number): string {
 NON-NEGOTIABLE RULES (override anything above if in conflict):
 1. This is a FOLLOW-UP to a cold email the prospect never replied to. Your "intro" field is the ENTIRE follow-up message body (2 to 4 short sentences) — a brief, low-pressure nudge referencing the earlier note. Do NOT re-introduce Kuber Polyplast, do NOT repeat the offerings/strengths/accolades, do NOT use bullet points, do NOT write a new sales pitch.
 2. ATTACHMENTS: never claim a file, brochure, or attachment is included unless the lead data explicitly says one is attached.
-3. Keep it personal and specific to the lead's business if a fact is available, but brevity matters more than detail here.`;
+3. Keep it personal and specific to the lead's business if a fact is available, but brevity matters more than detail here.
+4. NO FABRICATION: never state a price, discount, percentage, certification, technical spec, or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. If none is given, stay qualitative — do not invent a number to sound persuasive.
+5. FORMATTING: wrap at most one or two concrete facts (a product name, figure, or certification actually present in the data) in **double asterisks** so they render bold, matching the rest of the email. Do not bold whole sentences or generic phrases.
+6. NO EM DASHES: never use an em dash (—) anywhere in your text. Split into two sentences, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.`;
   }
   return `
 
@@ -135,7 +180,11 @@ NON-NEGOTIABLE RULES (override anything above if in conflict):
 2. ATTACHMENTS: The lead data below states whether this email includes a brochure/file. Never reference an attachment or brochure in your intro text either way — the closing paragraph (appended in code) already handles that correctly.
 3. PERSONALISATION: The intro must reference at least one concrete, specific fact from the lead's company description, keywords, or end markets (e.g. what they manufacture, the products they sell, their market or country). Do not use vague filler such as "reliable materials for packaging, housings, and functional components" or "consistent material quality can be valuable for your operations". If the company clearly makes or packages physical products, name them. If it is a software/services company with no obvious plastics use, keep it honest: acknowledge what they do in one sentence, then bridge via their packaging, merchandise, or hardware suppliers rather than inventing a direct need.
 4. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally (e.g. white masterbatch for dairy packaging film) when the lead's industry plausibly uses it. Set product_match accordingly.
-5. SUBJECT: Use exactly the subject pattern given in the lead data, filling the bracketed part with the lead's real company name, industry, or country. Do not use a different pattern.`;
+5. SUBJECT: Use exactly the subject pattern given in the lead data, filling the bracketed part with the lead's real company name, industry, or country. Do not use a different pattern.
+6. NO FABRICATION: never state a price, discount, percentage, certification, technical spec (e.g. TiO2 content, MFI, density), or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. Qualitative claims ("consistent opacity", "food-grade options") are fine; invented numbers are not.
+7. FORMATTING: wrap at most one or two concrete facts actually present in the data (the matched product's name, or a real figure/certification from the PRODUCT REFERENCE LIBRARY or lead data) in **double asterisks** so they render bold — matching the bold styling used in the rest of the email. Do not bold whole sentences, generic phrases, or anything not grounded in the supplied data.
+8. KEY HIGHLIGHTS: from the "Available Key Strengths" list below, choose the 2 (max 3) keys most relevant to this lead's industry or scale and return them as key_highlights, e.g. a large manufacturer cares more about capacity/global reach, a niche buyer may care more about expertise. Use only the exact keys given — never invent a new key, wording, or number.
+9. NO EM DASHES: never use an em dash (—) anywhere in your text, including to string together two or three ideas in one sentence. One idea per sentence; split with a period, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.`;
 }
 
 function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProductOfferings>>): string {
@@ -169,6 +218,12 @@ function buildUserPrompt(
     `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email — this is handled in the closing, do not mention it yourself` : "No attachment — do NOT mention any attachment or brochure anywhere in your intro"}`,
     `Subject pattern to use: ${pickSubjectPattern(lead.id)}`,
   ];
+  if (stepNumber === 1) {
+    lines.push(
+      "Available Key Strengths (pick 2-3 by key for key_highlights, do not alter wording/numbers):",
+      ...Object.entries(HIGHLIGHT_TEXT).map(([key, text]) => `- ${key}: ${text.replace(/\*\*/g, "")}`),
+    );
+  }
   if (companyContext) lines.push(`Company context: ${companyContext}`);
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
   if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
@@ -276,23 +331,33 @@ export async function generateOneDraft(
       .replace(/^dear[^,\n]*,?\s*/i, "")
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
       .replace(/[^.\n]*\b(please find (the\s+)?attached|find attached|attached (our|the|is|you will find)|our attached|brochure)\b[^.\n]*\.\s*/gi, "")
+      // Em dashes are a well-known AI-writing tell; the guardrails forbid them,
+      // but strip any that slip through as a safety net rather than trust compliance.
+      .replace(/\s*[—–]\s*/g, ", ")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
     const greetingName = lead.first_name?.trim();
     const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
 
-    // Step 1 = full cold intro: code-assembled fixed sections around the LLM's intro.
-    // Step > 1 = follow-up: the LLM's "intro" IS the entire short nudge, nothing appended.
+    // Step 1 = full cold intro: code-assembled sections (rotated per lead, see
+    // pickVariant) around the LLM's intro. Step > 1 = follow-up: the LLM's
+    // "intro" IS the entire short nudge, nothing appended.
     const aiBody =
       stepNumber > 1
         ? aiIntro
         : [
-            "I hope this message finds you well.",
+            pickVariant(lead.id, "opening", OPENING_VARIANTS),
             aiIntro,
-            KUBER_INTRO_SENTENCE,
-            FIXED_OFFERINGS_BLOCK,
-            effectiveAttachmentName ? CLOSING_WITH_ATTACHMENT : CLOSING_NO_ATTACHMENT,
+            pickVariant(lead.id, "company", COMPANY_INTRO_VARIANTS),
+            OUR_OFFERINGS_BLOCK,
+            buildKeyStrengthsBlock(validated.data.key_highlights),
+            ACCOLADES_BLOCK,
+            pickVariant(
+              lead.id,
+              effectiveAttachmentName ? "closing-attach" : "closing-noattach",
+              effectiveAttachmentName ? CLOSING_WITH_ATTACHMENT_VARIANTS : CLOSING_NO_ATTACHMENT_VARIANTS,
+            ),
           ].filter(Boolean).join("\n\n");
 
     let finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
