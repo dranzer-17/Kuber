@@ -494,6 +494,23 @@ export async function regenerateFollowUpDraft(
   }, token);
 }
 
+export async function regenerateFollowUpStepTemplate(
+  token: string,
+  campaignId: string,
+  stepNumber: number,
+  currentBody: string,
+  instruction?: string,
+): Promise<{ body: string }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/followup-step-regenerate`, {
+    method: "POST",
+    body: JSON.stringify({
+      step_number: stepNumber,
+      body: currentBody,
+      instruction,
+    }),
+  }, token);
+}
+
 // Save for a follow-up: persist + approve + sync to Instantly in one action.
 // Deliberately separate from editDraft/approveDraft (the step-1 draft's
 // PATCH .../drafts/[id] flow), whose "edit" action requires a non-empty

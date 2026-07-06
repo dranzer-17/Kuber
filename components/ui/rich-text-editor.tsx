@@ -83,6 +83,7 @@ interface RichTextEditorProps {
   placeholder?: string;
   className?: string;
   minHeight?: number;
+  showTemplateVars?: boolean;
 }
 
 function ToolbarButton({
@@ -124,6 +125,7 @@ export function RichTextEditor({
   placeholder = "Write your email…",
   className,
   minHeight = 280,
+  showTemplateVars = false,
 }: RichTextEditorProps) {
   const editor = useEditor({
     extensions: [
@@ -250,27 +252,31 @@ export function RichTextEditor({
           </ToolbarButton>
         )}
 
-        <div className="w-px h-4 bg-border mx-1" />
+        {showTemplateVars && (
+          <>
+            <div className="w-px h-4 bg-border mx-1" />
 
-        <div className="relative group">
-          <button
-            type="button"
-            disabled={disabled}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              editor.chain().focus().insertContent("{{firstName}}").run();
-            }}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[11px] font-semibold border border-primary/25 hover:bg-primary/25 transition-colors cursor-pointer disabled:opacity-40"
-          >
-            firstName
-            <Copy className="size-2.5 opacity-60" />
-          </button>
-          <div className="pointer-events-none absolute top-full left-0 mt-1.5 z-50 w-48 rounded-lg bg-popover border border-border shadow-lg px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <p className="text-xs font-semibold text-foreground">Lead&apos;s first name</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">e.g. &quot;John&quot;</p>
-            <p className="text-[11px] text-muted-foreground mt-1">Type <span className="font-mono bg-muted px-0.5 rounded">{"{{firstName}}"}</span> or click to insert</p>
-          </div>
-        </div>
+            <div className="relative group">
+              <button
+                type="button"
+                disabled={disabled}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  editor.chain().focus().insertContent("{{firstName}}").run();
+                }}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[11px] font-semibold border border-primary/25 hover:bg-primary/25 transition-colors cursor-pointer disabled:opacity-40"
+              >
+                firstName
+                <Copy className="size-2.5 opacity-60" />
+              </button>
+              <div className="pointer-events-none absolute top-full left-0 mt-1.5 z-50 w-48 rounded-lg bg-popover border border-border shadow-lg px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <p className="text-xs font-semibold text-foreground">Lead&apos;s first name</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">e.g. &quot;John&quot;</p>
+                <p className="text-[11px] text-muted-foreground mt-1">Type <span className="font-mono bg-muted px-0.5 rounded">{"{{firstName}}"}</span> or click to insert</p>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Editor content */}

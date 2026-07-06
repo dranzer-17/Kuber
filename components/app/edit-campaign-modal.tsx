@@ -49,7 +49,7 @@ function DayPill({ day, active, onClick }: { day: string; active: boolean; onCli
 function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-9 w-32 bg-transparent tabular-nums">
+      <SelectTrigger className="h-9 w-32 bg-background tabular-nums">
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="center" className="min-w-32 max-h-56">
@@ -248,7 +248,7 @@ export function EditCampaignForm({
   );
 
   if (isPage) {
-    const fieldBlock = "space-y-2";
+    const fieldBlock = "space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm";
 
     return (
       <div className={cn("space-y-8", className)}>
@@ -258,7 +258,7 @@ export function EditCampaignForm({
             <div className={fieldBlock}>
               <Label className="text-sm font-medium">Sender name</Label>
               <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
-              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" className="bg-background" />
             </div>
 
             <div className={fieldBlock}>
@@ -269,6 +269,7 @@ export function EditCampaignForm({
                 onChange={(e) => setAiPromptContext(e.target.value)}
                 placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
                 rows={5}
+                className="bg-background"
               />
             </div>
           </div>
@@ -287,7 +288,7 @@ export function EditCampaignForm({
                 max={500}
                 value={dailyLimit}
                 onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                className="h-9 w-24 text-center"
+                className="h-9 w-24 text-center bg-background"
               />
             </div>
 
@@ -305,26 +306,8 @@ export function EditCampaignForm({
             </div>
           </div>
 
-          {/* Col 3: timezone & days */}
+          {/* Col 3: send days */}
           <div className="space-y-8 md:col-span-2 xl:col-span-1">
-            <div className={fieldBlock}>
-              <div className="flex items-center gap-2">
-                <Globe className="size-4 text-muted-foreground shrink-0" />
-                <Label className="text-sm font-medium">Timezone</Label>
-              </div>
-              <p className="text-xs text-muted-foreground">Applies to the sending window</p>
-              <Select value={timezone} onValueChange={setTimezone}>
-                <SelectTrigger className="h-9 w-full bg-transparent">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent align="start" className="min-w-45">
-                  {TIMEZONES.map((tz) => (
-                    <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className={fieldBlock}>
               <div className="flex items-center gap-2">
                 <Calendar className="size-4 text-muted-foreground shrink-0" />
@@ -346,7 +329,7 @@ export function EditCampaignForm({
         </div>
 
         {/* Full width: follow-up schedule */}
-        <div className="space-y-3 pt-2 border-t border-border">
+        <div className={cn(fieldBlock, "space-y-3")}>
           <div>
             <div className="flex items-center gap-2">
               <Clock className="size-4 text-muted-foreground shrink-0" />
@@ -432,11 +415,11 @@ export function EditCampaignForm({
               <p className="text-sm font-medium leading-none">Timezone</p>
             </div>
             <Select value={timezone} onValueChange={setTimezone}>
-              <SelectTrigger className="h-9 w-full sm:w-45 bg-transparent">
-                <SelectValue />
+              <SelectTrigger className="h-9 w-full sm:w-45 bg-background">
+                <SelectValue placeholder="Select timezone" />
               </SelectTrigger>
               <SelectContent align="start" className="min-w-45">
-                {TIMEZONES.map((tz) => (
+                {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((tz) => (
                   <SelectItem key={tz} value={tz}>{tz}</SelectItem>
                 ))}
               </SelectContent>

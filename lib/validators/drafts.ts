@@ -43,6 +43,12 @@ export const FollowUpRegenerateSchema = z.object({
   instruction: z.string().optional(),
 });
 
+export const FollowUpStepTemplateRegenerateSchema = z.object({
+  step_number: z.number().int().min(2),
+  body: z.string(),
+  instruction: z.string().optional(),
+});
+
 // Follow-up subject is intentionally allowed to be empty — it threads as a
 // reply in the same conversation, unlike the step-1 draft's PatchDraftSchema
 // "edit" action, which requires a non-empty subject.

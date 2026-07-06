@@ -35,6 +35,7 @@ import {
   rejectReplyDraft,
   sendReplyDraft,
   regenerateReplyDraft,
+  regenerateFollowUpStepTemplate,
   saveCampaignSteps,
   uploadCampaignLeadAttachment,
   removeCampaignLeadAttachment,
@@ -180,16 +181,6 @@ const LEGACY_MISLEADING_FOLLOWUP_SUBJECT =
 const GENERIC_FOLLOWUP_BODY =
   "Hi {{firstName}},\n\nJust following up on my previous note — would love your thoughts.\n\nBest regards";
 
-function fillTemplateTags(
-  text: string | null | undefined,
-  lead: { first_name: string | null; last_name: string | null } | null | undefined,
-): string {
-  if (!text) return "";
-  return text
-    .replace(/\{\{\s*firstName\s*\}\}/gi, lead?.first_name?.trim() || "there")
-    .replace(/\{\{\s*lastName\s*\}\}/gi, lead?.last_name?.trim() || "");
-}
-
 function sequenceStepSubtitle(
   step: { step_order: number; subject: string; body: string },
   leads: CampaignLead[],
@@ -275,6 +266,7 @@ export function CampaignDetail({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
   const [campaignSteps, setCampaignSteps] = useState<CampaignStepInput[]>([]);
+  const [stepPerformance, setStepPerformance] = useState<Array<{ step: number; sent: number; failed: number; total: number }>>([]);
   const [previewVersionId, setPreviewVersionId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [viewTab, setViewTab] = useState<CampaignViewTab>("analytics");
@@ -297,6 +289,9 @@ export function CampaignDetail({
   const [seqSubjectEdit, setSeqSubjectEdit] = useState("");
   const [seqBodyEdit, setSeqBodyEdit] = useState("");
   const [seqHasContent, setSeqHasContent] = useState(false);
+  const [seqRegenOpen, setSeqRegenOpen] = useState(false);
+  const [seqRegenQuery, setSeqRegenQuery] = useState("");
+  const [seqRegenerating, setSeqRegenerating] = useState(false);
   const [seqStepSaving, setSeqStepSaving] = useState(false);
 
   const [systemPromptUpdatedAt, setSystemPromptUpdatedAt] = useState<string | null>(null);
@@ -323,7 +318,22 @@ export function CampaignDetail({
       fetchCampaignLeads(token, campaign.id),
       fetchDraftProgress(token, campaign.id),
     ]);
-    const leads = (leadsRes.campaign_leads as CampaignLead[]).map((cl) => {
+    const rawLeads = leadsRes.campaign_leads as CampaignLead[];
+
+    const stepMap = new Map<number, { sent: number; failed: number; total: number }>();
+    for (const cl of rawLeads) {
+      for (const d of getLeadDrafts(cl)) {
+        const step = d.step_number ?? 1;
+        const entry = stepMap.get(step) ?? { sent: 0, failed: 0, total: 0 };
+        entry.total++;
+        if (d.status === "sent") entry.sent++;
+        if (d.status === "failed") entry.failed++;
+        stepMap.set(step, entry);
+      }
+    }
+    setStepPerformance([...stepMap.entries()].sort((a, b) => a[0] - b[0]).map(([step, v]) => ({ step, ...v })));
+
+    const leads = rawLeads.map((cl) => {
       const step1Draft = getLeadDraftForStep(cl, 1);
       return step1Draft ? { ...cl, email_drafts: step1Draft } : { ...cl, email_drafts: null };
     });
@@ -406,25 +416,18 @@ export function CampaignDetail({
     const step = followUps.find((s) => s.step_order === selectedSequenceStep) ?? followUps[0];
     if (!step) return;
 
-    const stepNum = step.step_order;
-    const sampleLead = campaignLeads.find((cl) => getLeadDraftForStep(cl, stepNum)?.body);
-    const sampleDraft = sampleLead ? getLeadDraftForStep(sampleLead, stepNum) : null;
     const rawBody = step.body ?? "";
     const rawSubject = step.subject ?? "";
     const isPlaceholder = isInstantlyPlaceholder(rawBody);
-    const subject =
-      sampleDraft?.subject ??
-      (rawSubject && rawSubject !== LEGACY_MISLEADING_FOLLOWUP_SUBJECT ? rawSubject : "");
-    const body =
-      sampleDraft?.body ??
-      (isPlaceholder || !rawBody
-        ? fillTemplateTags(GENERIC_FOLLOWUP_BODY, sampleLead?.leads ?? campaignLeads[0]?.leads)
-        : rawBody);
+    const subject = rawSubject && rawSubject !== LEGACY_MISLEADING_FOLLOWUP_SUBJECT ? rawSubject : "";
+    const body = isPlaceholder || !rawBody ? GENERIC_FOLLOWUP_BODY : rawBody;
     setSeqSubjectEdit(subject);
     setSeqBodyEdit(body);
     setSeqHasContent(true);
     setSeqStepSaving(false);
-  }, [viewTab, selectedSequenceStep, campaignSteps, campaignLeads]);
+    setSeqRegenOpen(false);
+    setSeqRegenQuery("");
+  }, [viewTab, selectedSequenceStep, campaignSteps]);
 
   useEffect(() => {
     if (!progress) return;
@@ -508,27 +511,6 @@ export function CampaignDetail({
     const ds = cl.email_drafts?.status;
     if (ds && DRAFT_STATUS_STYLE[ds]) return DRAFT_STATUS_STYLE[ds];
     return "bg-secondary text-muted-foreground";
-  }
-
-  function toggleCheck(clId: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(clId)) next.delete(clId); else next.add(clId);
-      return next;
-    });
-  }
-
-  function toggleAllDraftReady() {
-    const ids = draftReadyLeads.map((cl) => cl.id);
-    const allChecked = ids.every((id) => checkedIds.has(id));
-    setCheckedIds(allChecked ? new Set() : new Set(ids));
-  }
-
-  function toggleAllSendReady() {
-    const ids = sendReadyLeads.map((cl) => cl.id);
-    const allChecked = ids.every((id) => checkedIds.has(id));
-    setCheckedIds(allChecked ? new Set() : new Set(ids));
   }
 
   const [attaching, setAttaching] = useState(false);
@@ -804,6 +786,30 @@ export function CampaignDetail({
     }
   }
 
+  async function handleRegenerateSeqDraft() {
+    if (!activeSeqStep) return;
+    setSeqRegenerating(true);
+    setSeqRegenOpen(false);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { body } = await regenerateFollowUpStepTemplate(
+        session.access_token,
+        campaign.id,
+        activeSeqStep.step_order,
+        seqBodyEdit,
+        seqRegenQuery || undefined,
+      );
+      setSeqBodyEdit(body);
+      setSeqRegenQuery("");
+      toast.success("Follow-up regenerated");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSeqRegenerating(false);
+    }
+  }
+
   function handleKanbanSelect(campaignLeadId: string) {
     setSelectedId(campaignLeadId);
     setViewTab("leads");
@@ -875,6 +881,54 @@ export function CampaignDetail({
   }).length;
 
   const outboxThreadByLeadId = new Map(threads.filter((t) => t.campaign_lead_id).map((t) => [t.campaign_lead_id as string, t]));
+
+  // ── Analytics tab derived data ──────────────────────────────────────────
+  const analyticsTotalLeads = campaign.leads ?? 0;
+  const analyticsSent = campaign.sent ?? 0;
+  const analyticsReplied = campaign.replied ?? 0;
+  const analyticsHot = campaign.hot ?? 0;
+  const analyticsCold = campaign.cold ?? 0;
+  const analyticsReplyRate = analyticsSent > 0 ? Math.round((analyticsReplied / analyticsSent) * 100) : 0;
+
+  // NOTE: --primary/--muted-foreground already hold a complete `hsl(...)` string
+  // (set dynamically in lib/branding.ts), so wrapping them again in `hsl(var(...))`
+  // is invalid CSS and silently falls back to black — use the var directly.
+  // Colors are solid (no opacity shading) and keyed by stage id, not array
+  // position, since stageDistribution only includes non-empty stages and their
+  // order/count shifts per campaign.
+  const PIPELINE_STAGE_STYLE: Record<string, { fill: string; opacity: number }> = {
+    pending:  { fill: "var(--muted-foreground)", opacity: 0.35 },
+    draft:    { fill: "var(--primary)", opacity: 1 },
+    approved: { fill: "var(--primary)", opacity: 1 },
+    sent:     { fill: "var(--primary)", opacity: 1 },
+    replied:  { fill: "#22c55e", opacity: 1 },
+  };
+  const pipelineData = report && report.stageDistribution.length > 0
+    ? report.stageDistribution.map((s) => ({ name: s.label, value: s.count, ...(PIPELINE_STAGE_STYLE[s.stage] ?? { fill: "var(--primary)", opacity: 1 }) }))
+    : [{ name: "No data", value: 1, fill: "var(--muted)", opacity: 1 }];
+
+  const funnelData = report ? [
+    { name: "Leads",  v: report.totals.leads,           fill: "var(--primary)", opacity: 1 },
+    { name: "Gen",    v: report.totals.draftsGenerated, fill: "var(--primary)", opacity: 1 },
+    { name: "Cert",   v: report.totals.certified,       fill: "var(--primary)", opacity: 1 },
+    { name: "Sent",   v: report.totals.sent,            fill: "var(--primary)", opacity: 1 },
+    { name: "Failed", v: report.totals.failed,          fill: "#ef4444",        opacity: 1 },
+  ] : [];
+
+  const analyticsNeutral = Math.max(0, analyticsTotalLeads - analyticsHot - analyticsCold);
+  const tempData = [
+    { name: "Hot",     value: analyticsHot,     fill: "#ef4444",             opacity: 1 },
+    { name: "Cold",    value: analyticsCold,     fill: "#0ea5e9",             opacity: 1 },
+    { name: "Neutral", value: analyticsNeutral,  fill: "var(--muted-foreground)", opacity: 0.35 },
+  ].filter((d) => d.value > 0);
+  if (tempData.length === 0) tempData.push({ name: "No data", value: 1, fill: "var(--muted)", opacity: 1 });
+
+  const stepPerformancePct = stepPerformance.map((s) => ({
+    name: `Email ${s.step}`,
+    sent: s.sent,
+    total: s.total,
+    pct: s.total > 0 ? Math.round((s.sent / s.total) * 100) : 0,
+  }));
 
   const OUTBOX_FILTERS: Array<{ id: typeof outboxFilter; label: string }> = [
     { id: "all",       label: "All" },
@@ -954,27 +1008,29 @@ export function CampaignDetail({
           <h1 className="text-sm font-semibold text-foreground truncate min-w-0">{campaign.name}</h1>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-          {draftReadyLeads.length > 0 && (
+        {viewTab === "outbox" && (
+          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {draftReadyLeads.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={certifying}
+                onClick={handleCertifyAll}
+              >
+                {certifying ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+                Certify all ({draftReadyLeads.length})
+              </Button>
+            )}
             <Button
-              variant="outline"
               size="sm"
-              disabled={certifying}
-              onClick={handleCertifyAll}
+              disabled={primaryBusy || certifying || sending || primaryAction.mode === "none"}
+              onClick={() => void handlePrimaryAction()}
             >
-              {certifying ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
-              Certify all ({draftReadyLeads.length})
+              {primaryBusy ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
+              {primaryLabel}
             </Button>
-          )}
-          <Button
-            size="sm"
-            disabled={primaryBusy || certifying || sending || primaryAction.mode === "none"}
-            onClick={() => void handlePrimaryAction()}
-          >
-            {primaryBusy ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
-            {primaryLabel}
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* ── Tab navigation — pill style ──────────────────────────────────── */}
@@ -1066,84 +1122,80 @@ export function CampaignDetail({
             </div>
           ) : (
             /* ── Analytics view ── */
-            <div className="px-6 pb-4 flex flex-col gap-3">
-              {/* Stat strip */}
-              <div className="flex items-stretch border border-border rounded-lg overflow-hidden">
+            <div className="px-6 pb-4 flex flex-col gap-3 flex-1 min-h-0">
+              {/* Stat cards */}
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
                 {[
-                  { label: "Leads",   value: campaign.leads,       cls: "text-foreground" },
-                  { label: "Sent",    value: campaign.sent,        cls: "text-primary" },
-                  { label: "Replied", value: campaign.replied,     cls: "text-primary" },
-                  { label: "Hot",     value: campaign.hot ?? 0,    cls: "text-red-500" },
-                  { label: "Cold",    value: campaign.cold ?? 0,   cls: "text-sky-500" },
-                ].map(({ label, value, cls }, i, arr) => (
-                  <div key={label} className={cn("flex-1 flex flex-col items-center justify-center py-2 bg-card", i < arr.length - 1 && "border-r border-border")}>
-                    <span className={cn("text-xl font-bold tabular-nums leading-tight", cls)}>{value}</span>
-                    <span className="text-[10px] text-muted-foreground mt-0.5">{label}</span>
-                    {i > 0 && (
-                      <span className="text-[9px] text-muted-foreground/50 tabular-nums">
-                        {campaign.leads > 0 ? `${Math.round((Number(value) / campaign.leads) * 100)}%` : "–"}
-                      </span>
-                    )}
+                  { label: "Leads",      value: analyticsTotalLeads, icon: Users,          accent: "" },
+                  { label: "Sent",       value: analyticsSent,       icon: Send,           accent: "" },
+                  { label: "Replied",    value: analyticsReplied,    icon: MessageSquare,  accent: "", sub: `${analyticsReplyRate}% reply rate` },
+                  { label: "Certified",  value: report?.totals.certified ?? 0, icon: CheckCircle2, accent: "", sub: report ? `${report.rates.certifyRate}% of drafts` : undefined },
+                  { label: "Hot",        value: analyticsHot,        icon: Flame,          accent: "red" },
+                  { label: "Cold",       value: analyticsCold,       icon: Snowflake,      accent: "sky" },
+                ].map(({ label, value, icon: Icon, accent, sub }) => (
+                  <div key={label} className="rounded-xl border border-border bg-card p-3 flex flex-col gap-2">
+                    <div
+                      className={cn(
+                        "size-7 rounded-lg flex items-center justify-center border",
+                        accent === "red" ? "bg-red-500/10 border-red-500/20 text-red-400"
+                        : accent === "sky" ? "bg-sky-500/10 border-sky-500/20 text-sky-400"
+                        : "bg-primary/10 border-primary/20 text-primary",
+                      )}
+                    >
+                      <Icon className="size-3.5" />
+                    </div>
+                    <div>
+                      <p className="text-xl font-bold tabular-nums leading-tight">{value}</p>
+                      <p className="text-[10px] text-muted-foreground">{label}</p>
+                      {sub && <p className="text-[9px] text-muted-foreground/60 mt-0.5">{sub}</p>}
+                    </div>
                   </div>
                 ))}
               </div>
 
-              {/* Two-column charts */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Pipeline pie chart */}
-                <div className="rounded-lg border border-border bg-card px-4 py-3">
+              {/* Chart grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {/* Pipeline donut + legend */}
+                <div className="rounded-xl border border-border bg-card p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Pipeline</p>
-                  {(() => {
-                    const sent = campaign.sent ?? 0;
-                    const replied = campaign.replied ?? 0;
-                    const hot = campaign.hot ?? 0;
-                    const cold = campaign.cold ?? 0;
-                    const pending = Math.max(0, campaign.leads - sent);
-                    const segments = [
-                      { name: "Replied", value: replied,  fill: "#22c55e" },
-                      { name: "Sent",    value: Math.max(0, sent - replied), fill: "hsl(var(--primary))" },
-                      { name: "Hot",     value: hot,      fill: "#ef4444" },
-                      { name: "Cold",    value: cold,     fill: "#0ea5e9" },
-                      { name: "Pending", value: pending,  fill: "hsl(var(--muted-foreground) / 0.3)" },
-                    ].filter((s) => s.value > 0);
-                    if (segments.length === 0) segments.push({ name: "No data", value: 1, fill: "hsl(var(--muted))" });
-                    return (
-                      <ResponsiveContainer width="100%" height={120}>
-                        <PieChart>
-                          <Pie data={segments} cx="50%" cy="50%" innerRadius={32} outerRadius={52} dataKey="value" stroke="none">
-                            {segments.map((s, i) => <Cell key={i} fill={s.fill} />)}
-                          </Pie>
-                          <Tooltip
-                            content={({ active, payload }) =>
-                              active && payload?.length ? (
-                                <div className="rounded border border-border bg-card px-2 py-1 text-xs shadow-lg">
-                                  <span className="font-semibold">{payload[0].name}: </span>
-                                  <span>{payload[0].value}</span>
-                                </div>
-                              ) : null
-                            }
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    );
-                  })()}
+                  <div className="flex items-center gap-3">
+                    <ResponsiveContainer width="45%" height={140}>
+                      <PieChart>
+                        <Pie data={pipelineData} cx="50%" cy="50%" innerRadius={36} outerRadius={58} paddingAngle={2} dataKey="value" stroke="none">
+                          {pipelineData.map((s, i) => <Cell key={i} fill={s.fill} fillOpacity={s.opacity} />)}
+                        </Pie>
+                        <Tooltip
+                          content={({ active, payload }) =>
+                            active && payload?.length ? (
+                              <div className="rounded border border-border bg-card px-2 py-1 text-xs shadow-lg">
+                                <span className="font-semibold">{payload[0].name}: </span>
+                                <span>{payload[0].value}</span>
+                              </div>
+                            ) : null
+                          }
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-1.5 min-w-0">
+                      {pipelineData.map((s) => (
+                        <div key={s.name} className="flex items-center justify-between text-xs gap-2">
+                          <span className="flex items-center gap-1.5 text-muted-foreground truncate">
+                            <span className="size-2 rounded-full shrink-0" style={{ background: s.fill, opacity: s.opacity }} />
+                            <span className="truncate">{s.name}</span>
+                          </span>
+                          <span className="font-semibold tabular-nums shrink-0">{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {/* Draft bar chart */}
-                {report ? (
-                  <div className="rounded-lg border border-border bg-card px-4 py-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Drafts</p>
-                    <ResponsiveContainer width="100%" height={120}>
-                      <BarChart
-                        data={[
-                          { name: "Leads",  v: report.totals.leads },
-                          { name: "Gen",    v: report.totals.draftsGenerated },
-                          { name: "Cert",   v: report.totals.certified },
-                          { name: "Sent",   v: report.totals.sent },
-                          { name: "Failed", v: report.totals.failed },
-                        ]}
-                        margin={{ top: 4, right: 4, left: -28, bottom: 0 }}
-                      >
+                {/* Draft funnel bar chart */}
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Draft funnel</p>
+                  {report ? (
+                    <ResponsiveContainer width="100%" height={140}>
+                      <BarChart data={funnelData} margin={{ top: 8, right: 4, left: -28, bottom: 0 }}>
                         <XAxis dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fontSize: 9 }} axisLine={false} tickLine={false} allowDecimals={false} />
                         <Tooltip
@@ -1157,22 +1209,121 @@ export function CampaignDetail({
                           }
                         />
                         <Bar dataKey="v" radius={[3, 3, 0, 0]}>
-                          {[
-                            "hsl(var(--muted-foreground))",
-                            "hsl(var(--primary))",
-                            "hsl(var(--primary) / 0.7)",
-                            "#22c55e",
-                            "#ef4444",
-                          ].map((fill, i) => <Cell key={i} fill={fill} />)}
+                          {funnelData.map((d, i) => <Cell key={i} fill={d.fill} fillOpacity={d.opacity} />)}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
+                  ) : (
+                    <div className="h-[140px] flex items-center justify-center">
+                      {reportLoading ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : (
+                        <p className="text-xs text-muted-foreground">No data yet</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Lead temperature donut + legend */}
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Lead temperature</p>
+                  <div className="flex items-center gap-3">
+                    <ResponsiveContainer width="45%" height={140}>
+                      <PieChart>
+                        <Pie data={tempData} cx="50%" cy="50%" innerRadius={36} outerRadius={58} paddingAngle={2} dataKey="value" stroke="none">
+                          {tempData.map((s, i) => <Cell key={i} fill={s.fill} fillOpacity={s.opacity} />)}
+                        </Pie>
+                        <Tooltip
+                          content={({ active, payload }) =>
+                            active && payload?.length ? (
+                              <div className="rounded border border-border bg-card px-2 py-1 text-xs shadow-lg">
+                                <span className="font-semibold">{payload[0].name}: </span>
+                                <span>{payload[0].value}</span>
+                              </div>
+                            ) : null
+                          }
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex-1 space-y-1.5 min-w-0">
+                      {tempData.map((s) => (
+                        <div key={s.name} className="flex items-center justify-between text-xs gap-2">
+                          <span className="flex items-center gap-1.5 text-muted-foreground truncate">
+                            <span className="size-2 rounded-full shrink-0" style={{ background: s.fill, opacity: s.opacity }} />
+                            <span className="truncate">{s.name}</span>
+                          </span>
+                          <span className="font-semibold tabular-nums shrink-0">{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ) : reportLoading ? (
-                  <div className="rounded-lg border border-border bg-card px-4 py-3 flex items-center justify-center">
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              </div>
+
+              {/* Sequence step performance + Replied vs Sent */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {stepPerformancePct.length > 0 && (
+                  <div className="rounded-xl border border-border bg-card p-4 lg:col-span-2">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Sequence step performance</p>
+                      <InfoTip
+                        side="right"
+                        text="Each row is one email in this campaign's sequence — Email 1 is the initial outreach, Email 2 is the first follow-up, and so on. The bar shows what percentage of leads at that step have already had their email sent."
+                      />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mb-3">% of leads sent, per email in the sequence</p>
+                    <div className="space-y-3">
+                      {stepPerformancePct.map((s) => (
+                        <div key={s.name}>
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="font-medium">{s.name}</span>
+                            <span className="text-muted-foreground tabular-nums">{s.sent}/{s.total} sent · {s.pct}%</span>
+                          </div>
+                          <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{ width: `${s.pct}%`, background: "var(--primary)" }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ) : null}
+                )}
+
+                {/* Replied vs Sent */}
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Replied vs. sent</p>
+                  <p className="text-[10px] text-muted-foreground mb-2">
+                    {analyticsReplyRate}% of sent emails on this campaign got a reply
+                  </p>
+                  <ResponsiveContainer width="100%" height={140}>
+                    <BarChart
+                      data={[
+                        { name: "Sent",    v: analyticsSent,    fill: "var(--primary)", opacity: 1 },
+                        { name: "Replied", v: analyticsReplied, fill: "#22c55e",         opacity: 1 },
+                      ]}
+                      margin={{ top: 8, right: 4, left: -28, bottom: 0 }}
+                    >
+                      <XAxis dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 9 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip
+                        content={({ active, payload, label }) =>
+                          active && payload?.length ? (
+                            <div className="rounded border border-border bg-card px-2 py-1 text-xs shadow-lg">
+                              <span className="font-semibold">{label}: </span>
+                              <span>{payload[0].value}</span>
+                            </div>
+                          ) : null
+                        }
+                      />
+                      <Bar dataKey="v" radius={[3, 3, 0, 0]}>
+                        {[
+                          { fill: "var(--primary)", opacity: 1 },
+                          { fill: "#22c55e",         opacity: 1 },
+                        ].map((d, i) => <Cell key={i} fill={d.fill} fillOpacity={d.opacity} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
           )}
@@ -1219,24 +1370,6 @@ export function CampaignDetail({
               </button>
             </div>
 
-            {draftReadyLeads.length > 0 && (
-              <button
-                type="button"
-                onClick={toggleAllDraftReady}
-                className="text-[11px] text-muted-foreground hover:text-foreground"
-              >
-                {draftReadyLeads.every((cl) => checkedIds.has(cl.id)) ? "Deselect all" : "Select all draft-ready"}
-              </button>
-            )}
-            {sendReadyLeads.length > 0 && (
-              <button
-                type="button"
-                onClick={toggleAllSendReady}
-                className="text-[11px] text-muted-foreground hover:text-foreground"
-              >
-                {sendReadyLeads.every((cl) => checkedIds.has(cl.id)) ? "Deselect all" : "Select all send-ready"}
-              </button>
-            )}
           </div>
 
           {/* Table */}
@@ -1252,18 +1385,17 @@ export function CampaignDetail({
                   {leadsSearch ? "No leads match your search." : "No leads yet."}
                 </div>
               ) : (
-                <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                <table className="w-full text-sm border-collapse">
+                <div className="inline-block max-w-full rounded-xl border border-border bg-card shadow-sm overflow-x-auto overflow-y-hidden">
+                <table className="text-sm border-collapse">
                   <thead className="sticky top-0 z-10 bg-secondary/60 backdrop-blur-sm">
                     <tr className="border-b border-border">
-                      <th className="w-10 px-3 py-2.5 text-left" />
-                      <th className="w-10 px-2 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">#</th>
-                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Name</th>
-                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Email</th>
-                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Job Title</th>
-                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Status</th>
-                      <th className="px-3 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Company</th>
-                      <th className="w-10 px-2 py-2.5" />
+                      <th className="w-8 px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">#</th>
+                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Name</th>
+                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Email</th>
+                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Job Title</th>
+                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Status</th>
+                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Company</th>
+                      <th className="w-8 px-6 py-2.5" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1271,9 +1403,6 @@ export function CampaignDetail({
                       const lead = cl.leads;
                       const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
                       const isSelected = selectedId === cl.id;
-                      const canCertifyCheck = cl.email_drafts?.status === "draft";
-                      const canSendCheck = sendReadyLeads.some((s) => s.id === cl.id);
-                      const showCheckbox = canCertifyCheck || canSendCheck;
                       return (
                         <tr
                           key={cl.id}
@@ -1283,37 +1412,20 @@ export function CampaignDetail({
                             isSelected ? "bg-primary/10" : "hover:bg-secondary/40",
                           )}
                         >
-                          <td className="w-10 px-3 py-3">
-                            {showCheckbox ? (
-                              <span
-                                role="checkbox"
-                                aria-checked={checkedIds.has(cl.id)}
-                                onClick={(e) => toggleCheck(cl.id, e)}
-                                className={cn(
-                                  "flex size-4 rounded items-center justify-center shrink-0 transition-colors cursor-pointer",
-                                  checkedIds.has(cl.id) ? "bg-primary ring-2 ring-primary" : "bg-transparent ring-2 ring-muted-foreground/70",
-                                )}
-                              >
-                                {checkedIds.has(cl.id) && <Check className="size-2.5 text-primary-foreground" />}
-                              </span>
-                            ) : (
-                              <span className="size-4 block" />
-                            )}
-                          </td>
-                          <td className="w-10 px-2 py-3 text-xs text-muted-foreground tabular-nums">{index + 1}</td>
-                          <td className="px-3 py-3">
+                          <td className="w-8 px-6 py-3 text-xs text-muted-foreground tabular-nums border-r border-border">{index + 1}</td>
+                          <td className="px-6 py-3 border-r border-border">
                             <div className="flex items-center gap-2">
                               <Avatar name={name} size="sm" />
                               <span className="font-medium truncate max-w-[140px]">{name}</span>
                             </div>
                           </td>
-                          <td className="px-3 py-3 text-xs text-muted-foreground">
-                            <span className="truncate block max-w-[160px]">{lead?.email}</span>
+                          <td className="px-6 py-3 text-xs text-muted-foreground border-r border-border">
+                            <span className="whitespace-nowrap">{lead?.email}</span>
                           </td>
-                          <td className="px-3 py-3 text-xs text-muted-foreground">
+                          <td className="px-6 py-3 text-xs text-muted-foreground border-r border-border">
                             <span className="truncate block max-w-[120px]">{lead?.title}</span>
                           </td>
-                          <td className="px-3 py-3">
+                          <td className="px-6 py-3 border-r border-border">
                             <div className="flex flex-wrap gap-1">
                               {(() => {
                                 const ds = cl.email_drafts?.status;
@@ -1359,10 +1471,10 @@ export function CampaignDetail({
                               })()}
                             </div>
                           </td>
-                          <td className="px-3 py-3 text-xs text-muted-foreground">
+                          <td className="px-6 py-3 text-xs text-muted-foreground border-r border-border">
                             <span className="truncate block max-w-[120px]">{lead?.company_name}</span>
                           </td>
-                          <td className="w-10 px-2 py-3">
+                          <td className="w-8 px-6 py-3">
                             <Button
                               type="button"
                               variant="ghost"
@@ -2013,20 +2125,38 @@ export function CampaignDetail({
                     })()}
                   </div>
                   {seqHasContent && (
-                    <button
-                      type="button"
-                      disabled={seqStepSaving}
-                      onClick={() => void handleSaveSeqDraft()}
-                      className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
-                    >
-                      {seqStepSaving ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
-                      Save
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSeqRegenOpen((o) => !o)}
+                        disabled={seqRegenerating}
+                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 disabled:opacity-60 transition-colors"
+                      >
+                        <RotateCcw className="size-3" />
+                        Regenerate
+                      </button>
+                      <button
+                        type="button"
+                        disabled={seqStepSaving || seqRegenerating}
+                        onClick={() => void handleSaveSeqDraft()}
+                        className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
+                      >
+                        {seqStepSaving ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                        Save
+                      </button>
+                    </div>
                   )}
                 </div>
 
                 {seqHasContent ? (
                   <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                    {seqRegenerating ? (
+                      <div className="flex flex-col items-center py-16 gap-3">
+                        <Loader2 className="size-6 text-muted-foreground animate-spin" />
+                        <p className="text-sm text-muted-foreground">Regenerating follow-up…</p>
+                      </div>
+                    ) : (
+                      <>
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
                       <Input
@@ -2042,8 +2172,25 @@ export function CampaignDetail({
                         value={seqBodyEdit}
                         onChange={setSeqBodyEdit}
                         minHeight={280}
+                        showTemplateVars
                       />
                     </div>
+                    {seqRegenOpen && (
+                      <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
+                        <Input
+                          value={seqRegenQuery}
+                          onChange={(e) => setSeqRegenQuery(e.target.value)}
+                          placeholder="Optional instruction, e.g. Make it shorter…"
+                          className="text-sm"
+                          onKeyDown={(e) => { if (e.key === "Enter") void handleRegenerateSeqDraft(); }}
+                        />
+                        <Button size="sm" disabled={seqRegenerating} onClick={() => void handleRegenerateSeqDraft()} className="gap-1.5">
+                          <RotateCcw className="size-3.5" /> Regenerate
+                        </Button>
+                      </div>
+                    )}
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="rounded-xl border border-border bg-card p-8 text-center">
