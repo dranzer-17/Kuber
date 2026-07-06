@@ -1772,7 +1772,10 @@ export function CampaignDetail({
                           </Button>
                         </>
                       )}
-                      {["draft", "failed", "rejected"].includes(selected.email_drafts.status) && !isPreviewingHistory && (
+                      {/* Available for any lead not yet sent — draft, approved (certified), failed, or rejected —
+                          so a fresh draft can be regenerated against the current prompt without an extra
+                          reopen step, matching what the regenerate API already allows. */}
+                      {["draft", "approved", "failed", "rejected"].includes(selected.email_drafts.status) && !isPreviewingHistory && (
                         <Button variant="outline" className="gap-1.5" onClick={() => setRegenOpen((o) => !o)}>
                           <RotateCcw className="size-3.5" /> Regenerate
                         </Button>
