@@ -6,22 +6,26 @@ import {
   getEmailSignature,
   getProductOfferings,
   getCompanyContext,
+  getDraftTemplateConfig,
+  type DraftTemplateConfig,
 } from "@/lib/services/settings";
 
 // The LLM is asked for the SUBJECT, a short personalised INTRO, and (step 1 only)
 // which pre-approved KEY_STRENGTHS to feature — never the offerings/accolades/
-// closing text itself. The exact figures and claims are assembled in code (see
-// HIGHLIGHT_TEXT / OUR_OFFERINGS_BLOCK / ACCOLADES_BLOCK / CLOSING_* below) so
-// every number and certification sent to a real prospect is guaranteed accurate,
-// while the wording around them still varies per lead.
-const HIGHLIGHT_KEYS = ["capacity", "global", "expertise", "revenue"] as const;
-type HighlightKey = (typeof HIGHLIGHT_KEYS)[number];
+// closing text itself. The exact figures and claims come from the admin-editable
+// DraftTemplateConfig (see lib/services/settings.ts) so every number and
+// certification sent to a real prospect is guaranteed accurate, while the
+// wording around them still varies per lead and can be changed from Settings
+// without a code deploy.
 
 const DraftSchema = z.object({
   subject: z.string(),
   intro: z.string(),
   product_match: z.string(),
-  key_highlights: z.array(z.enum(HIGHLIGHT_KEYS)).optional(),
+  // Loose on purpose: a hallucinated/mis-worded key here shouldn't fail the whole
+  // draft (subject/intro are the content that matters). buildKeyStrengthsBlock
+  // filters out anything that isn't a real HighlightKey and falls back to defaults.
+  key_highlights: z.array(z.string()).optional(),
 });
 
 type DraftLLMOutput = z.infer<typeof DraftSchema>;
@@ -93,71 +97,20 @@ function pickVariant<T>(leadId: string, role: string, arr: readonly T[]): T {
   return arr[hash % arr.length];
 }
 
-const SUBJECT_PATTERNS = [
-  "Greetings from Kuber Polyplast | Exploring Opportunities with [Company Name]",
-  "Introduction: Kuber Polyplast | Masterbatch Solutions for [Industry]",
-  "Kuber Polyplast | Connecting with [Company Name]",
-  "Exploring Synergies: Kuber Polyplast and [Company Name]",
-  "Kuber Polyplast | Masterbatch & Compounds for [Industry/Country] Manufacturers",
-];
-
-function pickSubjectPattern(leadId: string): string {
-  return pickVariant(leadId, "subject", SUBJECT_PATTERNS);
+function pickSubjectPattern(leadId: string, patterns: string[]): string {
+  return pickVariant(leadId, "subject", patterns);
 }
 
-// Everything below the intro is assembled here in code — never authored by the
-// LLM — guaranteeing every figure, certification, and claim sent to a real
-// prospect is exactly right. Each piece rotates through a few pre-approved,
-// fact-equivalent phrasings so consecutive emails don't read as identical
-// boilerplate, without ever letting the model invent new claims.
-const OPENING_VARIANTS = [
-  "I hope this message finds you well.",
-  "I hope you're having a productive week.",
-  "Thank you for taking a moment to read this.",
-  "Reaching out because I think this could be genuinely useful for your team.",
-];
-
-const COMPANY_INTRO_VARIANTS = [
-  "It is my pleasure to introduce Kuber Polyplast, a trusted name in the masterbatch industry with over 30 years of experience. As an ISO 9001:2015 certified company based in Delhi, we specialise in delivering top-quality products tailored to meet your needs.",
-  "Kuber Polyplast has been a trusted masterbatch manufacturer for over 30 years, ISO 9001:2015 certified and based in Delhi, with a track record of tailoring products to what our clients actually need.",
-  "A quick introduction: Kuber Polyplast is an ISO 9001:2015 certified masterbatch manufacturer based in Delhi with 30+ years in the industry, built around tailoring products to each client's specific requirements.",
-  "For context, Kuber Polyplast is a Delhi-based, ISO 9001:2015 certified masterbatch manufacturer with over three decades of experience delivering products tailored to our clients' needs.",
-];
-
-const OUR_OFFERINGS_BLOCK = `**Our Offerings:**
-• **Masterbatches**: Black, White, Colour and Additive Masterbatches
-• **Application Suitability**: Tested for film extrusion, sheet extrusion, injection molding, blow molding, and roto molding`;
-
-// The LLM picks which 2-3 of these to feature per lead (see key_highlights) —
-// the wording and figures themselves are fixed, never LLM-authored.
-const HIGHLIGHT_TEXT: Record<HighlightKey, string> = {
-  capacity: "**Annual Production Capacity**: 18,000 MT",
-  global: "**Global Presence**: Serving 6,670+ clients across 40+ countries",
-  expertise: "**Proven Expertise**: Over 57,000 unique masterbatches developed with 1,042,440 hours of experience",
-  revenue: "**Impressive Revenue**: $2.4 billion (₹20,360 crore) client revenue achieved to date",
-};
-const DEFAULT_HIGHLIGHTS: HighlightKey[] = ["global", "expertise"];
-
-function buildKeyStrengthsBlock(selected: HighlightKey[] | undefined): string {
-  const unique = [...new Set(selected)].filter((k): k is HighlightKey => HIGHLIGHT_KEYS.includes(k));
-  const keys = unique.length >= 2 ? unique.slice(0, 3) : DEFAULT_HIGHLIGHTS;
-  return "**Key Strengths:**\n" + keys.map((k) => `• ${HIGHLIGHT_TEXT[k]}`).join("\n");
+// The LLM picks which 2-3 highlight keys to feature per lead (see key_highlights)
+// — the wording/figures themselves come from the admin-editable template config,
+// never LLM-authored. The key set itself (capacity/global/expertise/revenue)
+// stays fixed in code since it's structural, not copy.
+function buildKeyStrengthsBlock(selected: string[] | undefined, template: DraftTemplateConfig): string {
+  const validKeys = Object.keys(template.highlightText);
+  const unique = [...new Set(selected)].filter((k) => validKeys.includes(k));
+  const keys = unique.length >= 2 ? unique.slice(0, 3) : template.defaultHighlights;
+  return "**Key Strengths:**\n" + keys.map((k) => `• ${template.highlightText[k]}`).join("\n");
 }
-
-const ACCOLADES_BLOCK = `**Accolades & Clients:**
-• **Awards**: Udaan Award (Rising Star in Masterbatch)
-• **Trusted Partners**: APL Apollo, UFlex, Wipro, Phillips, BSNL, and more`;
-
-const CLOSING_NO_ATTACHMENT_VARIANTS = [
-  "If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.",
-  "Happy to share more detail or answer any questions if this would be useful to you.",
-  "Let me know if this is relevant to your work. Glad to share more detail or set up a quick call.",
-];
-const CLOSING_WITH_ATTACHMENT_VARIANTS = [
-  "Please find our brochure for further details on how we can support your needs. If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.",
-  "I've attached our brochure with more detail on how we could support you. Happy to answer any questions or set up a quick call.",
-  "Our brochure is attached and covers this in more depth. Let me know if you have questions or would like to set up a short call.",
-];
 
 // Hard guardrails appended in code so they apply regardless of what the
 // editable settings prompt says.
@@ -170,6 +123,7 @@ NON-NEGOTIABLE RULES (override anything above if in conflict):
 2. ATTACHMENTS: never claim a file, brochure, or attachment is included unless the lead data explicitly says one is attached.
 3. Keep it personal and specific to the lead's business if a fact is available, but brevity matters more than detail here.
 4. NO FABRICATION: never state a price, discount, percentage, certification, technical spec, or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. If none is given, stay qualitative — do not invent a number to sound persuasive.
+4b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into this follow-up nudge whenever it's relevant to the lead (e.g. a live promotion, seasonal offer, or specific message they want featured), not just permission to mention it if you feel like it.
 5. FORMATTING: wrap at most one or two concrete facts (a product name, figure, or certification actually present in the data) in **double asterisks** so they render bold, matching the rest of the email. Do not bold whole sentences or generic phrases.
 6. NO EM DASHES: never use an em dash (—) anywhere in your text. Split into two sentences, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.`;
   }
@@ -182,6 +136,7 @@ NON-NEGOTIABLE RULES (override anything above if in conflict):
 4. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally (e.g. white masterbatch for dairy packaging film) when the lead's industry plausibly uses it. Set product_match accordingly.
 5. SUBJECT: Use exactly the subject pattern given in the lead data, filling the bracketed part with the lead's real company name, industry, or country. Do not use a different pattern.
 6. NO FABRICATION: never state a price, discount, percentage, certification, technical spec (e.g. TiO2 content, MFI, density), or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. Qualitative claims ("consistent opacity", "food-grade options") are fine; invented numbers are not.
+6b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into the intro whenever it's relevant to the lead (e.g. a live promotion, seasonal offer, or specific message they want featured), not just permission to mention it if you feel like it.
 7. FORMATTING: wrap at most one or two concrete facts actually present in the data (the matched product's name, or a real figure/certification from the PRODUCT REFERENCE LIBRARY or lead data) in **double asterisks** so they render bold — matching the bold styling used in the rest of the email. Do not bold whole sentences, generic phrases, or anything not grounded in the supplied data.
 8. KEY HIGHLIGHTS: from the "Available Key Strengths" list below, choose the 2 (max 3) keys most relevant to this lead's industry or scale and return them as key_highlights, e.g. a large manufacturer cares more about capacity/global reach, a niche buyer may care more about expertise. Use only the exact keys given — never invent a new key, wording, or number.
 9. NO EM DASHES: never use an em dash (—) anywhere in your text, including to string together two or three ideas in one sentence. One idea per sentence; split with a period, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.`;
@@ -197,6 +152,7 @@ function buildUserPrompt(
   lead: LeadRow,
   campaignName: string,
   companyContext: string,
+  template: DraftTemplateConfig,
   customInstruction?: string,
   aiPromptContext?: string,
   stepNumber = 1,
@@ -216,12 +172,12 @@ function buildUserPrompt(
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
     `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email — this is handled in the closing, do not mention it yourself` : "No attachment — do NOT mention any attachment or brochure anywhere in your intro"}`,
-    `Subject pattern to use: ${pickSubjectPattern(lead.id)}`,
+    `Subject pattern to use: ${pickSubjectPattern(lead.id, template.subjectPatterns)}`,
   ];
   if (stepNumber === 1) {
     lines.push(
       "Available Key Strengths (pick 2-3 by key for key_highlights, do not alter wording/numbers):",
-      ...Object.entries(HIGHLIGHT_TEXT).map(([key, text]) => `- ${key}: ${text.replace(/\*\*/g, "")}`),
+      ...Object.entries(template.highlightText).map(([key, text]) => `- ${key}: ${text.replace(/\*\*/g, "")}`),
     );
   }
   if (companyContext) lines.push(`Company context: ${companyContext}`);
@@ -300,10 +256,11 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const [baseSystemPrompt, products, companyContext] = await Promise.all([
+    const [baseSystemPrompt, products, companyContext, template] = await Promise.all([
       getDraftSystemPrompt(db),
       getProductOfferings(db),
       getCompanyContext(db),
+      getDraftTemplateConfig(db),
     ]);
     const systemPrompt =
       baseSystemPrompt
@@ -313,11 +270,17 @@ export async function generateOneDraft(
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
-      user: buildUserPrompt(lead, campaignName, companyContext, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
+      user: buildUserPrompt(lead, campaignName, companyContext, template, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
     });
 
     const validated = DraftSchema.safeParse(json);
-    if (!validated.success) throw new Error("Draft shape mismatch");
+    if (!validated.success) {
+      const issues = validated.error.issues
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ");
+      console.error("Draft schema validation failed for lead", lead.id, issues, json);
+      throw new Error(`Draft shape mismatch — ${issues}`);
+    }
 
     // Strip any greeting/sign-off/placeholder the LLM emitted despite instructions,
     // and — defense in depth — any attachment/brochure mention it slipped into the
@@ -347,16 +310,16 @@ export async function generateOneDraft(
       stepNumber > 1
         ? aiIntro
         : [
-            pickVariant(lead.id, "opening", OPENING_VARIANTS),
+            pickVariant(lead.id, "opening", template.openingVariants),
             aiIntro,
-            pickVariant(lead.id, "company", COMPANY_INTRO_VARIANTS),
-            OUR_OFFERINGS_BLOCK,
-            buildKeyStrengthsBlock(validated.data.key_highlights),
-            ACCOLADES_BLOCK,
+            pickVariant(lead.id, "company", template.companyIntroVariants),
+            template.offeringsBlock,
+            buildKeyStrengthsBlock(validated.data.key_highlights, template),
+            template.accoladesBlock,
             pickVariant(
               lead.id,
               effectiveAttachmentName ? "closing-attach" : "closing-noattach",
-              effectiveAttachmentName ? CLOSING_WITH_ATTACHMENT_VARIANTS : CLOSING_NO_ATTACHMENT_VARIANTS,
+              effectiveAttachmentName ? template.closingWithAttachmentVariants : template.closingNoAttachmentVariants,
             ),
           ].filter(Boolean).join("\n\n");
 

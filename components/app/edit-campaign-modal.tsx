@@ -194,7 +194,7 @@ export function EditCampaignForm({
                 const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
                 setFollowupSteps((prev) => prev.map((s, i) => i === idx ? { ...s, delay: v } : s));
               }}
-              className="h-7 w-9 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+              className="h-7 w-12 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
             />
             <Select
               value={step.delay_unit}
@@ -204,7 +204,7 @@ export function EditCampaignForm({
                 )
               }
             >
-              <SelectTrigger className="h-7 w-fit min-w-0 justify-start gap-0 border-0 bg-transparent px-0 text-xs text-muted-foreground shadow-none">
+              <SelectTrigger className="h-7 w-fit min-w-0 justify-start gap-0 border-0 bg-transparent pl-0 pr-1 -ml-1 text-xs text-muted-foreground shadow-none">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent align="start" className="min-w-24">
@@ -251,78 +251,99 @@ export function EditCampaignForm({
     const fieldBlock = "space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm";
 
     return (
-      <div className={cn("space-y-8", className)}>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-10 gap-y-8">
-          {/* Col 1: identity & AI */}
-          <div className="space-y-8">
+      <div className={cn("space-y-6", className)}>
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Left: identity & AI */}
+          <div className="space-y-6 lg:col-span-2">
             <div className={fieldBlock}>
               <Label className="text-sm font-medium">Sender name</Label>
               <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
               <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" className="bg-background" />
             </div>
 
-            <div className={fieldBlock}>
+            <div className={cn(fieldBlock, "flex flex-1 flex-col")}>
               <Label className="text-sm font-medium">Additional context for AI</Label>
               <p className="text-xs text-muted-foreground">Extra guidance the AI uses when writing emails</p>
               <Textarea
                 value={aiPromptContext}
                 onChange={(e) => setAiPromptContext(e.target.value)}
                 placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
-                rows={5}
-                className="bg-background"
+                className="bg-background flex-1 min-h-32 resize-none"
               />
             </div>
           </div>
 
-          {/* Col 2: volume & window */}
-          <div className="space-y-8">
-            <div className={fieldBlock}>
-              <div className="flex items-center gap-2">
-                <Gauge className="size-4 text-muted-foreground shrink-0" />
-                <Label className="text-sm font-medium">Daily limit</Label>
+          {/* Right: schedule & limits — one compact card, no dead space */}
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden lg:col-span-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0">
+              <div className="flex flex-col gap-3 px-5 py-4 sm:border-r sm:border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <Gauge className="size-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium leading-none">Daily limit</p>
+                    <p className="text-xs text-muted-foreground mt-1">Emails sent per day across all senders</p>
+                  </div>
+                </div>
+                <Input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={dailyLimit}
+                  onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
+                  className="h-9 w-24 text-center bg-background"
+                />
               </div>
-              <p className="text-xs text-muted-foreground">Emails sent per day across all senders</p>
-              <Input
-                type="number"
-                min={1}
-                max={500}
-                value={dailyLimit}
-                onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                className="h-9 w-24 text-center bg-background"
-              />
-            </div>
 
-            <div className={fieldBlock}>
-              <div className="flex items-center gap-2">
-                <Clock className="size-4 text-muted-foreground shrink-0" />
-                <Label className="text-sm font-medium">Sending window</Label>
+              <div className="flex flex-col gap-3 px-5 py-4 sm:border-b border-border">
+                <div className="flex items-center gap-2.5">
+                  <Clock className="size-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium leading-none">Sending window</p>
+                    <p className="text-xs text-muted-foreground mt-1">Local time of recipient</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <TimeSelect value={windowFrom} onChange={setWindowFrom} />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <TimeSelect value={windowTo} onChange={setWindowTo} />
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">Local time of recipient</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <TimeSelect value={windowFrom} onChange={setWindowFrom} />
-                <span className="text-xs text-muted-foreground">to</span>
-                <TimeSelect value={windowTo} onChange={setWindowTo} />
-              </div>
-            </div>
-          </div>
 
-          {/* Col 3: send days */}
-          <div className="space-y-8 md:col-span-2 xl:col-span-1">
-            <div className={fieldBlock}>
-              <div className="flex items-center gap-2">
-                <Calendar className="size-4 text-muted-foreground shrink-0" />
-                <Label className="text-sm font-medium">Send days</Label>
+              <div className="flex flex-col gap-3 px-5 py-4 sm:border-r border-border">
+                <div className="flex items-center gap-2.5">
+                  <Globe className="size-4 text-muted-foreground shrink-0" />
+                  <p className="text-sm font-medium leading-none">Timezone</p>
+                </div>
+                <Select value={timezone} onValueChange={setTimezone}>
+                  <SelectTrigger className="h-9 w-full bg-background">
+                    <SelectValue placeholder="Select timezone" />
+                  </SelectTrigger>
+                  <SelectContent align="start" className="min-w-45">
+                    {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((tz) => (
+                      <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <p className="text-xs text-muted-foreground">Days emails will be sent</p>
-              <div className="flex flex-wrap gap-2">
-                {DAYS.map((day) => (
-                  <DayPill
-                    key={day}
-                    day={DAY_LABELS[day]}
-                    active={sendDays[day] ?? false}
-                    onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
-                  />
-                ))}
+
+              <div className="flex flex-col gap-3 px-5 py-4">
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="size-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium leading-none">Send days</p>
+                    <p className="text-xs text-muted-foreground mt-1">Days emails will be sent</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {DAYS.map((day) => (
+                    <DayPill
+                      key={day}
+                      day={DAY_LABELS[day]}
+                      active={sendDays[day] ?? false}
+                      onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           </div>

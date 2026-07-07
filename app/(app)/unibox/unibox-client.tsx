@@ -17,7 +17,6 @@ import {
   type UniboxMessage,
   type UniboxThreadSummary,
 } from "@/lib/api-client";
-import { UniboxFilterRail } from "@/components/app/unibox/unibox-filter-rail";
 import { UniboxThreadList } from "@/components/app/unibox/unibox-thread-list";
 import { UniboxThreadView } from "@/components/app/unibox/unibox-thread-view";
 import { UniboxTemperatureBadge } from "@/components/app/unibox/unibox-temperature-badge";
@@ -116,9 +115,9 @@ export function UniboxClient() {
     fetchCampaigns(token).then((c) => setCampaigns(c.map((x) => ({ id: x.id, name: x.name })))).catch(() => {});
   }, [token]);
 
-  const loadDetail = useCallback(async (threadId: string) => {
+  const loadDetail = useCallback(async (threadId: string, opts?: { silent?: boolean }) => {
     if (!token) return;
-    setDetailLoading(true);
+    if (!opts?.silent) setDetailLoading(true);
     try {
       const detail = await fetchUniboxThread(token, threadId, true);
       setThreadDetail(detail);
@@ -129,7 +128,7 @@ export function UniboxClient() {
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setDetailLoading(false);
+      if (!opts?.silent) setDetailLoading(false);
     }
   }, [token]);
 
@@ -185,14 +184,6 @@ export function UniboxClient() {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        <UniboxFilterRail
-          campaignIds={campaignIds}
-          eaccount={eaccount}
-          campaigns={campaigns}
-          eaccounts={eaccounts}
-          onCampaigns={setCampaignIds}
-          onEaccount={setEaccount}
-        />
         <UniboxThreadList
           threads={threads}
           selectedId={selectedId}
@@ -201,6 +192,12 @@ export function UniboxClient() {
           readState={readState}
           interest={interest}
           unreadTotal={unreadTotal}
+          campaignIds={campaignIds}
+          campaigns={campaigns}
+          eaccount={eaccount}
+          eaccounts={eaccounts}
+          onCampaigns={setCampaignIds}
+          onEaccount={setEaccount}
           onReadState={setReadState}
           onInterest={setInterest}
           onSearch={setSearch}
@@ -235,7 +232,7 @@ export function UniboxClient() {
                     onChange={(v) => {
                       if (!token || !selectedId) return;
                       void setThreadStatus(token, selectedId, v, selectedSummary.lead_email ?? undefined)
-                        .then(() => { void loadThreads(false); void loadDetail(selectedId); })
+                        .then(() => { void loadThreads(false); void loadDetail(selectedId, { silent: true }); })
                         .catch((e) => toast.error((e as Error).message));
                     }}
                   />
@@ -256,7 +253,7 @@ export function UniboxClient() {
                     canReply={!!threadDetail?.reply_to_uuid}
                     pendingDraft={pendingDraft}
                     replyToSubject={threadDetail?.messages?.find((m) => m.direction === "received")?.subject ?? null}
-                    onChanged={() => { void loadThreads(false); void loadDetail(selectedId!); }}
+                    onChanged={() => { void loadThreads(false); void loadDetail(selectedId!, { silent: true }); }}
                   />
                 </div>
               )}

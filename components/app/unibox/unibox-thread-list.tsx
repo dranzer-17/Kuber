@@ -9,6 +9,7 @@ import {
   type UniboxInterestFilter,
   type UniboxReadStateFilter,
 } from "@/components/app/unibox/unibox-status-filter";
+import { CampaignMultiSelect, InboxSelect } from "@/components/app/unibox/unibox-filters";
 
 type Props = {
   threads: UniboxThreadSummary[];
@@ -18,6 +19,12 @@ type Props = {
   readState: UniboxReadStateFilter;
   interest: UniboxInterestFilter;
   unreadTotal: number;
+  campaignIds: string[];
+  campaigns: Array<{ id: string; name: string }>;
+  eaccount: string | null;
+  eaccounts: string[];
+  onCampaigns: (ids: string[]) => void;
+  onEaccount: (e: string | null) => void;
   onReadState: (v: UniboxReadStateFilter) => void;
   onInterest: (v: UniboxInterestFilter) => void;
   onSearch: (q: string) => void;
@@ -28,11 +35,16 @@ type Props = {
 
 export function UniboxThreadList({
   threads, selectedId, search, loading, readState, interest, unreadTotal,
+  campaignIds, campaigns, eaccount, eaccounts, onCampaigns, onEaccount,
   onReadState, onInterest, onSearch, onSelect, onLoadMore, hasMore,
 }: Props) {
   return (
     <div className="w-[380px] shrink-0 border-r border-border flex flex-col bg-card/30">
       <div className="p-3 border-b border-border space-y-2">
+        <div className="flex items-center justify-end gap-1.5">
+          <CampaignMultiSelect items={campaigns} selectedIds={campaignIds} onChange={onCampaigns} />
+          <InboxSelect eaccount={eaccount} eaccounts={eaccounts} onEaccount={onEaccount} />
+        </div>
         <UniboxStatusFilter
           readState={readState}
           interest={interest}
@@ -45,7 +57,7 @@ export function UniboxThreadList({
           placeholder="Search by lead name…"
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          className="w-full h-8 px-3 rounded-md border border-border bg-background text-xs"
+          className="w-full h-8 px-3 rounded-md border border-border bg-card text-xs"
         />
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1">

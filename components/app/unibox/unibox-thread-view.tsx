@@ -6,13 +6,14 @@ import Link from "next/link";
 import { ChevronDown, ExternalLink, Loader2, Reply, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { splitQuotedBody } from "@/lib/email-display";
+import { splitQuotedBody, emailPreview } from "@/lib/email-display";
 import type { ReplyDraft, UniboxMessage } from "@/lib/api-client";
 import { sendUniboxReply } from "@/lib/api-client";
 import { ReplyDraftBox } from "@/components/app/reply-draft-box";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { Avatar } from "@/components/leads/lead-ui";
 
 type Props = {
   messages: UniboxMessage[];
@@ -55,79 +56,110 @@ function QuotedBlock({ quoted, isHtml }: { quoted: string; isHtml: boolean }) {
   );
 }
 
-function MessageBubble({
+function MessageRow({
   m,
   campaign,
   leadName,
+  expanded,
+  onToggle,
 }: {
   m: UniboxMessage;
   campaign: { id: string; name: string } | null;
   leadName: string;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const isOutbound = m.direction !== "received";
+  const senderName = isOutbound ? "You" : leadName;
+  const toLabel = isOutbound ? leadName : "me";
   const { main, quoted } = useMemo(
     () => splitQuotedBody(m.body_html, m.body_text),
     [m.body_html, m.body_text],
   );
   const isHtml = !!m.body_html;
+  const snippet = useMemo(
+    () => emailPreview(m.body_text, m.body_html, 100),
+    [m.body_text, m.body_html],
+  );
+  const isUnread = m.is_unread && !isOutbound;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "w-full flex items-center gap-3 px-4 py-2.5 text-left border-b border-border/60 hover:bg-secondary/40 transition-colors",
+          isUnread && "bg-primary/5",
+        )}
+      >
+        <Avatar name={senderName} size="sm" />
+        <span className={cn("shrink-0 max-w-[160px] truncate text-sm", isUnread ? "font-semibold" : "font-medium text-foreground/90")}>
+          {senderName}
+        </span>
+        <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">
+          {snippet || "(empty message)"}
+        </span>
+        {isUnread && <span className="size-1.5 rounded-full bg-primary shrink-0" />}
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+          {format(new Date(m.timestamp_email), "MMM d")}
+        </span>
+      </button>
+    );
+  }
 
   return (
-    <div className={cn("flex", isOutbound ? "justify-end" : "justify-start")}>
-      <div className={cn("max-w-[85%] space-y-1", isOutbound ? "items-end" : "items-start")}>
-        <div
-          className={cn(
-            "rounded-2xl px-4 py-3 text-sm relative",
-            isOutbound
-              ? "rounded-br-sm bg-primary/10 border border-primary/20"
-              : "rounded-bl-sm bg-secondary border border-border",
-            m.is_unread && !isOutbound && "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
-          )}
-        >
-          {m.is_unread && !isOutbound && (
-            <span
-              className="absolute -left-2 top-3 size-2 rounded-full bg-primary"
-              title="Unread"
-            />
-          )}
-          {main ? (
-            isHtml ? (
-              <div
-                className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0 [&_p:last-child]:leading-snug"
-                dangerouslySetInnerHTML={{ __html: main }}
-              />
-            ) : (
-              <p className="whitespace-pre-wrap">{main}</p>
-            )
-          ) : (
-            <p className="text-muted-foreground italic">(empty message)</p>
-          )}
-          {quoted && <QuotedBlock quoted={quoted} isHtml={isHtml} />}
-          {m.step && isOutbound && (
-            <span className="inline-block mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-              Step {m.step}
-            </span>
-          )}
+    <div className={cn("border-b border-border/60", isUnread && "bg-primary/5")}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-secondary/30 transition-colors"
+      >
+        <Avatar name={senderName} size="sm" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm">{senderName}</span>
+            {isUnread && (
+              <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/25">
+                Unread
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground truncate">to {toLabel}</p>
         </div>
-        <p className="text-[10px] text-muted-foreground px-1 flex items-center gap-1 flex-wrap">
-          <span>
-            {isOutbound ? "You" : leadName} · {format(new Date(m.timestamp_email), "MMM d, h:mm a")}
-          </span>
+        <div className="shrink-0 flex items-center gap-2 text-[11px] text-muted-foreground">
           {campaign && isOutbound && (
-            <>
-              <span>·</span>
-              <Link
-                href={`/campaigns/${campaign.id}`}
-                className="text-primary hover:underline inline-flex items-center gap-0.5"
-              >
-                {campaign.name}
-                <ExternalLink className="size-2.5 opacity-70" />
-              </Link>
-            </>
+            <Link
+              href={`/campaigns/${campaign.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-primary hover:underline inline-flex items-center gap-0.5"
+            >
+              {campaign.name}
+              <ExternalLink className="size-2.5 opacity-70" />
+            </Link>
           )}
-          {m.is_unread && !isOutbound && (
-            <span className="text-primary font-medium">Unread</span>
-          )}
-        </p>
+          <span className="tabular-nums">{format(new Date(m.timestamp_email), "MMM d, h:mm a")}</span>
+        </div>
+      </button>
+      <div className="px-4 pb-4 pl-[52px] text-sm">
+        {main ? (
+          isHtml ? (
+            <div
+              className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
+              dangerouslySetInnerHTML={{ __html: main }}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap">{main}</p>
+          )
+        ) : (
+          <p className="text-muted-foreground italic">(empty message)</p>
+        )}
+        {quoted && <QuotedBlock quoted={quoted} isHtml={isHtml} />}
+        {m.step && isOutbound && (
+          <span className="inline-block mt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Step {m.step}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -207,22 +239,29 @@ export function UniboxThreadView({
   replyToSubject,
   onChanged,
 }: Props) {
-  const [expanded, setExpanded] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
-
-  useEffect(() => {
-    setReplyOpen(false);
-    setExpanded(false);
-  }, [threadId]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const sorted = useMemo(
     () => [...messages].sort((a, b) => a.timestamp_email.localeCompare(b.timestamp_email)),
     [messages],
   );
 
-  const latest = sorted.length > 0 ? sorted[sorted.length - 1] : null;
-  const older = sorted.length > 1 ? sorted.slice(0, -1) : [];
-  const hiddenCount = older.length;
+  useEffect(() => {
+    setReplyOpen(false);
+    const last = sorted.length > 0 ? sorted[sorted.length - 1] : null;
+    setExpandedIds(last ? new Set([last.id]) : new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
+
+  function toggle(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const hasDraftReady = pendingDraft && pendingDraft.status !== "generating" && pendingDraft.status !== "sent";
   const isGenerating = pendingDraft?.status === "generating";
@@ -236,96 +275,82 @@ export function UniboxThreadView({
   }
 
   return (
-    <div className="p-6 space-y-4">
-      {latest && (
-        <>
-          <MessageBubble m={latest} campaign={campaign} leadName={leadName} />
+    <div className="flex flex-col">
+      <div className="rounded-xl border border-border bg-card overflow-hidden mx-6 mt-6">
+        {sorted.map((m) => (
+          <MessageRow
+            key={m.id}
+            m={m}
+            campaign={campaign}
+            leadName={leadName}
+            expanded={expandedIds.has(m.id)}
+            onToggle={() => toggle(m.id)}
+          />
+        ))}
+      </div>
 
-          {canReply && (
-            <div className="flex items-center gap-2 pt-1">
-              <Button
-                size="sm"
-                onClick={() => setReplyOpen((o) => !o)}
-                className="gap-1.5 rounded-full px-4"
-              >
-                <Reply className="size-3.5" />
-                Reply
-                <ChevronDown className={cn("size-3.5 transition-transform", replyOpen && "rotate-180")} />
-              </Button>
-              {hasDraftReady && !replyOpen && (
-                <button
-                  type="button"
-                  onClick={() => setReplyOpen(true)}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-colors"
-                >
-                  <Sparkles className="size-3" />
-                  AI reply ready
-                </button>
-              )}
-              {isGenerating && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <Loader2 className="size-3 animate-spin" />
-                  Generating draft…
-                </span>
-              )}
-            </div>
-          )}
-
-          {replyOpen && canReply && (
-            <div className="pl-0">
-              {hasDraftReady ? (
-                <ReplyDraftBox
-                  draft={pendingDraft!}
-                  token={token}
-                  onChanged={() => {
-                    onChanged();
-                    setReplyOpen(false);
-                  }}
-                />
-              ) : isGenerating ? (
-                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground py-4">
-                  <Loader2 className="size-4 animate-spin" />
-                  Generating AI reply draft…
-                </div>
-              ) : (
-                <ManualReplyEditor
-                  threadId={threadId}
-                  token={token}
-                  replyToSubject={replyToSubject}
-                  onSent={() => {
-                    onChanged();
-                    setReplyOpen(false);
-                  }}
-                  onCancel={() => setReplyOpen(false)}
-                />
-              )}
-            </div>
-          )}
-        </>
-      )}
-
-      {hiddenCount > 0 && (
-        <>
-          <div className="flex justify-center py-1">
-            <button
-              type="button"
-              onClick={() => setExpanded((e) => !e)}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-full px-4 py-1.5 bg-card/60 hover:bg-secondary/40 transition-colors"
+      <div className="px-6 pb-6 pt-4">
+        {canReply && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setReplyOpen((o) => !o)}
+              className="gap-1.5 rounded-full px-4"
             >
-              <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
-              {expanded ? "Hide messages" : `${hiddenCount} more message${hiddenCount === 1 ? "" : "s"}`}
-            </button>
+              <Reply className="size-3.5" />
+              Reply
+              <ChevronDown className={cn("size-3.5 transition-transform", replyOpen && "rotate-180")} />
+            </Button>
+            {hasDraftReady && !replyOpen && (
+              <button
+                type="button"
+                onClick={() => setReplyOpen(true)}
+                className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-colors"
+              >
+                <Sparkles className="size-3" />
+                AI reply ready
+              </button>
+            )}
+            {isGenerating && (
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Loader2 className="size-3 animate-spin" />
+                Generating draft…
+              </span>
+            )}
           </div>
+        )}
 
-          {expanded && (
-            <div className="space-y-4 pt-1 border-t border-border/50">
-              {older.map((m) => (
-                <MessageBubble key={m.id} m={m} campaign={campaign} leadName={leadName} />
-              ))}
-            </div>
-          )}
-        </>
-      )}
+        {replyOpen && canReply && (
+          <div className="pl-0">
+            {hasDraftReady ? (
+              <ReplyDraftBox
+                draft={pendingDraft!}
+                token={token}
+                onChanged={() => {
+                  onChanged();
+                  setReplyOpen(false);
+                }}
+              />
+            ) : isGenerating ? (
+              <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground py-4">
+                <Loader2 className="size-4 animate-spin" />
+                Generating AI reply draft…
+              </div>
+            ) : (
+              <ManualReplyEditor
+                threadId={threadId}
+                token={token}
+                replyToSubject={replyToSubject}
+                onSent={() => {
+                  onChanged();
+                  setReplyOpen(false);
+                }}
+                onCancel={() => setReplyOpen(false)}
+              />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

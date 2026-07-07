@@ -21,6 +21,7 @@ export const PatchSettingsSchema = z.object({
   product_offerings:       z.string().optional(), // JSON: [{name, description}]
   reply_classifier_prompt: z.string().optional(),
   reply_drafter_prompt:    z.string().optional(),
+  draft_template_config:   z.string().optional(), // JSON: DraftTemplateConfig (see lib/services/settings.ts)
 });
 
 export const SETTINGS_KEYS = [
@@ -41,4 +42,5 @@ export const SETTINGS_KEYS = [
   "product_offerings",
   "reply_classifier_prompt",
   "reply_drafter_prompt",
+  "draft_template_config",
 ] as const;

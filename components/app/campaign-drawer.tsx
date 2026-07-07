@@ -215,7 +215,7 @@ function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
   return "—";
 }
 
-type CampaignViewTab = "analytics" | "leads" | "kanban" | "outbox" | "sequences" | "options";
+type CampaignViewTab = "analytics" | "leads" | "outbox" | "sequences" | "options";
 
 function DraftStatusBadge({
   label,
@@ -263,6 +263,7 @@ export function CampaignDetail({
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
   const [leadsSort, setLeadsSort] = useState<CampaignLeadsSort>("az");
+  const [leadsViewMode, setLeadsViewMode] = useState<"list" | "kanban">("list");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<Array<{ id: string; subject: string | null; body: string | null; status: string; version: number; created_at: string }>>([]);
   const [campaignSteps, setCampaignSteps] = useState<CampaignStepInput[]>([]);
@@ -1063,9 +1064,9 @@ export function CampaignDetail({
 
       {/* ── Tab navigation — pill style ──────────────────────────────────── */}
       <div className="shrink-0 border-b border-border px-6 py-3">
-        <div className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted/40 p-1">
+        <div className="inline-flex items-center gap-0.5 rounded-full border border-border bg-card p-1">
           {campaignTabs.map(({ id, label, icon: Icon, count }) => {
-            const isActive = viewTab === id || (id === "analytics" && viewTab === "kanban");
+            const isActive = viewTab === id;
             return (
               <button
                 key={id}
@@ -1097,11 +1098,10 @@ export function CampaignDetail({
       {/* ── Tab content ──────────────────────────────────────────────────── */}
 
       {/* ── Analytics ─────────────────────────────────────────────────────── */}
-      {(viewTab === "analytics" || viewTab === "kanban") && (
+      {viewTab === "analytics" && (
         <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
-          {/* ── Analytics/Kanban toggle ── */}
-          <div className="px-6 pt-3 pb-2 flex items-center justify-end gap-2">
-            {progress && progress.failed > 0 && (
+          {progress && progress.failed > 0 && (
+            <div className="px-6 pt-3 pb-2 flex items-center justify-end gap-2">
               <button
                 type="button"
                 className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-red-500/30 bg-background px-2.5 text-xs font-medium text-red-400 hover:text-red-300 transition-colors"
@@ -1111,44 +1111,10 @@ export function CampaignDetail({
                 {retryingAll ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
                 Retry ({progress.failed})
               </button>
-            )}
-            <div className="inline-flex items-center rounded-full border border-border bg-muted/40 p-1 gap-0.5">
-              <button
-                type="button"
-                onClick={() => setViewTab("analytics")}
-                className={cn(
-                  "inline-flex h-6 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
-                  viewTab === "analytics" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <BarChart2 className="size-3" /> Analytics
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewTab("kanban")}
-                className={cn(
-                  "inline-flex h-6 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
-                  viewTab === "kanban" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <LayoutGrid className="size-3" /> Kanban
-              </button>
             </div>
-          </div>
+          )}
 
-          {viewTab === "kanban" ? (
-            /* ── Kanban view ── */
-            <div className="flex flex-col flex-1 min-h-0 bg-card/30">
-              <CampaignKanban
-                leads={sortedCampaignLeads}
-                selectedId={selectedId}
-                onSelect={handleKanbanSelect}
-                onRetry={handleRetryOne}
-                retryingId={retryingId}
-              />
-              {error && <p className="text-sm text-destructive px-4 pb-3">{error}</p>}
-            </div>
-          ) : (
+          {
             /* ── Analytics view ── */
             <div className="px-6 pb-4 flex flex-col gap-3 flex-1 min-h-0">
               {/* Stat cards */}
@@ -1354,7 +1320,7 @@ export function CampaignDetail({
                 </div>
               </div>
             </div>
-          )}
+          }
         </div>
       )}
 
@@ -1362,7 +1328,7 @@ export function CampaignDetail({
       {viewTab === "leads" && (
         <div className="flex flex-col flex-1 min-h-0">
           {/* Header row */}
-          <div className="px-6 py-3 border-b border-border shrink-0 flex items-center gap-3 flex-wrap bg-background">
+          <div className="px-6 py-3 border-b border-border shrink-0 flex items-center gap-3 flex-wrap">
             {/* Search */}
             <div className="relative flex-1 min-w-36 max-w-xs">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
@@ -1370,12 +1336,12 @@ export function CampaignDetail({
                 value={leadsSearch}
                 onChange={(e) => setLeadsSearch(e.target.value)}
                 placeholder="Search leads…"
-                className="pl-8 h-8 text-xs"
+                className="pl-8 h-8 text-xs bg-card"
               />
             </div>
 
             {/* Sort pills */}
-            <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
+            <div className="flex items-center rounded-lg border border-border p-0.5">
               <button
                 type="button"
                 onClick={() => setLeadsSort("az")}
@@ -1398,9 +1364,45 @@ export function CampaignDetail({
               </button>
             </div>
 
+            {/* List/Kanban toggle */}
+            <div className="inline-flex items-center rounded-full border border-border bg-muted/40 p-1 gap-0.5 ml-auto">
+              <button
+                type="button"
+                onClick={() => setLeadsViewMode("list")}
+                className={cn(
+                  "inline-flex h-6 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
+                  leadsViewMode === "list" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <List className="size-3" /> List
+              </button>
+              <button
+                type="button"
+                onClick={() => setLeadsViewMode("kanban")}
+                className={cn(
+                  "inline-flex h-6 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
+                  leadsViewMode === "kanban" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <LayoutGrid className="size-3" /> Kanban
+              </button>
+            </div>
           </div>
 
-          {/* Table */}
+          {leadsViewMode === "kanban" ? (
+            /* ── Kanban view ── */
+            <div className="flex flex-col flex-1 min-h-0 bg-card/30">
+              <CampaignKanban
+                leads={sortedCampaignLeads}
+                selectedId={selectedId}
+                onSelect={handleKanbanSelect}
+                onRetry={handleRetryOne}
+                retryingId={retryingId}
+              />
+              {error && <p className="text-sm text-destructive px-4 pb-3">{error}</p>}
+            </div>
+          ) : (
+          /* Table */
           <div className="flex-1 min-h-0 overflow-y-auto bg-secondary/20 px-6 py-4">
               {loading ? (
                 <div className="rounded-xl border border-border bg-card shadow-sm p-4 space-y-2 animate-pulse">
@@ -1413,8 +1415,8 @@ export function CampaignDetail({
                   {leadsSearch ? "No leads match your search." : "No leads yet."}
                 </div>
               ) : (
-                <div className="inline-block max-w-full rounded-xl border border-border bg-card shadow-sm overflow-x-auto overflow-y-hidden">
-                <table className="text-sm border-collapse">
+                <div className="block w-full rounded-xl border border-border bg-card shadow-sm overflow-x-auto overflow-y-hidden">
+                <table className="w-full text-sm border-collapse">
                   <thead className="sticky top-0 z-10 bg-secondary/60 backdrop-blur-sm">
                     <tr className="border-b border-border">
                       <th className="w-8 px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">#</th>
@@ -1422,23 +1424,18 @@ export function CampaignDetail({
                       <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Email</th>
                       <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Job Title</th>
                       <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Status</th>
-                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Company</th>
-                      <th className="w-8 px-6 py-2.5" />
+                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Company</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filteredLeads.map((cl, index) => {
                       const lead = cl.leads;
                       const name = [lead?.first_name, lead?.last_name].filter(Boolean).join(" ") || "Unknown";
-                      const isSelected = selectedId === cl.id;
                       return (
                         <tr
                           key={cl.id}
-                          onClick={() => setSelectedId(isSelected ? null : cl.id)}
-                          className={cn(
-                            "group cursor-pointer transition-colors",
-                            isSelected ? "bg-primary/10" : "hover:bg-secondary/40",
-                          )}
+                          onClick={() => handleOpenInOutbox(cl.id)}
+                          className="group cursor-pointer transition-colors hover:bg-secondary/40"
                         >
                           <td className="w-8 px-6 py-3 text-xs text-muted-foreground tabular-nums border-r border-border">{index + 1}</td>
                           <td className="px-6 py-3 border-r border-border">
@@ -1499,23 +1496,8 @@ export function CampaignDetail({
                               })()}
                             </div>
                           </td>
-                          <td className="px-6 py-3 text-xs text-muted-foreground border-r border-border">
+                          <td className="px-6 py-3 text-xs text-muted-foreground">
                             <span className="truncate block max-w-[120px]">{lead?.company_name}</span>
-                          </td>
-                          <td className="w-8 px-6 py-3">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              title="Open in outbox"
-                              className="size-7 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-primary"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenInOutbox(cl.id);
-                              }}
-                            >
-                              <Send className="size-3.5" />
-                            </Button>
                           </td>
                         </tr>
                       );
@@ -1525,10 +1507,9 @@ export function CampaignDetail({
                 </div>
               )}
           </div>
+          )}
         </div>
       )}
-
-      {/* ── Kanban ────────────────────────────────────────────────────────── */}
 
       {/* ── Outbox ────────────────────────────────────────────────────────── */}
       {viewTab === "outbox" && (
@@ -2121,17 +2102,17 @@ export function CampaignDetail({
                       "border rounded-lg p-4 text-left cursor-pointer transition-all w-full",
                       isActive
                         ? "border-primary bg-primary/10"
-                        : "border-border hover:border-primary/40 hover:bg-muted/40",
+                        : "border-border bg-card hover:bg-secondary/40 hover:border-primary/40",
                     )}
                   >
-                    <p className="text-sm font-semibold text-foreground mb-0.5">
+                    <p className={cn("text-sm font-semibold mb-0.5", isActive ? "text-primary" : "text-foreground")}>
                       Step {displayStep}
                     </p>
                     {subtitle && (
-                      <p className="text-xs text-muted-foreground truncate mb-1">{subtitle}</p>
+                      <p className={cn("text-xs truncate mb-1", isActive ? "text-primary/80" : "text-muted-foreground")}>{subtitle}</p>
                     )}
                     {prevStep && prevStep.delay > 0 && (
-                      <p className="text-[11px] text-muted-foreground/70">
+                      <p className={cn("text-[11px]", isActive ? "text-primary/60" : "text-muted-foreground/70")}>
                         Send {prevStep.delay} {prevStep.delay_unit} after previous
                       </p>
                     )}

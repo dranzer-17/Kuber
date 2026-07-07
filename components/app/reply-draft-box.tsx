@@ -34,8 +34,10 @@ interface ReplyDraftBoxProps {
 }
 
 export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
+  const [status, setStatus] = useState(draft.status);
   const [subject, setSubject] = useState(draft.subject ?? "");
   const [body, setBody] = useState(() => normalizeReplyBodyHtml(draft.body ?? ""));
+  const [error, setError] = useState(draft.error);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
@@ -62,7 +64,7 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
     }
   }
 
-  if (draft.status === "sent") {
+  if (status === "sent") {
     return (
       <div className="flex items-end gap-2 justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-3">
@@ -82,9 +84,9 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
   async function handleSave() {
     setSaving(true);
     try {
-      await editReplyDraft(token, draft.id, subject, body);
+      const updated = await editReplyDraft(token, draft.id, subject, body);
+      setStatus(updated.status);
       toast.success("Reply draft saved");
-      onChanged();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -95,9 +97,9 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
   async function handleApprove() {
     setSaving(true);
     try {
-      await approveReplyDraft(token, draft.id, subject, body);
+      const updated = await approveReplyDraft(token, draft.id, subject, body);
+      setStatus(updated.status);
       toast.success("Reply approved");
-      onChanged();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -109,6 +111,7 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
     setSending(true);
     try {
       await sendReplyDraft(token, draft.id);
+      setStatus("sent");
       toast.success("Reply sent");
       onChanged();
     } catch (e) {
@@ -126,7 +129,8 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
   async function handleReject() {
     setSaving(true);
     try {
-      await rejectReplyDraft(token, draft.id);
+      const updated = await rejectReplyDraft(token, draft.id);
+      setStatus(updated.status);
       toast.success("Reply rejected");
       onChanged();
     } catch (e) {
@@ -139,11 +143,14 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
   async function handleRegenerate() {
     setRegenerating(true);
     try {
-      await regenerateReplyDraft(token, draft.id, regenQuery || undefined);
+      const updated = await regenerateReplyDraft(token, draft.id, regenQuery || undefined);
+      setSubject(updated.subject ?? "");
+      setBody(normalizeReplyBodyHtml(updated.body ?? ""));
+      setStatus(updated.status);
+      setError(updated.error);
       setRegenOpen(false);
       setRegenQuery("");
       toast.success("Reply regenerated");
-      onChanged();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -156,8 +163,8 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
       <div className="px-4 py-2.5 border-b border-primary/10 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-primary">Your reply</span>
-          <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full", DRAFT_STATUS_STYLE[draft.status] ?? "")}>
-            {draft.status}
+          <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full", DRAFT_STATUS_STYLE[status] ?? "")}>
+            {status}
           </span>
         </div>
         <Button size="sm" variant="ghost" onClick={() => setRegenOpen((o) => !o)} className="h-6 gap-1 text-[11px] text-muted-foreground hover:text-foreground px-2">
@@ -190,19 +197,19 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
             {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />} Save
           </Button>
 
-          {draft.status !== "approved" && (
+          {status !== "approved" && (
             <Button size="sm" disabled={saving} onClick={() => void handleApprove()} className="gap-1.5">
               <Check className="size-3.5" /> Approve
             </Button>
           )}
 
-          {draft.status === "approved" && (
+          {status === "approved" && (
             <Button size="sm" disabled={sending} onClick={() => void handleSend()} className="gap-1.5 bg-green-600 hover:bg-green-700">
               {sending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />} Send reply
             </Button>
           )}
 
-          {draft.status === "draft" && (
+          {status === "draft" && (
             <Button size="sm" variant="outline" disabled={saving} onClick={() => void handleReject()} className="gap-1.5 text-red-400 border-red-500/30 hover:bg-red-500/10">
               <ThumbsDown className="size-3.5" /> Reject
             </Button>
@@ -224,8 +231,8 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
           </div>
         )}
 
-        {draft.status === "failed" && draft.error && (
-          <p className="text-xs text-red-400 mt-1">Error: {draft.error}</p>
+        {status === "failed" && error && (
+          <p className="text-xs text-red-400 mt-1">Error: {error}</p>
         )}
       </div>
     </div>
