@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
-  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X, Sparkles, Pencil,
+  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X, Sparkles, Pencil, Reply,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -363,6 +363,8 @@ export function CampaignDetail({
   const [threads, setThreads] = useState<CampaignReplyThread[]>([]);
   const [outboxFilter, setOutboxFilter] = useState<"all" | "action" | "certified" | "sent" | "replied">("all");
   const [outboxExpandOverrides, setOutboxExpandOverrides] = useState<Set<string>>(new Set());
+  const [outboxReplyOpen, setOutboxReplyOpen] = useState(false);
+  const [outboxNewReplyLoading, setOutboxNewReplyLoading] = useState(false);
   const [syncingReplies, setSyncingReplies] = useState(false);
   const syncHitTimesRef = useRef<number[]>([]);
   const SYNC_RATE_LIMIT = 10;
@@ -466,6 +468,24 @@ export function CampaignDetail({
     const { threads: t } = await fetchCampaignReplies(session.access_token, campaign.id);
     setThreads(t);
   }, [campaign.id]);
+
+  useEffect(() => {
+    setOutboxReplyOpen(false);
+  }, [selectedId]);
+
+  async function handleStartNewOutboxReply(anchorDraftId: string) {
+    setOutboxNewReplyLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      await regenerateReplyDraft(session.access_token, anchorDraftId);
+      await loadReplies();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setOutboxNewReplyLoading(false);
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -2210,28 +2230,75 @@ export function CampaignDetail({
                   </div>
                 )}
 
-                {/* Pending AI reply draft for the latest inbound message — shown below the thread */}
+                {/* Reply — AI-generated draft (with manual rich-text edit) for the latest inbound message */}
                 {selectedThread && (() => {
                   const lastMsg = selectedThread.messages[selectedThread.messages.length - 1] ?? null;
-                  const latestDraft = lastMsg?.reply_drafts[lastMsg.reply_drafts.length - 1] ?? null;
-                  if (!lastMsg || latestDraft?.status === "sent") return null;
-                  if (!latestDraft) {
-                    return <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft generated yet.</div>;
+                  if (!lastMsg) return null;
+                  const latestDraft = lastMsg.reply_drafts[lastMsg.reply_drafts.length - 1] ?? null;
+                  const hasDraftReady = !!latestDraft && latestDraft.status !== "generating" && latestDraft.status !== "sent";
+                  const isGenerating = latestDraft?.status === "generating" || outboxNewReplyLoading;
+
+                  function handleReplyClick() {
+                    if (outboxReplyOpen) {
+                      setOutboxReplyOpen(false);
+                      return;
+                    }
+                    setOutboxReplyOpen(true);
+                    if (latestDraft && latestDraft.status === "sent") {
+                      void handleStartNewOutboxReply(latestDraft.id);
+                    }
                   }
-                  if (latestDraft.status === "generating") {
-                    return (
-                      <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
-                        <Loader2 className="size-4 animate-spin" /> Generating reply draft…
-                      </div>
-                    );
-                  }
+
                   return (
-                    <ReplyDraftBox
-                      key={latestDraft.id}
-                      draft={latestDraft}
-                      token={appSession?.access_token ?? ""}
-                      onChanged={() => void loadReplies()}
-                    />
+                    <div className="pt-2 w-full">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          disabled={isGenerating}
+                          onClick={handleReplyClick}
+                          className="gap-1.5 rounded-full px-4"
+                        >
+                          <Reply className="size-3.5" />
+                          Reply
+                          <ChevronDown className={cn("size-3.5 transition-transform", outboxReplyOpen && "rotate-180")} />
+                        </Button>
+                        {hasDraftReady && !outboxReplyOpen && (
+                          <button
+                            type="button"
+                            onClick={() => setOutboxReplyOpen(true)}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-colors"
+                          >
+                            <Sparkles className="size-3" />
+                            AI reply ready
+                          </button>
+                        )}
+                        {isGenerating && (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <Loader2 className="size-3 animate-spin" />
+                            Generating draft…
+                          </span>
+                        )}
+                      </div>
+
+                      {outboxReplyOpen && (
+                        <div className="mt-3">
+                          {hasDraftReady ? (
+                            <ReplyDraftBox
+                              key={latestDraft!.id}
+                              draft={latestDraft!}
+                              token={appSession?.access_token ?? ""}
+                              onChanged={() => void loadReplies()}
+                            />
+                          ) : isGenerating ? (
+                            <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
+                              <Loader2 className="size-4 animate-spin" /> Generating reply draft…
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft available for this message.</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })()}
               </div>
