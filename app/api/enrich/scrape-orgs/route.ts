@@ -1,6 +1,7 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { complete } from "@/lib/services/llm";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const maxDuration = 55;
@@ -352,11 +353,14 @@ export async function POST(req: NextRequest) {
     .eq("enrichment_stage", "queued");
 
   if ((count ?? 0) > 0) {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
-      method: "POST",
-      headers: { "x-internal-secret": process.env.INTERNAL_SECRET! },
-    }).catch(() => {});
+    const baseUrl = internalAppBaseUrl(req);
+    const secret = process.env.INTERNAL_SECRET!;
+    after(() =>
+      fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+        method: "POST",
+        headers: { "x-internal-secret": secret },
+      }).catch(() => {})
+    );
   }
 
   return Response.json({ processed, succeeded, failed });

@@ -1,9 +1,10 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { EnrichSchema } from "@/lib/validators/leads";
 import { enrichLeads, type EnrichTarget } from "@/lib/services/enrich-leads";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 
 export const maxDuration = 300;
 
@@ -50,11 +51,14 @@ export async function POST(req: NextRequest) {
 
   // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
   if (stats.enriched_org_ids.length > 0 && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
-      method: "POST",
-      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
-    }).catch(() => {});
+    const baseUrl = internalAppBaseUrl(req);
+    const secret = process.env.INTERNAL_SECRET;
+    after(() =>
+      fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+        method: "POST",
+        headers: { "x-internal-secret": secret },
+      }).catch(() => {})
+    );
   }
 
   const { count: remaining } = await db
