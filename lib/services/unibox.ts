@@ -353,6 +353,36 @@ async function loadLeadInterestMap(db: Db, leadEmails: string[]): Promise<Map<st
   return map;
 }
 
+/**
+ * A lead can be enrolled in several campaigns at once, each with its own
+ * campaign_leads row (and its own interest_status). Unlike loadLeadInterestMap
+ * (which merges across campaigns by "most recently touched" and can surface the
+ * wrong campaign's status for a given thread), this scopes the lookup to the
+ * exact campaign_lead_id each unibox thread already carries — matching how
+ * getThreadMessages resolves status for the detail view.
+ */
+async function loadCampaignLeadStatusMap(
+  db: Db,
+  campaignLeadIds: string[],
+): Promise<Map<string, { interest_status: number | null; lead_temperature: string | null; campaign_lead_id: string | null }>> {
+  const map = new Map<string, { interest_status: number | null; lead_temperature: string | null; campaign_lead_id: string | null }>();
+  if (campaignLeadIds.length === 0) return map;
+
+  const { data: cls } = await db
+    .from("campaign_leads")
+    .select("id, interest_status, lead_temperature")
+    .in("id", campaignLeadIds);
+
+  for (const cl of cls ?? []) {
+    map.set(cl.id as string, {
+      interest_status: cl.interest_status as number | null,
+      lead_temperature: cl.lead_temperature as string | null,
+      campaign_lead_id: cl.id as string,
+    });
+  }
+  return map;
+}
+
 function matchesTab(tab: UniboxTab, row: { is_focused: boolean; is_auto_reply: boolean }): boolean {
   if (tab === "primary") return row.is_focused && !row.is_auto_reply;
   return !row.is_focused || row.is_auto_reply;
@@ -458,6 +488,8 @@ export async function getThreads(db: Db, filters: {
 
   const leadEmails = [...new Set([...all, ...Array.from(threadMap.values()).flat()].map((r) => r.lead_email).filter(Boolean))] as string[];
   const interestMap = await loadLeadInterestMap(db, leadEmails);
+  const campaignLeadIds = [...new Set(Array.from(threadMap.values()).flat().map((r) => r.campaign_lead_id).filter(Boolean))] as string[];
+  const statusByCampaignLead = await loadCampaignLeadStatusMap(db, campaignLeadIds);
 
   const summaries: UniboxThreadSummary[] = [];
   const latestUnreadAtByThread = new Map<string, string>();
@@ -468,7 +500,8 @@ export async function getThreads(db: Db, filters: {
     if (!hasReceived) continue;
 
     const leadEmail = latest.lead_email;
-    const interest = leadEmail ? interestMap.get(leadEmail) : undefined;
+    const interest = (latest.campaign_lead_id ? statusByCampaignLead.get(latest.campaign_lead_id) : undefined)
+      ?? (leadEmail ? interestMap.get(leadEmail) : undefined);
 
     let lead: UniboxThreadSummary["lead"] = null;
     if (leadEmail) {

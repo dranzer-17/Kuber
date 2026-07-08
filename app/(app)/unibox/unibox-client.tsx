@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -24,6 +24,26 @@ import { UniboxInstantlyInterestMenu } from "@/components/app/unibox/unibox-inst
 import type { UniboxInterestFilter, UniboxReadStateFilter } from "@/components/app/unibox/unibox-status-filter";
 import { Avatar } from "@/components/leads/lead-ui";
 
+const READ_STATE_VALUES: UniboxReadStateFilter[] = ["all", "unread", "read", "replied", "needs_reply"];
+
+function parseReadStateParam(v: string | null): UniboxReadStateFilter {
+  return v && (READ_STATE_VALUES as string[]).includes(v) ? (v as UniboxReadStateFilter) : "all";
+}
+
+function parseInterestParam(v: string | null): UniboxInterestFilter {
+  if (!v) return "all";
+  if (v === "lead") return "lead";
+  const n = Number(v);
+  return Number.isFinite(n) ? n : "all";
+}
+
+function parseCampaignIdsParam(sp: URLSearchParams): string[] {
+  const ids = sp.get("campaign_ids");
+  if (ids) return ids.split(",").map((s) => s.trim()).filter(Boolean);
+  const single = sp.get("campaign_id");
+  return single ? [single] : [];
+}
+
 function pickPendingDraft(messages: UniboxMessage[], drafts: ReplyDraft[]): ReplyDraft | null {
   const received = messages.filter((m) => m.direction === "received");
   const latest = received[received.length - 1];
@@ -38,16 +58,15 @@ function pickPendingDraft(messages: UniboxMessage[], drafts: ReplyDraft[]): Repl
 
 export function UniboxClient() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [token, setToken] = useState("");
-  const [campaignIds, setCampaignIds] = useState<string[]>(() => {
-    const id = searchParams.get("campaign_id");
-    return id ? [id] : [];
-  });
-  const [eaccount, setEaccount] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [readState, setReadState] = useState<UniboxReadStateFilter>("all");
-  const [interest, setInterest] = useState<UniboxInterestFilter>("all");
+  const [campaignIds, setCampaignIds] = useState<string[]>(() => parseCampaignIdsParam(searchParams));
+  const [eaccount, setEaccount] = useState<string | null>(() => searchParams.get("eaccount"));
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get("q") ?? "");
+  const [readState, setReadState] = useState<UniboxReadStateFilter>(() => parseReadStateParam(searchParams.get("status")));
+  const [interest, setInterest] = useState<UniboxInterestFilter>(() => parseInterestParam(searchParams.get("interest")));
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [threads, setThreads] = useState<UniboxThreadSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -70,6 +89,19 @@ export function UniboxClient() {
     const t = setTimeout(() => setDebouncedSearch(search), 350);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Keep filters in the URL so a refresh (or sharing the link) restores them
+  // instead of silently resetting to "All".
+  useEffect(() => {
+    const qs = new URLSearchParams();
+    if (campaignIds.length > 0) qs.set("campaign_ids", campaignIds.join(","));
+    if (eaccount) qs.set("eaccount", eaccount);
+    if (readState !== "all") qs.set("status", readState);
+    if (interest !== "all") qs.set("interest", String(interest));
+    if (debouncedSearch) qs.set("q", debouncedSearch);
+    const qsStr = qs.toString();
+    router.replace(qsStr ? `${pathname}?${qsStr}` : pathname, { scroll: false });
+  }, [campaignIds, eaccount, readState, interest, debouncedSearch, pathname, router]);
 
   const eaccounts = useMemo(
     () => [...new Set(threads.map((t) => t.eaccount).filter(Boolean))] as string[],

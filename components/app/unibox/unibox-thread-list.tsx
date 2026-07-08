@@ -64,7 +64,7 @@ export function UniboxThreadList({
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 h-full flex flex-col bg-card/30">
+      <div className="flex-1 min-w-0 h-full flex flex-col bg-background">
         <div className="px-6 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <button
@@ -107,8 +107,8 @@ export function UniboxThreadList({
                   type="button"
                   onClick={() => onSelect(t.thread_id)}
                   className={cn(
-                    "w-full flex items-center gap-3 px-6 py-2.5 border-b border-border/60 text-left transition-colors",
-                    selectedId === t.thread_id ? "bg-primary/5" : "hover:bg-secondary/40",
+                    "w-full flex items-center gap-3 px-6 py-2.5 border-b border-border text-left transition-colors",
+                    selectedId === t.thread_id ? "bg-primary/5" : "bg-card hover:bg-secondary/40",
                   )}
                 >
                   <span
