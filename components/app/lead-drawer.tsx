@@ -181,9 +181,10 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       if (!tok) return;
       const updated = await fetchLead(tok, l.id);
       setFreshLead(updated);
+      onLeadUpdated?.(updated);
     } catch { /* keep stale */ }
     finally { setLoadingLead(false); }
-  }, []);
+  }, [onLeadUpdated]);
 
   const fetchEnrichStatus = useCallback(async (orgId: string) => {
     try {
