@@ -1,7 +1,8 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 
 export async function POST(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -46,11 +47,14 @@ export async function POST(req: NextRequest) {
 
   // Re-trigger scrape
   if (process.env.INTERNAL_SECRET) {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
-      method: "POST",
-      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
-    }).catch(() => {});
+    const baseUrl = internalAppBaseUrl(req);
+    const secret = process.env.INTERNAL_SECRET;
+    after(() =>
+      fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+        method: "POST",
+        headers: { "x-internal-secret": secret },
+      }).catch(() => {})
+    );
   }
 
   return ok({ queued: true });

@@ -1,9 +1,10 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import crypto from "crypto";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { ExcelImportSchema } from "@/lib/validators/leads";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 
 export const maxDuration = 300;
 
@@ -195,13 +196,16 @@ async function processRows(
   return { inserted: insertedCount, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail, skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb };
 }
 
-function triggerScrape() {
+function triggerScrape(req: NextRequest) {
   if (!process.env.INTERNAL_SECRET) return;
-  const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  fetch(`${base}/api/enrich/scrape-orgs`, {
-    method: "POST",
-    headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
-  }).catch(() => {});
+  const base = internalAppBaseUrl(req);
+  const secret = process.env.INTERNAL_SECRET;
+  after(() =>
+    fetch(`${base}/api/enrich/scrape-orgs`, {
+      method: "POST",
+      headers: { "x-internal-secret": secret },
+    }).catch(() => {})
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -226,7 +230,7 @@ export async function POST(req: NextRequest) {
     if (importId && result.inserted > 0) {
       await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId);
     }
-    if (result.inserted > 0) triggerScrape();
+    if (result.inserted > 0) triggerScrape(req);
     return ok(result);
   }
 
@@ -259,6 +263,6 @@ export async function POST(req: NextRequest) {
   if (importId2 && result.inserted > 0) {
     await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId2);
   }
-  if (result.inserted > 0) triggerScrape();
+  if (result.inserted > 0) triggerScrape(req);
   return ok(result);
 }

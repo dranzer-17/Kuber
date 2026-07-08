@@ -1,10 +1,11 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fail, ok } from "@/lib/api-response";
 import { ApolloSearchSchema } from "@/lib/validators/leads";
 import { searchPeople } from "@/lib/services/apollo";
 import { type EnrichTarget } from "@/lib/services/enrich-leads";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 
 export const maxDuration = 300;
 
@@ -183,15 +184,17 @@ export async function POST(req: NextRequest) {
 
   // Phase 1 complete — leads are now in the DB. Fire-and-forget Phase 2A
   // (email reveal) and Phase 2B (org scraping) so the client can redirect.
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const baseUrl = internalAppBaseUrl(req);
   const authHeader = req.headers.get("authorization") ?? "";
 
   if (importId && newLeadTargets.length > 0 && process.env.APOLLO_API_KEY) {
-    fetch(`${baseUrl}/api/v1/leads/enrich`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": authHeader },
-      body: JSON.stringify({ import_id: importId }),
-    }).catch(() => {});
+    after(() =>
+      fetch(`${baseUrl}/api/v1/leads/enrich`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": authHeader },
+        body: JSON.stringify({ import_id: importId }),
+      }).catch(() => {})
+    );
   }
 
   if (newOrgIds.length > 0) {

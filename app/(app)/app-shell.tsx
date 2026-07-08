@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings, Inbox,
-  RefreshCw, Trash2, AlertTriangle,
+  RefreshCw, Trash2, AlertTriangle, Menu,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { ThemeProvider } from "@/lib/theme-context";
@@ -69,6 +69,8 @@ function DeleteConfirmModal({
   );
 }
 
+const SIDEBAR_COLLAPSED_KEY = "kuber_sidebar_collapsed";
+
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard",  icon: LayoutDashboard, exact: true  },
   { href: "/leads",     label: "Leads",      icon: Users,           exact: false },
@@ -92,6 +94,18 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const [uniboxUnread, setUniboxUnread] = useState<number | null>(null);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  });
+
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   useEffect(() => { setPendingHref(null); }, [pathname]);
 
@@ -154,16 +168,39 @@ function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <div className="h-screen flex bg-background overflow-hidden">
-        <aside className="w-56 shrink-0 border-r border-border flex flex-col bg-card">
-          <div className="px-4 py-5 border-b border-border flex items-center gap-2.5">
-            {logoUrl ? (
-              <img src={logoUrl} alt="Brand logo" className="size-8 rounded-lg border border-border bg-card object-contain" />
-            ) : (
-              <div className="size-8 bg-foreground rounded-lg flex items-center justify-center">
-                <span className="text-background text-sm font-black">{APP_LOGO_INITIAL}</span>
-              </div>
+        <aside
+          className={cn(
+            "shrink-0 border-r border-border flex flex-col bg-card transition-[width] duration-200",
+            sidebarCollapsed ? "w-16" : "w-56",
+          )}
+        >
+          <div
+            className={cn(
+              "border-b border-border flex items-center",
+              sidebarCollapsed ? "flex-col gap-2 px-2 py-4" : "gap-2.5 px-4 py-5",
             )}
-            <span className="font-bold">{APP_NAME}</span>
+          >
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="shrink-0 size-8 flex items-center justify-center rounded-lg text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors"
+            >
+              <Menu className="size-4" />
+            </button>
+            {!sidebarCollapsed && (
+              <>
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Brand logo" className="size-8 rounded-lg border border-border bg-card object-contain shrink-0" />
+                ) : (
+                  <div className="size-8 bg-foreground rounded-lg flex items-center justify-center shrink-0">
+                    <span className="text-background text-sm font-black">{APP_LOGO_INITIAL}</span>
+                  </div>
+                )}
+                <span className="font-bold truncate">{APP_NAME}</span>
+              </>
+            )}
           </div>
           <nav className="flex-1 p-2 space-y-0.5">
             {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
@@ -174,31 +211,46 @@ function AppShell({ children }: { children: React.ReactNode }) {
                   key={href}
                   href={href}
                   prefetch
+                  title={sidebarCollapsed ? label : undefined}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     e.preventDefault();
                     handleNavClick(href);
                   }}
                   className={cn(
-                    "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    "w-full flex items-center rounded-lg text-sm font-medium transition-colors relative",
+                    sidebarCollapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2",
                     active
                       ? "bg-primary/15 text-primary font-semibold"
                       : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
                   )}
                 >
                   <Icon className="size-4 shrink-0" />
-                  <span className="flex-1 text-left">{label}</span>
+                  {!sidebarCollapsed && <span className="flex-1 text-left">{label}</span>}
                   {badge !== null && badge > 0 && (
-                    <span className="text-[10px] font-semibold bg-secondary rounded-full px-1.5 py-0.5 tabular-nums">
-                      {badge}
-                    </span>
+                    sidebarCollapsed ? (
+                      <span className="absolute top-1 right-1.5 size-1.5 rounded-full bg-primary" />
+                    ) : (
+                      <span className="text-[10px] font-semibold bg-secondary rounded-full px-1.5 py-0.5 tabular-nums">
+                        {badge}
+                      </span>
+                    )
                   )}
                 </Link>
               );
             })}
           </nav>
-          <div className="p-3 border-t border-border">
-            <p className="text-[11px] text-muted-foreground truncate px-1">{session.user.email}</p>
+          <div className={cn("border-t border-border", sidebarCollapsed ? "p-2 flex justify-center" : "p-3")}>
+            {sidebarCollapsed ? (
+              <div
+                className="size-7 rounded-full bg-secondary flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0"
+                title={session.user.email}
+              >
+                {session.user.email?.[0]?.toUpperCase() ?? "?"}
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground truncate px-1">{session.user.email}</p>
+            )}
           </div>
         </aside>
 

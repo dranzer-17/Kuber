@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import {
@@ -52,6 +52,7 @@ export function UniboxClient() {
   const [threads, setThreads] = useState<UniboxThreadSummary[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [view, setView] = useState<"list" | "detail">("list");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string }>>([]);
@@ -98,9 +99,6 @@ export function UniboxClient() {
       setThreads((prev) => (append ? [...prev, ...data.threads] : data.threads));
       setCursor(data.next_cursor);
       if (!append) setUnreadTotal(data.counts.unread_total);
-      if (!append && data.threads.length > 0) {
-        setSelectedId((cur) => cur ?? data.threads[0].thread_id);
-      }
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -162,6 +160,7 @@ export function UniboxClient() {
   );
 
   const leadTemperature = threadDetail?.lead_temperature ?? selectedSummary?.lead_temperature ?? null;
+  const showDetail = view === "detail" && !!selectedSummary;
 
   return (
     <div className="flex flex-col h-full">
@@ -183,87 +182,90 @@ export function UniboxClient() {
         </div>
       </div>
 
-      <div className="flex flex-1 min-h-0">
-        <UniboxThreadList
-          threads={threads}
-          selectedId={selectedId}
-          search={search}
-          loading={loading}
-          readState={readState}
-          interest={interest}
-          unreadTotal={unreadTotal}
-          campaignIds={campaignIds}
-          campaigns={campaigns}
-          eaccount={eaccount}
-          eaccounts={eaccounts}
-          onCampaigns={setCampaignIds}
-          onEaccount={setEaccount}
-          onReadState={setReadState}
-          onInterest={setInterest}
-          onSearch={setSearch}
-          onSelect={setSelectedId}
-          hasMore={!!cursor}
-          onLoadMore={() => void loadThreads(true)}
-        />
-        <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          {selectedSummary ? (
-            <>
-              <div className="border-b border-border px-6 py-3 flex items-center justify-between gap-4 shrink-0">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Avatar name={leadName} size="sm" />
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{leadName}</p>
-                    <p className="text-xs text-muted-foreground truncate">{selectedSummary.lead_email}</p>
-                  </div>
-                  {selectedSummary.campaign && (
-                    <Link
-                      href={`/campaigns/${selectedSummary.campaign.id}`}
-                      className="inline-flex items-center gap-1 shrink-0 rounded-md border border-border px-2 py-1 text-xs text-primary hover:bg-primary/10 transition-colors"
-                    >
-                      {selectedSummary.campaign.name}
-                      <ExternalLink className="size-3 opacity-70" />
-                    </Link>
-                  )}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {showDetail ? (
+          <>
+            <div className="border-b border-border px-6 py-3 flex items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setView("list")}
+                  aria-label="Back to conversations"
+                  className="shrink-0 size-8 flex items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors"
+                >
+                  <ArrowLeft className="size-4" />
+                </button>
+                <Avatar name={leadName} size="sm" />
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{leadName}</p>
+                  <p className="text-xs text-muted-foreground truncate">{selectedSummary.lead_email}</p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <UniboxTemperatureBadge temperature={leadTemperature} />
-                  <UniboxInstantlyInterestMenu
-                    interestStatus={threadDetail?.interest_status ?? selectedSummary.interest_status}
-                    onChange={(v) => {
-                      if (!token || !selectedId) return;
-                      void setThreadStatus(token, selectedId, v, selectedSummary.lead_email ?? undefined)
-                        .then(() => { void loadThreads(false); void loadDetail(selectedId, { silent: true }); })
-                        .catch((e) => toast.error((e as Error).message));
-                    }}
-                  />
-                </div>
+                {selectedSummary.campaign && (
+                  <Link
+                    href={`/campaigns/${selectedSummary.campaign.id}`}
+                    className="inline-flex items-center gap-1 shrink-0 rounded-md border border-border px-2 py-1 text-xs text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    {selectedSummary.campaign.name}
+                    <ExternalLink className="size-3 opacity-70" />
+                  </Link>
+                )}
               </div>
-              {detailLoading ? (
-                <div className="flex-1 flex items-center justify-center min-h-0"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>
-              ) : (
-                <div className="flex-1 overflow-y-auto min-h-0">
-                  <UniboxThreadView
-                    key={selectedId}
-                    messages={threadDetail?.messages ?? []}
-                    leadName={leadName}
-                    leadEmail={selectedSummary.lead_email}
-                    campaign={selectedSummary.campaign}
-                    threadId={selectedId!}
-                    token={token}
-                    canReply={!!threadDetail?.reply_to_uuid}
-                    pendingDraft={pendingDraft}
-                    replyToSubject={threadDetail?.messages?.find((m) => m.direction === "received")?.subject ?? null}
-                    onChanged={() => { void loadThreads(false); void loadDetail(selectedId!, { silent: true }); }}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-              Select a conversation
+              <div className="flex items-center gap-2 shrink-0">
+                <UniboxTemperatureBadge temperature={leadTemperature} />
+                <UniboxInstantlyInterestMenu
+                  interestStatus={threadDetail?.interest_status ?? selectedSummary.interest_status}
+                  onChange={(v) => {
+                    if (!token || !selectedId) return;
+                    void setThreadStatus(token, selectedId, v, selectedSummary.lead_email ?? undefined)
+                      .then(() => { void loadThreads(false); void loadDetail(selectedId, { silent: true }); })
+                      .catch((e) => toast.error((e as Error).message));
+                  }}
+                />
+              </div>
             </div>
-          )}
-        </div>
+            {detailLoading ? (
+              <div className="flex-1 flex items-center justify-center min-h-0"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <UniboxThreadView
+                  key={selectedId}
+                  messages={threadDetail?.messages ?? []}
+                  leadName={leadName}
+                  leadEmail={selectedSummary.lead_email}
+                  campaign={selectedSummary.campaign}
+                  threadId={selectedId!}
+                  token={token}
+                  canReply={!!threadDetail?.reply_to_uuid}
+                  pendingDraft={pendingDraft}
+                  replyToSubject={threadDetail?.messages?.find((m) => m.direction === "received")?.subject ?? null}
+                  onChanged={() => { void loadThreads(false); void loadDetail(selectedId!, { silent: true }); }}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <UniboxThreadList
+            threads={threads}
+            selectedId={selectedId}
+            search={search}
+            loading={loading}
+            readState={readState}
+            interest={interest}
+            unreadTotal={unreadTotal}
+            campaignIds={campaignIds}
+            campaigns={campaigns}
+            eaccount={eaccount}
+            eaccounts={eaccounts}
+            onCampaigns={setCampaignIds}
+            onEaccount={setEaccount}
+            onReadState={setReadState}
+            onInterest={setInterest}
+            onSearch={setSearch}
+            onSelect={(id) => { setSelectedId(id); setView("detail"); }}
+            hasMore={!!cursor}
+            onLoadMore={() => void loadThreads(true)}
+          />
+        )}
       </div>
     </div>
   );

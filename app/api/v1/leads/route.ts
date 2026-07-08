@@ -1,9 +1,10 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import crypto from "crypto";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
+import { internalAppBaseUrl } from "@/lib/internal-url";
 
 const APP_SUBDOMAINS = /^(app|dashboard|portal|login|my|account|admin|web|mail|crm|api|secure)\./i;
 function normalizeDomain(raw: string): string {
@@ -186,11 +187,14 @@ export async function POST(req: NextRequest) {
 
   // Fire enrichment if a domain was provided (new org will be queued)
   if (organization_domain && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-    fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
-      method: "POST",
-      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
-    }).catch(() => {});
+    const baseUrl = internalAppBaseUrl(req);
+    const secret = process.env.INTERNAL_SECRET;
+    after(() =>
+      fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
+        method: "POST",
+        headers: { "x-internal-secret": secret },
+      }).catch(() => {})
+    );
   }
 
   return ok(data);
