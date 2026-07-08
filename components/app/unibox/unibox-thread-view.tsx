@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import Link from "next/link";
-import { ChevronDown, ExternalLink, Loader2, Reply, Send, Sparkles } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, Reply, Send } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { splitQuotedBody, emailPreview } from "@/lib/email-display";
 import type { ReplyDraft, UniboxMessage } from "@/lib/api-client";
-import { sendUniboxReply } from "@/lib/api-client";
+import { sendUniboxReply, regenerateReplyDraft } from "@/lib/api-client";
 import { ReplyDraftBox } from "@/components/app/reply-draft-box";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ type Props = {
   threadId: string;
   token: string;
   canReply: boolean;
-  pendingDraft: ReplyDraft | null;
+  latestDraft: ReplyDraft | null;
   replyToSubject: string | null;
   onChanged: () => void;
 };
@@ -235,11 +235,12 @@ export function UniboxThreadView({
   threadId,
   token,
   canReply,
-  pendingDraft,
+  latestDraft,
   replyToSubject,
   onChanged,
 }: Props) {
   const [replyOpen, setReplyOpen] = useState(false);
+  const [replyPreparing, setReplyPreparing] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const sorted = useMemo(
@@ -249,6 +250,7 @@ export function UniboxThreadView({
 
   useEffect(() => {
     setReplyOpen(false);
+    setReplyPreparing(false);
     const last = sorted.length > 0 ? sorted[sorted.length - 1] : null;
     setExpandedIds(last ? new Set([last.id]) : new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,8 +265,27 @@ export function UniboxThreadView({
     });
   }
 
-  const hasDraftReady = pendingDraft && pendingDraft.status !== "generating" && pendingDraft.status !== "sent";
-  const isGenerating = pendingDraft?.status === "generating";
+  const hasDraftReady = !!latestDraft && latestDraft.status !== "generating" && latestDraft.status !== "sent" && latestDraft.status !== "rejected";
+  const isGenerating = latestDraft?.status === "generating" || replyPreparing;
+
+  async function handleReplyClick() {
+    if (replyOpen) {
+      setReplyOpen(false);
+      return;
+    }
+    setReplyOpen(true);
+    if (latestDraft && (latestDraft.status === "sent" || latestDraft.status === "rejected")) {
+      setReplyPreparing(true);
+      try {
+        await regenerateReplyDraft(token, latestDraft.id);
+        onChanged();
+      } catch (e) {
+        toast.error((e as Error).message);
+      } finally {
+        setReplyPreparing(false);
+      }
+    }
+  }
 
   if (messages.length === 0) {
     return (
@@ -294,38 +315,31 @@ export function UniboxThreadView({
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              onClick={() => setReplyOpen((o) => !o)}
+              disabled={isGenerating}
+              onClick={() => void handleReplyClick()}
               className="gap-1.5 rounded-full px-4"
             >
               <Reply className="size-3.5" />
               Reply
               <ChevronDown className={cn("size-3.5 transition-transform", replyOpen && "rotate-180")} />
             </Button>
-            {hasDraftReady && !replyOpen && (
-              <button
-                type="button"
-                onClick={() => setReplyOpen(true)}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-colors"
-              >
-                <Sparkles className="size-3" />
-                AI reply ready
-              </button>
-            )}
             {isGenerating && (
               <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <Loader2 className="size-3 animate-spin" />
-                Generating draft…
+                Preparing…
               </span>
             )}
           </div>
         )}
 
         {replyOpen && canReply && (
-          <div className="pl-0">
+          <div className="pl-0 mt-3">
             {hasDraftReady ? (
               <ReplyDraftBox
-                draft={pendingDraft!}
+                key={`${latestDraft!.id}-blank`}
+                draft={latestDraft!}
                 token={token}
+                startBlank
                 onChanged={() => {
                   onChanged();
                   setReplyOpen(false);
@@ -334,7 +348,7 @@ export function UniboxThreadView({
             ) : isGenerating ? (
               <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground py-4">
                 <Loader2 className="size-4 animate-spin" />
-                Generating AI reply draft…
+                Preparing reply…
               </div>
             ) : (
               <ManualReplyEditor

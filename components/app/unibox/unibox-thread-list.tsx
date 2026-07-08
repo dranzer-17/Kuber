@@ -64,79 +64,85 @@ export function UniboxThreadList({
         </div>
       </div>
 
-      <div className="flex-1 min-w-0 h-full flex flex-col bg-card/30">
-        <div className="px-6 py-3 border-b border-border">
+      <div className="flex-1 min-w-0 h-full flex flex-col bg-secondary/20">
+        <div className="px-6 py-3 border-b border-border shrink-0 bg-background">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setFiltersOpen((v) => !v)}
               aria-label={filtersOpen ? "Close filters" : "Open filters"}
               className={cn(
-                "relative shrink-0 size-10 flex items-center justify-center rounded-full text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors",
+                "relative shrink-0 size-9 flex items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-secondary/40 hover:text-foreground transition-colors",
                 filtersActive && "text-primary",
               )}
             >
-              <Menu className="size-5" />
-              {filtersActive && <span className="absolute top-2 right-2 size-2 rounded-full bg-primary ring-2 ring-card" />}
+              <Menu className="size-4" />
+              {filtersActive && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary ring-2 ring-card" />}
             </button>
             <div className="relative flex-1 max-w-xl">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search by lead name…"
                 value={search}
                 onChange={(e) => onSearch(e.target.value)}
-                className="w-full h-10 pl-9 pr-4 rounded-full border-none bg-secondary/40 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="w-full h-9 pl-9 pr-4 rounded-md border border-border bg-card text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading && threads.length === 0 ? (
-            <div className="flex justify-center py-12"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+            <div className="rounded-xl border border-border bg-card shadow-sm flex justify-center py-12">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
           ) : threads.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-12 px-6">No conversations match your filters.</p>
+            <div className="rounded-xl border border-border bg-card shadow-sm py-16 text-center text-sm text-muted-foreground">
+              No conversations match your filters.
+            </div>
           ) : (
-            threads.map((t) => {
-              const name = [t.lead?.first_name, t.lead?.last_name].filter(Boolean).join(" ") || t.lead_email || "Unknown";
-              const needsReply = t.latest_direction === "received";
-              const isUnread = t.unread_count > 0;
-              return (
-                <button
-                  key={t.thread_id}
-                  type="button"
-                  onClick={() => onSelect(t.thread_id)}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-6 py-2.5 border-b border-border/60 text-left transition-colors",
-                    selectedId === t.thread_id ? "bg-primary/5" : "hover:bg-secondary/40",
-                  )}
-                >
-                  <span
-                    aria-hidden
-                    className={cn("size-1.5 rounded-full shrink-0", needsReply ? "bg-amber-500" : "bg-transparent")}
-                  />
-                  <span className={cn("w-44 shrink-0 truncate text-sm", isUnread ? "font-semibold text-foreground" : "text-foreground/80")}>
-                    {name}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-sm">
-                    <span className={isUnread ? "font-semibold text-foreground" : "text-foreground/80"}>
-                      {t.subject ?? "(no subject)"}
-                    </span>
-                    <span className="text-muted-foreground"> — {t.preview}</span>
-                  </span>
-                  <span className="flex items-center gap-1.5 shrink-0">
-                    {isUnread && t.unread_count > 1 && (
-                      <span className="text-[9px] font-semibold tabular-nums min-w-4 text-center px-1 py-0.5 rounded-full bg-primary/15 text-primary">
-                        {t.unread_count}
-                      </span>
+            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden divide-y divide-border">
+              {threads.map((t) => {
+                const name = [t.lead?.first_name, t.lead?.last_name].filter(Boolean).join(" ") || t.lead_email || "Unknown";
+                const needsReply = t.latest_direction === "received";
+                const isUnread = t.unread_count > 0;
+                return (
+                  <button
+                    key={t.thread_id}
+                    type="button"
+                    onClick={() => onSelect(t.thread_id)}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
+                      selectedId === t.thread_id ? "bg-primary/5" : "hover:bg-secondary/40",
                     )}
-                    <span className="text-[10px] text-muted-foreground w-14 text-right">
-                      {format(new Date(t.latest_at), "MMM d")}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn("size-1.5 rounded-full shrink-0", needsReply ? "bg-amber-500" : "bg-transparent")}
+                    />
+                    <span className={cn("w-44 shrink-0 truncate text-sm", isUnread ? "font-semibold text-foreground" : "text-foreground/80")}>
+                      {name}
                     </span>
-                  </span>
-                </button>
-              );
-            })
+                    <span className="flex-1 min-w-0 truncate text-sm">
+                      <span className={isUnread ? "font-semibold text-foreground" : "text-foreground/80"}>
+                        {t.subject ?? "(no subject)"}
+                      </span>
+                      <span className="text-muted-foreground"> — {t.preview}</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      {isUnread && t.unread_count > 1 && (
+                        <span className="text-[9px] font-semibold tabular-nums min-w-4 text-center px-1 py-0.5 rounded-full bg-primary/15 text-primary">
+                          {t.unread_count}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground w-14 text-right">
+                        {format(new Date(t.latest_at), "MMM d")}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           )}
           {hasMore && (
             <button type="button" onClick={onLoadMore} className="w-full py-2.5 text-xs text-primary hover:underline">

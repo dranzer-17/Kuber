@@ -24,16 +24,18 @@ import { UniboxInstantlyInterestMenu } from "@/components/app/unibox/unibox-inst
 import type { UniboxInterestFilter, UniboxReadStateFilter } from "@/components/app/unibox/unibox-status-filter";
 import { Avatar } from "@/components/leads/lead-ui";
 
-function pickPendingDraft(messages: UniboxMessage[], drafts: ReplyDraft[]): ReplyDraft | null {
+// Latest reply_draft for the latest inbound message, regardless of status —
+// used as the anchor id for regenerating a fresh draft (even after one was
+// already sent), and to know whether one is ready to show.
+function pickLatestDraft(messages: UniboxMessage[], drafts: ReplyDraft[]): ReplyDraft | null {
   const received = messages.filter((m) => m.direction === "received");
   const latest = received[received.length - 1];
   const eventId = latest?.reply_event_id;
-  const candidates = drafts.filter((d) => d.status !== "sent" && d.status !== "rejected");
   if (eventId) {
-    const matched = candidates.filter((d) => d.reply_event_id === eventId);
+    const matched = drafts.filter((d) => d.reply_event_id === eventId);
     if (matched.length > 0) return matched[matched.length - 1];
   }
-  return candidates[candidates.length - 1] ?? null;
+  return drafts[drafts.length - 1] ?? null;
 }
 
 export function UniboxClient() {
@@ -154,8 +156,8 @@ export function UniboxClient() {
     ? [selectedSummary.lead?.first_name, selectedSummary.lead?.last_name].filter(Boolean).join(" ") || selectedSummary.lead_email || "Unknown"
     : "";
 
-  const pendingDraft = useMemo(
-    () => pickPendingDraft(threadDetail?.messages ?? [], threadDetail?.reply_drafts ?? []),
+  const latestDraft = useMemo(
+    () => pickLatestDraft(threadDetail?.messages ?? [], threadDetail?.reply_drafts ?? []),
     [threadDetail],
   );
 
@@ -236,7 +238,7 @@ export function UniboxClient() {
                   threadId={selectedId!}
                   token={token}
                   canReply={!!threadDetail?.reply_to_uuid}
-                  pendingDraft={pendingDraft}
+                  latestDraft={latestDraft}
                   replyToSubject={threadDetail?.messages?.find((m) => m.direction === "received")?.subject ?? null}
                   onChanged={() => { void loadThreads(false); void loadDetail(selectedId!, { silent: true }); }}
                 />
