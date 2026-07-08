@@ -9,6 +9,7 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { emailPreview } from "@/lib/email-display";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -240,6 +241,83 @@ function DraftStatusBadge({
   );
 }
 
+/** Gmail/Unibox-style expandable message row — collapsed shows sender + snippet + date, expanded shows the full body. */
+function OutboxMessageRow({
+  senderName,
+  toLabel,
+  timestamp,
+  bodyHtml,
+  bodyText,
+  expanded,
+  onToggle,
+}: {
+  senderName: string;
+  toLabel: string;
+  timestamp: string | null;
+  bodyHtml: string | null;
+  bodyText: string | null;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const snippet = emailPreview(bodyText, bodyHtml, 100);
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left border-b border-border/60 last:border-b-0 hover:bg-secondary/40 transition-colors"
+      >
+        <Avatar name={senderName} size="sm" />
+        <span className="shrink-0 max-w-[160px] truncate text-sm font-medium text-foreground/90">
+          {senderName}
+        </span>
+        <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">
+          {snippet || "(empty message)"}
+        </span>
+        {timestamp && (
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {format(new Date(timestamp), "MMM d")}
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  return (
+    <div className="border-b border-border/60 last:border-b-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-secondary/30 transition-colors"
+      >
+        <Avatar name={senderName} size="sm" />
+        <div className="flex-1 min-w-0">
+          <span className="font-semibold text-sm">{senderName}</span>
+          <p className="text-xs text-muted-foreground truncate">to {toLabel}</p>
+        </div>
+        {timestamp && (
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+            {format(new Date(timestamp), "MMM d, h:mm a")}
+          </span>
+        )}
+      </button>
+      <div className="px-4 pb-4 pl-[52px] text-sm">
+        {bodyHtml ? (
+          <div
+            className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
+            dangerouslySetInnerHTML={{ __html: bodyHtml }}
+          />
+        ) : bodyText ? (
+          <p className="whitespace-pre-wrap">{bodyText}</p>
+        ) : (
+          <p className="text-muted-foreground italic">(empty message)</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function CampaignDetail({
   campaign,
   onBack,
@@ -279,6 +357,7 @@ export function CampaignDetail({
   const [drawerOrgId, setDrawerOrgId] = useState<string | null>(null);
   const [threads, setThreads] = useState<CampaignReplyThread[]>([]);
   const [outboxFilter, setOutboxFilter] = useState<"all" | "action" | "certified" | "sent" | "replied">("all");
+  const [outboxExpandOverrides, setOutboxExpandOverrides] = useState<Set<string>>(new Set());
   const [syncingReplies, setSyncingReplies] = useState(false);
   const syncHitTimesRef = useRef<number[]>([]);
   const SYNC_RATE_LIMIT = 10;
@@ -453,6 +532,7 @@ export function CampaignDetail({
     setHistoryOpen(false);
     setPreviewVersionId(null);
     setError("");
+    setOutboxExpandOverrides(new Set());
   }, [selected?.id, selected?.email_drafts?.subject, selected?.email_drafts?.body]);
 
   useEffect(() => {
@@ -889,6 +969,55 @@ export function CampaignDetail({
   });
 
   const selectedThread = threads.find((t) => t.campaign_lead_id === selectedId) ?? null;
+
+  const outboxReplyName = selected
+    ? [selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || selectedThread?.lead_email || "Unknown"
+    : "Unknown";
+
+  type OutboxMessageItem = {
+    id: string;
+    sender: string;
+    to: string;
+    timestamp: string | null;
+    bodyHtml: string | null;
+    bodyText: string | null;
+  };
+
+  const outboxMessageItems: OutboxMessageItem[] = [];
+  if (selected?.email_drafts?.status === "sent") {
+    outboxMessageItems.push({
+      id: `initial-${selected.email_drafts.id}`,
+      sender: "You",
+      to: outboxReplyName,
+      timestamp: selected.email_drafts.created_at ?? null,
+      bodyHtml: selectedThread?.original_email?.body ?? selected.email_drafts.body ?? "",
+      bodyText: null,
+    });
+  }
+  if (selectedThread) {
+    for (const msg of selectedThread.messages) {
+      outboxMessageItems.push({
+        id: msg.id,
+        sender: outboxReplyName,
+        to: "You",
+        timestamp: msg.received_at,
+        bodyHtml: null,
+        bodyText: stripQuotedLines(msg.reply_body) ?? "",
+      });
+      const latestDraft = msg.reply_drafts[msg.reply_drafts.length - 1] ?? null;
+      if (latestDraft?.status === "sent") {
+        outboxMessageItems.push({
+          id: latestDraft.id,
+          sender: "You",
+          to: outboxReplyName,
+          timestamp: latestDraft.sent_at,
+          bodyHtml: latestDraft.body,
+          bodyText: null,
+        });
+      }
+    }
+  }
+  const outboxLastItemId = outboxMessageItems.length > 0 ? outboxMessageItems[outboxMessageItems.length - 1].id : null;
 
   const TEMP_BADGE: Record<string, { label: string; cls: string; icon?: React.ReactNode }> = {
     hot:          { label: "HOT",          cls: "bg-red-500/15 text-red-400 border-red-500/30",     icon: <Flame className="size-3" /> },
@@ -1975,28 +2104,24 @@ export function CampaignDetail({
                       </div>
                     )}
                   </div>
-                ) : selected.email_drafts?.status === "sent" ? (
-                  <div className="flex flex-col items-end gap-1">
-                    <div className="max-w-[85%] space-y-1 items-end flex flex-col">
-                      <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
-                        {(selectedThread?.original_email?.subject ?? selected.email_drafts.subject) && (
-                          <p className="text-xs font-semibold text-primary mb-1.5">
-                            {selectedThread?.original_email?.subject ?? selected.email_drafts.subject}
-                          </p>
-                        )}
-                        <div
-                          className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
-                          dangerouslySetInnerHTML={{ __html: selectedThread?.original_email?.body ?? selected.email_drafts.body ?? "" }}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1.5 pr-1">
-                        <CheckCircle2 className="size-3 text-green-400" />
-                        <p className="text-[10px] text-green-400">Sent</p>
-                      </div>
-                    </div>
-                    <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
-                      K
-                    </div>
+                ) : outboxMessageItems.length > 0 ? (
+                  <div className="rounded-xl border border-border bg-card overflow-hidden">
+                    {outboxMessageItems.map((item) => (
+                      <OutboxMessageRow
+                        key={item.id}
+                        senderName={item.sender}
+                        toLabel={item.to}
+                        timestamp={item.timestamp}
+                        bodyHtml={item.bodyHtml}
+                        bodyText={item.bodyText}
+                        expanded={(item.id === outboxLastItemId) !== outboxExpandOverrides.has(item.id)}
+                        onToggle={() => setOutboxExpandOverrides((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                          return next;
+                        })}
+                      />
+                    ))}
                   </div>
                 ) : (
                   <div className="max-w-2xl mx-auto rounded-lg border border-border bg-card p-12 text-center">
@@ -2004,67 +2129,30 @@ export function CampaignDetail({
                   </div>
                 )}
 
-                {/* Reply thread — inbound messages + our reply drafts */}
-                {selectedThread && selectedThread.messages.map((msg) => {
-                  const latestDraft = msg.reply_drafts[msg.reply_drafts.length - 1] ?? null;
-                  const replyName = [selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || selectedThread.lead_email || "Unknown";
+                {/* Pending AI reply draft for the latest inbound message — shown below the thread */}
+                {selectedThread && (() => {
+                  const lastMsg = selectedThread.messages[selectedThread.messages.length - 1] ?? null;
+                  const latestDraft = lastMsg?.reply_drafts[lastMsg.reply_drafts.length - 1] ?? null;
+                  if (!lastMsg || latestDraft?.status === "sent") return null;
+                  if (!latestDraft) {
+                    return <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft generated yet.</div>;
+                  }
+                  if (latestDraft.status === "generating") {
+                    return (
+                      <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
+                        <Loader2 className="size-4 animate-spin" /> Generating reply draft…
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={msg.id} className="space-y-3">
-                      {/* Inbound message — LEFT bubble */}
-                      <div className="flex items-end gap-2">
-                        <div className="size-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-muted-foreground">
-                          {replyName.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="max-w-[85%] space-y-1">
-                          <div className="rounded-2xl rounded-bl-sm bg-secondary border border-border px-4 py-3">
-                            <p className="text-sm whitespace-pre-wrap leading-relaxed text-foreground">
-                              {stripQuotedLines(msg.reply_body)}
-                            </p>
-                          </div>
-                          <p className="text-[10px] text-muted-foreground/70 pl-1">
-                            {msg.received_at ? format(new Date(msg.received_at), "MMM d, h:mm a") : ""}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* AI reply draft — RIGHT bubble, with accept/reject */}
-                      <div className="flex flex-col items-end gap-1">
-                        {!latestDraft ? (
-                          <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft generated yet.</div>
-                        ) : latestDraft.status === "generating" ? (
-                          <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
-                            <Loader2 className="size-4 animate-spin" /> Generating reply draft…
-                          </div>
-                        ) : latestDraft.status === "sent" ? (
-                          <>
-                            <div className="max-w-[85%] space-y-1 items-end flex flex-col">
-                              <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 px-4 py-3">
-                                <div
-                                  className="text-sm leading-relaxed text-foreground [&_p]:mb-2 [&_p:last-child]:mb-0 [&_strong]:font-semibold"
-                                  dangerouslySetInnerHTML={{ __html: latestDraft.body ?? "" }}
-                                />
-                              </div>
-                              <div className="flex items-center gap-1.5 pr-1">
-                                <CheckCircle2 className="size-3 text-green-400" />
-                                <p className="text-[10px] text-green-400">Sent</p>
-                              </div>
-                            </div>
-                            <div className="size-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0 mb-0.5 text-[10px] font-bold text-primary">
-                              K
-                            </div>
-                          </>
-                        ) : (
-                          <ReplyDraftBox
-                            key={latestDraft.id}
-                            draft={latestDraft}
-                            token={appSession?.access_token ?? ""}
-                            onChanged={() => void loadReplies()}
-                          />
-                        )}
-                      </div>
-                    </div>
+                    <ReplyDraftBox
+                      key={latestDraft.id}
+                      draft={latestDraft}
+                      token={appSession?.access_token ?? ""}
+                      onChanged={() => void loadReplies()}
+                    />
                   );
-                })}
+                })()}
               </div>
             )}
           </div>
