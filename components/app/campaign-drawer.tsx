@@ -364,6 +364,7 @@ export function CampaignDetail({
   const [outboxFilter, setOutboxFilter] = useState<"all" | "action" | "certified" | "sent" | "replied">("all");
   const [outboxExpandOverrides, setOutboxExpandOverrides] = useState<Set<string>>(new Set());
   const [outboxReplyOpen, setOutboxReplyOpen] = useState(false);
+  const [outboxReplyStartBlank, setOutboxReplyStartBlank] = useState(true);
   const [outboxNewReplyLoading, setOutboxNewReplyLoading] = useState(false);
   const [syncingReplies, setSyncingReplies] = useState(false);
   const syncHitTimesRef = useRef<number[]>([]);
@@ -471,6 +472,7 @@ export function CampaignDetail({
 
   useEffect(() => {
     setOutboxReplyOpen(false);
+    setOutboxReplyStartBlank(true);
   }, [selectedId]);
 
   async function handleStartNewOutboxReply(anchorDraftId: string) {
@@ -2244,6 +2246,7 @@ export function CampaignDetail({
                       return;
                     }
                     setOutboxReplyOpen(true);
+                    setOutboxReplyStartBlank(true);
                     if (latestDraft && latestDraft.status === "sent") {
                       void handleStartNewOutboxReply(latestDraft.id);
                     }
@@ -2262,16 +2265,6 @@ export function CampaignDetail({
                           Reply
                           <ChevronDown className={cn("size-3.5 transition-transform", outboxReplyOpen && "rotate-180")} />
                         </Button>
-                        {hasDraftReady && !outboxReplyOpen && (
-                          <button
-                            type="button"
-                            onClick={() => setOutboxReplyOpen(true)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 transition-colors"
-                          >
-                            <Sparkles className="size-3" />
-                            AI reply ready
-                          </button>
-                        )}
                         {isGenerating && (
                           <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
                             <Loader2 className="size-3 animate-spin" />
@@ -2284,10 +2277,11 @@ export function CampaignDetail({
                         <div className="mt-3">
                           {hasDraftReady ? (
                             <ReplyDraftBox
-                              key={latestDraft!.id}
+                              key={`${latestDraft!.id}-${outboxReplyStartBlank}`}
                               draft={latestDraft!}
                               token={appSession?.access_token ?? ""}
                               onChanged={() => void loadReplies()}
+                              startBlank={outboxReplyStartBlank}
                             />
                           ) : isGenerating ? (
                             <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">

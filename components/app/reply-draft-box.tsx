@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, CheckCircle2, Paperclip } from "lucide-react";
+import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, CheckCircle2, Paperclip, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -31,12 +31,17 @@ interface ReplyDraftBoxProps {
   draft: ReplyDraft;
   token: string;
   onChanged: () => void;
+  /** When true, starts with blank subject/body for manual composition instead of
+   *  prefilling the AI-generated content — the user can opt into AI via the
+   *  "Generate with AI" button instead. */
+  startBlank?: boolean;
 }
 
-export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
+export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: ReplyDraftBoxProps) {
   const [status, setStatus] = useState(draft.status);
-  const [subject, setSubject] = useState(draft.subject ?? "");
-  const [body, setBody] = useState(() => normalizeReplyBodyHtml(draft.body ?? ""));
+  const [subject, setSubject] = useState(startBlank ? "" : draft.subject ?? "");
+  const [body, setBody] = useState(() => (startBlank ? "" : normalizeReplyBodyHtml(draft.body ?? "")));
+  const [aiUsed, setAiUsed] = useState(!startBlank);
   const [error, setError] = useState(draft.error);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
@@ -148,9 +153,10 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
       setBody(normalizeReplyBodyHtml(updated.body ?? ""));
       setStatus(updated.status);
       setError(updated.error);
+      setAiUsed(true);
       setRegenOpen(false);
       setRegenQuery("");
-      toast.success("Reply regenerated");
+      toast.success(aiUsed ? "Reply regenerated" : "AI reply generated");
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -167,8 +173,24 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
             {status}
           </span>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setRegenOpen((o) => !o)} className="h-6 gap-1 text-[11px] text-muted-foreground hover:text-foreground px-2">
-          <RotateCcw className="size-3" /> Regenerate
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={regenerating}
+          onClick={() => (aiUsed ? setRegenOpen((o) => !o) : void handleRegenerate())}
+          className={cn(
+            "h-6 gap-1 text-[11px] px-2",
+            aiUsed ? "text-muted-foreground hover:text-foreground" : "text-primary hover:text-primary",
+          )}
+        >
+          {regenerating ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : aiUsed ? (
+            <RotateCcw className="size-3" />
+          ) : (
+            <Sparkles className="size-3" />
+          )}
+          {regenerating ? "Generating…" : aiUsed ? "Regenerate" : "Generate with AI"}
         </Button>
       </div>
       <div className="p-4 space-y-3">
@@ -221,12 +243,13 @@ export function ReplyDraftBox({ draft, token, onChanged }: ReplyDraftBoxProps) {
             <Input
               value={regenQuery}
               onChange={(e) => setRegenQuery(e.target.value)}
-              placeholder="Optional instruction, e.g. Make it shorter…"
+              placeholder={aiUsed ? "Optional instruction, e.g. Make it shorter…" : "Optional instruction, e.g. Focus on pricing…"}
               className="text-sm"
               onKeyDown={(e) => { if (e.key === "Enter") void handleRegenerate(); }}
             />
             <Button size="sm" disabled={regenerating} onClick={() => void handleRegenerate()} className="gap-1.5">
-              {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />} Regenerate
+              {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : (aiUsed ? <RotateCcw className="size-3.5" /> : <Sparkles className="size-3.5" />)}
+              {aiUsed ? "Regenerate" : "Generate with AI"}
             </Button>
           </div>
         )}
