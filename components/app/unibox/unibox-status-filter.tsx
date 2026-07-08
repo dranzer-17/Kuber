@@ -38,25 +38,70 @@ function readStateLabel(value: UniboxReadStateFilter): string {
   return READ_STATE_OPTIONS.find((o) => o.value === value)?.label ?? "All";
 }
 
-type Props = {
+type ReadStateProps = {
   readState: UniboxReadStateFilter;
-  interest: UniboxInterestFilter;
   unreadTotal: number;
   onReadState: (v: UniboxReadStateFilter) => void;
+};
+
+export function UniboxInboxFilter({ readState, unreadTotal, onReadState }: ReadStateProps) {
+  const [open, setOpen] = useState(false);
+
+  function select(v: UniboxReadStateFilter) {
+    onReadState(v);
+    setOpen(false);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex-1 flex items-center justify-between gap-2 h-9 px-3 rounded-lg border border-border bg-card text-sm font-medium hover:bg-secondary/40 transition-colors"
+        >
+          <span className="truncate flex items-center gap-2">
+            {readStateLabel(readState)}
+            {readState === "all" && unreadTotal > 0 && (
+              <span className="text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
+                {unreadTotal} unread
+              </span>
+            )}
+          </span>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-56 p-1.5">
+        {READ_STATE_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => select(o.value)}
+            className={cn(
+              "w-full text-left px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 flex items-center justify-between",
+              readState === o.value ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground",
+            )}
+          >
+            {o.label}
+            {o.value === "unread" && unreadTotal > 0 && (
+              <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
+                {unreadTotal}
+              </span>
+            )}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+type InterestProps = {
+  interest: UniboxInterestFilter;
   onInterest: (v: UniboxInterestFilter) => void;
 };
 
-export function UniboxStatusFilter({
-  readState, interest, unreadTotal, onReadState, onInterest,
-}: Props) {
+export function UniboxInterestFilterDropdown({ interest, onInterest }: InterestProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-
-  const triggerLabel = useMemo(() => {
-    if (interest !== "all") return interestLabel(interest);
-    if (readState !== "all") return readStateLabel(readState);
-    return "All conversations";
-  }, [readState, interest]);
 
   const filteredInterest = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -64,16 +109,8 @@ export function UniboxStatusFilter({
     return INTEREST_FILTER_OPTIONS.filter((o) => o.label.toLowerCase().includes(q));
   }, [search]);
 
-  function selectRead(v: UniboxReadStateFilter) {
-    onReadState(v);
-    if (v !== "all") onInterest("all");
-    setOpen(false);
-    setSearch("");
-  }
-
-  function selectInterest(v: UniboxInterestFilter) {
+  function select(v: UniboxInterestFilter) {
     onInterest(v);
-    if (v !== "all") onReadState("all");
     setOpen(false);
     setSearch("");
   }
@@ -83,18 +120,13 @@ export function UniboxStatusFilter({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="w-full flex items-center justify-between gap-2 h-9 px-3 rounded-lg border border-border bg-card text-sm font-medium hover:bg-secondary/40 transition-colors"
+          className="flex-1 flex items-center justify-between gap-2 h-9 px-3 rounded-lg border border-border bg-card text-sm font-medium hover:bg-secondary/40 transition-colors"
         >
           <span className="truncate flex items-center gap-2">
             {interest !== "all" && interest !== "lead" && (
               <Zap className={cn("size-3.5 shrink-0", INTEREST_FILTER_OPTIONS.find((o) => o.value === interest)?.color)} />
             )}
-            {triggerLabel}
-            {readState === "all" && interest === "all" && unreadTotal > 0 && (
-              <span className="text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
-                {unreadTotal} unread
-              </span>
-            )}
+            {interestLabel(interest)}
           </span>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
         </button>
@@ -111,40 +143,12 @@ export function UniboxStatusFilter({
         </div>
         <div className="max-h-72 overflow-y-auto p-1.5">
           {!search.trim() && (
-            <>
-              <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Inbox
-              </p>
-              {READ_STATE_OPTIONS.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => selectRead(o.value)}
-                  className={cn(
-                    "w-full text-left px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 flex items-center justify-between",
-                    readState === o.value && interest === "all" ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground",
-                  )}
-                >
-                  {o.label}
-                  {o.value === "unread" && unreadTotal > 0 && (
-                    <span className="text-[10px] tabular-nums px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
-                      {unreadTotal}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </>
-          )}
-          <p className="px-2 py-1 mt-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Instantly status
-          </p>
-          {!search.trim() && (
             <button
               type="button"
-              onClick={() => selectInterest("all")}
+              onClick={() => select("all")}
               className={cn(
                 "w-full text-left px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60",
-                interest === "all" && readState === "all" ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground",
+                interest === "all" ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground",
               )}
             >
               All statuses
@@ -154,7 +158,7 @@ export function UniboxStatusFilter({
             <button
               key={o.label}
               type="button"
-              onClick={() => selectInterest(o.value)}
+              onClick={() => select(o.value)}
               className={cn(
                 "w-full text-left px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 flex items-center gap-2",
                 interest === o.value ? "bg-primary/10 text-primary font-semibold" : "text-muted-foreground",

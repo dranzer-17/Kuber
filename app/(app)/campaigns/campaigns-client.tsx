@@ -95,7 +95,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
             placeholder="Search campaigns…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-sm bg-secondary/50 border border-border rounded-lg placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full pl-8 pr-3 py-2 text-sm bg-card border border-border rounded-lg placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
         <div className="flex items-center gap-1.5">

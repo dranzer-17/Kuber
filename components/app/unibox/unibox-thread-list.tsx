@@ -5,7 +5,8 @@ import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UniboxThreadSummary } from "@/lib/api-client";
 import {
-  UniboxStatusFilter,
+  UniboxInboxFilter,
+  UniboxInterestFilterDropdown,
   type UniboxInterestFilter,
   type UniboxReadStateFilter,
 } from "@/components/app/unibox/unibox-status-filter";
@@ -45,13 +46,17 @@ export function UniboxThreadList({
           <CampaignMultiSelect items={campaigns} selectedIds={campaignIds} onChange={onCampaigns} />
           <InboxSelect eaccount={eaccount} eaccounts={eaccounts} onEaccount={onEaccount} />
         </div>
-        <UniboxStatusFilter
-          readState={readState}
-          interest={interest}
-          unreadTotal={unreadTotal}
-          onReadState={onReadState}
-          onInterest={onInterest}
-        />
+        <div className="flex items-center gap-1.5">
+          <UniboxInboxFilter
+            readState={readState}
+            unreadTotal={unreadTotal}
+            onReadState={onReadState}
+          />
+          <UniboxInterestFilterDropdown
+            interest={interest}
+            onInterest={onInterest}
+          />
+        </div>
         <input
           type="search"
           placeholder="Search by lead name…"

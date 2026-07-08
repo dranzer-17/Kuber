@@ -461,6 +461,7 @@ export async function patchCampaignConfig(
   token: string,
   campaignId: string,
   patch: {
+    name?: string;
     daily_limit?: number;
     window_from?: string;
     window_to?: string;
