@@ -274,9 +274,9 @@ export function EditCampaignForm({
           </div>
 
           {/* Right: schedule & limits — one compact card, no dead space */}
-          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden lg:col-span-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0">
-              <div className="flex flex-col gap-3 px-5 py-4 sm:border-r sm:border-b border-border">
+          <div className="flex flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden lg:col-span-3">
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0 border-b border-border">
+              <div className="flex flex-col justify-center gap-3 px-5 py-4 sm:border-r border-border">
                 <div className="flex items-center gap-2.5">
                   <Gauge className="size-4 text-muted-foreground shrink-0" />
                   <div>
@@ -294,7 +294,7 @@ export function EditCampaignForm({
                 />
               </div>
 
-              <div className="flex flex-col gap-3 px-5 py-4 sm:border-b border-border">
+              <div className="flex flex-col justify-center gap-3 px-5 py-4">
                 <div className="flex items-center gap-2.5">
                   <Clock className="size-4 text-muted-foreground shrink-0" />
                   <div>
@@ -308,42 +308,25 @@ export function EditCampaignForm({
                   <TimeSelect value={windowTo} onChange={setWindowTo} />
                 </div>
               </div>
+            </div>
 
-              <div className="flex flex-col gap-3 px-5 py-4 sm:border-r border-border">
-                <div className="flex items-center gap-2.5">
-                  <Globe className="size-4 text-muted-foreground shrink-0" />
-                  <p className="text-sm font-medium leading-none">Timezone</p>
+            <div className="flex flex-1 flex-col justify-center gap-4 px-5 py-4">
+              <div className="flex items-center gap-2.5">
+                <Calendar className="size-4 text-muted-foreground shrink-0" />
+                <div>
+                  <p className="text-sm font-medium leading-none">Send days</p>
+                  <p className="text-xs text-muted-foreground mt-1">Days emails will be sent</p>
                 </div>
-                <Select value={timezone} onValueChange={setTimezone}>
-                  <SelectTrigger className="h-9 w-full bg-background">
-                    <SelectValue placeholder="Select timezone" />
-                  </SelectTrigger>
-                  <SelectContent align="start" className="min-w-45">
-                    {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((tz) => (
-                      <SelectItem key={tz} value={tz}>{tz}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
-
-              <div className="flex flex-col gap-3 px-5 py-4">
-                <div className="flex items-center gap-2.5">
-                  <Calendar className="size-4 text-muted-foreground shrink-0" />
-                  <div>
-                    <p className="text-sm font-medium leading-none">Send days</p>
-                    <p className="text-xs text-muted-foreground mt-1">Days emails will be sent</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {DAYS.map((day) => (
-                    <DayPill
-                      key={day}
-                      day={DAY_LABELS[day]}
-                      active={sendDays[day] ?? false}
-                      onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
-                    />
-                  ))}
-                </div>
+              <div className="flex items-center justify-center flex-wrap gap-3">
+                {DAYS.map((day) => (
+                  <DayPill
+                    key={day}
+                    day={DAY_LABELS[day]}
+                    active={sendDays[day] ?? false}
+                    onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
+                  />
+                ))}
               </div>
             </div>
           </div>

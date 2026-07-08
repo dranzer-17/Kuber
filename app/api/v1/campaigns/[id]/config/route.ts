@@ -43,6 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!sub.instantly_campaign_id) continue;
     try {
       await patchInstantlyCampaignConfig(sub.instantly_campaign_id, {
+        name:       parsed.data.name,
         dailyLimit: parsed.data.daily_limit,
         windowFrom: parsed.data.window_from,
         windowTo:   parsed.data.window_to,

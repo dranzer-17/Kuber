@@ -136,6 +136,7 @@ export async function createInstantlyCampaign(opts: {
 export async function patchInstantlyCampaignConfig(
   instantlyCampaignId: string,
   opts: {
+    name?: string;
     dailyLimit?: number;
     windowFrom?: string;
     windowTo?: string;
@@ -144,6 +145,7 @@ export async function patchInstantlyCampaignConfig(
   },
 ): Promise<void> {
   const body: Record<string, unknown> = {};
+  if (opts.name !== undefined) body.name = opts.name;
   if (opts.dailyLimit !== undefined) body.daily_limit = opts.dailyLimit;
   if (opts.windowFrom !== undefined || opts.windowTo !== undefined || opts.timezone !== undefined || opts.sendDays !== undefined) {
     body.campaign_schedule = {

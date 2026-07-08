@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
-  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X, Sparkles,
+  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X, Sparkles, Pencil,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ import {
   saveCampaignSteps,
   uploadCampaignLeadAttachment,
   removeCampaignLeadAttachment,
+  patchCampaignConfig,
   type CampaignReplyThread,
   type ReplyDraft,
 } from "@/lib/api-client";
@@ -325,6 +326,10 @@ export function CampaignDetail({
   campaign: Campaign;
   onBack: () => void;
 }) {
+  const [campaignName, setCampaignName] = useState(campaign.name);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(campaign.name);
+  const [savingName, setSavingName] = useState(false);
   const [campaignLeads, setCampaignLeads] = useState<CampaignLead[]>([]);
   const [progress, setProgress] = useState<DraftProgress | null>(null);
   const [loading, setLoading] = useState(false);
@@ -389,6 +394,39 @@ export function CampaignDetail({
   }, []);
 
   const { loadCampaigns, session: appSession } = useApp();
+
+  useEffect(() => {
+    setCampaignName(campaign.name);
+    setNameDraft(campaign.name);
+    setEditingName(false);
+  }, [campaign.id, campaign.name]);
+
+  async function handleSaveName() {
+    const trimmed = nameDraft.trim();
+    if (!trimmed || trimmed === campaignName) {
+      setEditingName(false);
+      setNameDraft(campaignName);
+      return;
+    }
+    setSavingName(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const result = await patchCampaignConfig(session.access_token, campaign.id, { name: trimmed });
+      if (result.sync_errors.length > 0) {
+        toast.warning("Renamed, but Instantly sync had errors: " + result.sync_errors[0]);
+      } else {
+        toast.success("Campaign renamed");
+      }
+      setCampaignName(trimmed);
+      setEditingName(false);
+      if (appSession?.access_token) void loadCampaigns(appSession.access_token);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   const loadData = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -1163,7 +1201,50 @@ export function CampaignDetail({
           >
             <ArrowLeft className="size-4" />
           </button>
-          <h1 className="text-sm font-semibold text-foreground truncate min-w-0">{campaign.name}</h1>
+          {editingName ? (
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleSaveName();
+                  if (e.key === "Escape") { setEditingName(false); setNameDraft(campaignName); }
+                }}
+                className="h-7 w-56 bg-background text-sm font-semibold"
+              />
+              <button
+                type="button"
+                disabled={savingName}
+                onClick={() => void handleSaveName()}
+                aria-label="Save campaign name"
+                className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {savingName ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              </button>
+              <button
+                type="button"
+                disabled={savingName}
+                onClick={() => { setEditingName(false); setNameDraft(campaignName); }}
+                aria-label="Cancel"
+                className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 min-w-0 group/name">
+              <h1 className="text-sm font-semibold text-foreground truncate min-w-0">{campaignName}</h1>
+              <button
+                type="button"
+                onClick={() => { setNameDraft(campaignName); setEditingName(true); }}
+                aria-label="Edit campaign name"
+                className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            </div>
+          )}
         </div>
 
         {viewTab === "outbox" && (
@@ -1647,15 +1728,9 @@ export function CampaignDetail({
           <div className="w-[266px] shrink-0 border-r border-border bg-card flex flex-col">
             {/* Header */}
             <div className="border-b border-border shrink-0">
-              <div className="px-3 py-2 flex items-center gap-1.5 flex-wrap">
-                <a
-                  href={`/unibox?campaign_id=${campaign.id}`}
-                  className="text-[11px] text-primary hover:underline shrink-0"
-                >
-                  Open in Unibox
-                </a>
+              <div className="px-3 pt-2 flex items-center gap-1.5">
                 <Select value={outboxFilter} onValueChange={(v) => setOutboxFilter(v as typeof outboxFilter)}>
-                  <SelectTrigger className="h-7 w-auto gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
+                  <SelectTrigger className="h-7 flex-1 min-w-0 gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1665,7 +1740,7 @@ export function CampaignDetail({
                   </SelectContent>
                 </Select>
                 <Select value={leadsSort} onValueChange={(v) => setLeadsSort(v as CampaignLeadsSort)}>
-                  <SelectTrigger className="h-7 w-auto gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
+                  <SelectTrigger className="h-7 w-auto shrink-0 gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1673,21 +1748,51 @@ export function CampaignDetail({
                     <SelectItem value="newest" className="text-[11px]">Newest</SelectItem>
                   </SelectContent>
                 </Select>
-                {outboxCertifyDraftIds.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 px-2 text-[11px]"
-                    disabled={certifying}
-                    onClick={() => void handleBulkCertify(outboxCertifyDraftIds)}
-                  >
-                    {certifying ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
-                    Certify ({outboxCertifyDraftIds.length})
-                  </Button>
-                )}
+                <button
+                  type="button"
+                  disabled={syncingReplies}
+                  title="Sync replies"
+                  onClick={async () => {
+                    const now = Date.now();
+                    syncHitTimesRef.current = syncHitTimesRef.current.filter(
+                      (t) => now - t < SYNC_RATE_WINDOW_MS,
+                    );
+                    if (syncHitTimesRef.current.length >= SYNC_RATE_LIMIT) {
+                      toast.warning("Please wait a few seconds before trying again.");
+                      return;
+                    }
+                    syncHitTimesRef.current.push(now);
+
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (!session) return;
+                    setSyncingReplies(true);
+                    try {
+                      const result = await syncCampaignReplies(session.access_token, campaign.id);
+                      await loadReplies();
+                      if (result.backfilled > 0) {
+                        toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
+                      } else {
+                        toast.success("Replies are up to date");
+                      }
+                    } catch (e) {
+                      toast.error((e as Error).message);
+                    } finally {
+                      setSyncingReplies(false);
+                    }
+                  }}
+                  className="inline-flex items-center justify-center size-7 shrink-0 rounded-md border border-border bg-secondary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("size-3", syncingReplies && "animate-spin")} />
+                </button>
+                <a
+                  href={`/unibox?campaign_id=${campaign.id}`}
+                  title="Open in Unibox"
+                  className="inline-flex items-center justify-center size-7 shrink-0 rounded-md border border-border bg-secondary/30 text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <ExternalLink className="size-3" />
+                </a>
               </div>
-              <div className="px-3 pb-2 flex items-center justify-between gap-2">
+              <div className="px-3 py-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   {outboxSelectableFilteredLeads.length > 0 && (
                     <button
@@ -1710,55 +1815,31 @@ export function CampaignDetail({
                           });
                         }
                       }}
-                      className="text-[11px] text-muted-foreground hover:text-primary transition-colors"
+                      className="text-[11px] text-muted-foreground hover:text-primary transition-colors shrink-0"
                     >
                       {outboxSelectableFilteredLeads.every((cl) => checkedIds.has(cl.id))
                         ? "Deselect all"
                         : `Select all (${outboxSelectableFilteredLeads.length})`}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    disabled={syncingReplies}
-                    title="Sync replies"
-                    onClick={async () => {
-                      const now = Date.now();
-                      syncHitTimesRef.current = syncHitTimesRef.current.filter(
-                        (t) => now - t < SYNC_RATE_WINDOW_MS,
-                      );
-                      if (syncHitTimesRef.current.length >= SYNC_RATE_LIMIT) {
-                        toast.warning("Please wait a few seconds before trying again.");
-                        return;
-                      }
-                      syncHitTimesRef.current.push(now);
-
-                      const { data: { session } } = await supabase.auth.getSession();
-                      if (!session) return;
-                      setSyncingReplies(true);
-                      try {
-                        const result = await syncCampaignReplies(session.access_token, campaign.id);
-                        await loadReplies();
-                        if (result.backfilled > 0) {
-                          toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
-                        } else {
-                          toast.success("Replies are up to date");
-                        }
-                      } catch (e) {
-                        toast.error((e as Error).message);
-                      } finally {
-                        setSyncingReplies(false);
-                      }
-                    }}
-                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 shrink-0"
-                  >
-                    <RefreshCw className={cn("size-3", syncingReplies && "animate-spin")} />
-                    Refresh
-                  </button>
+                  {outboxCheckedCount > 0 && (
+                    <span className="text-[11px] font-medium text-foreground truncate">
+                      {outboxCheckedCount} selected
+                    </span>
+                  )}
                 </div>
-                {outboxCheckedCount > 0 && (
-                  <span className="text-[11px] font-medium text-foreground shrink-0">
-                    {outboxCheckedCount} selected
-                  </span>
+                {outboxCertifyDraftIds.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 px-2 text-[11px]"
+                    disabled={certifying}
+                    onClick={() => void handleBulkCertify(outboxCertifyDraftIds)}
+                  >
+                    {certifying ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                    Certify ({outboxCertifyDraftIds.length})
+                  </Button>
                 )}
               </div>
             </div>
