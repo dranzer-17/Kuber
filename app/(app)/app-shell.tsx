@@ -94,10 +94,13 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const [uniboxUnread, setUniboxUnread] = useState<number | null>(null);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [, startTransition] = useTransition();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  });
+  // Starts false on both server and client's first render to avoid a
+  // hydration mismatch, then syncs from the persisted value after mount.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") setSidebarCollapsed(true);
+  }, []);
 
   function toggleSidebar() {
     setSidebarCollapsed((prev) => {
