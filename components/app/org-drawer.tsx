@@ -18,6 +18,7 @@ interface OrgData {
   id: string;
   name: string | null;
   domain: string | null;
+  domain_source: string | null;
   website: string | null;
   description: string | null;
   company_description: string | null;
@@ -211,7 +212,12 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
               {org?.name ?? (loading ? "Loading…" : "Organization")}
             </h2>
             {org?.domain && (
-              <a href={toUrl(org.domain)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 truncate hover:underline">{org.domain}</a>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <a href={toUrl(org.domain)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 truncate hover:underline">{org.domain}</a>
+                {org.domain_source === "email_inferred" && (
+                  <span className="text-[9px] font-medium uppercase tracking-wide text-amber-500/80 border border-amber-500/30 rounded px-1 py-0.5 shrink-0">Inferred</span>
+                )}
+              </div>
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">

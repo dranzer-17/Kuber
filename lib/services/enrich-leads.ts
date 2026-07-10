@@ -1,16 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { bulkMatch } from "@/lib/services/apollo";
 import { sleep } from "@/lib/http";
-
-const APP_SUBDOMAINS = /^(app|dashboard|portal|login|my|account|admin|web|mail|crm|api|secure)\./i;
-function normalizeDomain(raw: string): string {
-  return raw
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/\/.*$/, "")           // strip path
-    .toLowerCase()
-    .replace(APP_SUBDOMAINS, "");   // strip non-marketing subdomains
-}
+import { normalizeDomain } from "@/lib/utils/domain";
 
 export interface EnrichLeadsResult {
   matched: number;
@@ -79,6 +70,7 @@ export async function enrichLeads(
             await db.from("organizations").update({
               name: match.organization.name ?? undefined,
               domain: match.organization.primary_domain ? normalizeDomain(match.organization.primary_domain) : undefined,
+              domain_source: match.organization.primary_domain ? "apollo" : undefined,
               website: match.organization.website_url ?? undefined,
               industry: match.organization.industry ?? undefined,
               keywords: match.organization.keywords ?? undefined,
@@ -100,6 +92,7 @@ export async function enrichLeads(
               await db.from("organizations").update({
                 apollo_org_id: match.organization_id,
                 domain: match.organization.primary_domain ? normalizeDomain(match.organization.primary_domain) : undefined,
+                domain_source: match.organization.primary_domain ? "apollo" : undefined,
                 website: match.organization.website_url ?? undefined,
                 industry: match.organization.industry ?? undefined,
                 keywords: match.organization.keywords ?? undefined,
@@ -113,6 +106,7 @@ export async function enrichLeads(
                 apollo_org_id: match.organization_id,
                 name: match.organization.name ?? "Unknown",
                 domain: match.organization.primary_domain ? normalizeDomain(match.organization.primary_domain) : null,
+                domain_source: match.organization.primary_domain ? "apollo" : null,
                 website: match.organization.website_url ?? null,
                 industry: match.organization.industry ?? null,
                 keywords: match.organization.keywords ?? null,
@@ -130,6 +124,7 @@ export async function enrichLeads(
           await db.from("organizations")
             .update({
               domain: normalizeDomain(match.organization.primary_domain),
+              domain_source: "apollo",
               ...(match.organization_id ? { apollo_org_id: match.organization_id } : {}),
               ...(match.organization.website_url ? { website: match.organization.website_url } : {}),
               updated_at: new Date().toISOString(),

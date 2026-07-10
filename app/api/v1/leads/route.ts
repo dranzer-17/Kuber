@@ -5,16 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
-
-const APP_SUBDOMAINS = /^(app|dashboard|portal|login|my|account|admin|web|mail|crm|api|secure)\./i;
-function normalizeDomain(raw: string): string {
-  return raw
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/\/.*$/, "")           // strip path
-    .toLowerCase()
-    .replace(APP_SUBDOMAINS, "");   // strip non-marketing subdomains
-}
+import { normalizeDomain } from "@/lib/utils/domain";
 
 async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -53,7 +44,7 @@ async function upsertOrg(
   if (byName) {
     if (industry || country || normalizedDomain) {
       await db.from("organizations").update({
-        ...(normalizedDomain ? { domain: normalizedDomain } : {}),
+        ...(normalizedDomain ? { domain: normalizedDomain, domain_source: "manual" } : {}),
         ...(industry ? { industry } : {}),
         ...(country ? { country } : {}),
         updated_at: new Date().toISOString(),
@@ -67,6 +58,7 @@ async function upsertOrg(
     .insert({
       name,
       domain: normalizedDomain,
+      domain_source: normalizedDomain ? "manual" : null,
       ...(industry ? { industry } : {}),
       ...(country ? { country } : {}),
       enrichment_stage: normalizedDomain ? "queued" : null,
@@ -95,7 +87,7 @@ export async function GET(req: NextRequest) {
   let q = db
     .from("leads")
     .select(
-      `*, organizations(id, name, domain, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error),
+      `*, organizations(id, name, domain, domain_source, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error),
        campaign_leads(crm_status, interest_status, created_at, campaigns(id, name)),
        imports(id, label, color)`,
       { count: "exact" }

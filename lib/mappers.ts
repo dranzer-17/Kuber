@@ -41,6 +41,7 @@ export interface DbLead {
     id: string;
     name: string;
     domain: string | null;
+    domain_source: string | null;
     unsubscribed: boolean;
     has_scraped: boolean;
     enrichment_stage: string | null;
@@ -89,6 +90,7 @@ export function mapDbLead(l: DbLead): Lead {
     email,
     company: org?.name ?? "",
     domain,
+    domainSource: (org?.domain_source as Lead["domainSource"]) ?? null,
     jobTitle: l.title ?? l.headline ?? "",
     phone: l.phone ?? "",
     country: l.country ?? "",

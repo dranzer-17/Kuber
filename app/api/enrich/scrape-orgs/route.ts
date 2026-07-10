@@ -2,6 +2,7 @@ import { NextRequest, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { complete } from "@/lib/services/llm";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { deriveDomainFromEmail } from "@/lib/utils/domain";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const maxDuration = 55;
@@ -67,6 +68,63 @@ async function markFailed(db: Db, orgId: string, status: string, errorMessage: s
   });
 }
 
+// Falls back to the org's leads' email domains when Apollo never resolved one.
+// Free/webmail providers (gmail.com etc.) are ignored. Requires a clear
+// majority among candidate domains; ties or no candidates return null.
+async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<string | null> {
+  const { data: leads } = await db
+    .from("leads")
+    .select("email")
+    .eq("organization_id", orgId)
+    .eq("is_deleted", false)
+    .not("email", "is", null);
+
+  const counts = new Map<string, number>();
+  for (const lead of leads ?? []) {
+    const domain = lead.email ? deriveDomainFromEmail(lead.email) : null;
+    if (domain) counts.set(domain, (counts.get(domain) ?? 0) + 1);
+  }
+
+  if (counts.size === 0) {
+    await insertLog(db, {
+      org_id: orgId,
+      source: "email_fallback",
+      event: "DOMAIN_INFERENCE_FAILED",
+      payload: { lead_count: leads?.length ?? 0, reason: "no_valid_candidates" },
+    });
+    return null;
+  }
+
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const [topDomain, topCount] = sorted[0];
+  const isTie = sorted.length > 1 && sorted[1][1] === topCount;
+
+  if (isTie) {
+    await insertLog(db, {
+      org_id: orgId,
+      source: "email_fallback",
+      event: "DOMAIN_INFERENCE_FAILED",
+      payload: { lead_count: leads?.length ?? 0, candidates: sorted, candidate_conflict: true },
+    });
+    return null;
+  }
+
+  const { error } = await db.from("organizations")
+    .update({ domain: topDomain, domain_source: "email_inferred", updated_at: new Date().toISOString() })
+    .eq("id", orgId)
+    .is("domain", null);
+  if (error) return null;
+
+  await insertLog(db, {
+    org_id: orgId,
+    source: "email_fallback",
+    event: "DOMAIN_INFERRED_FROM_EMAIL",
+    payload: { derived_domain: topDomain, candidate_count: counts.size, lead_count: leads?.length ?? 0 },
+  });
+
+  return topDomain;
+}
+
 async function processOneOrg(
   db: Db,
   org: { id: string; domain: string | null; name: string },
@@ -86,10 +144,14 @@ async function processOneOrg(
     payload: { domain: org.domain, org_name: org.name },
   });
 
-  // ── B: Validate domain ─────────────────────────────────────────────────────
+  // ── B: Validate domain, falling back to leads' email domains ────────────────
   if (!org.domain) {
-    await markFailed(db, org.id, "SCRAPE_FAILED", "No domain available after Phase 2A");
-    return;
+    const inferred = await inferDomainFromLeadEmails(db, org.id);
+    if (!inferred) {
+      await markFailed(db, org.id, "SCRAPE_FAILED", "No domain available after Phase 2A and no usable lead email domain");
+      return;
+    }
+    org.domain = inferred;
   }
 
   // ── C: Firecrawl scrape ────────────────────────────────────────────────────

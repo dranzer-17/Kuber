@@ -428,7 +428,12 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   <div className="text-sm leading-relaxed mt-1.5">
                     <p className="font-medium">{display.company}</p>
                     {display.domain && (
-                      <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 mt-0.5 hover:underline block">{display.domain}</a>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline">{display.domain}</a>
+                        {display.domainSource === "email_inferred" && (
+                          <span className="text-[9px] font-medium uppercase tracking-wide text-amber-500/80 border border-amber-500/30 rounded px-1 py-0.5">Inferred from email</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </button>

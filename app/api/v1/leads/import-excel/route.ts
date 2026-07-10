@@ -5,16 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { ExcelImportSchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { normalizeDomain } from "@/lib/utils/domain";
 
 export const maxDuration = 300;
-
-function normalizeDomain(raw: string): string {
-  return raw
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/\/+$/, "")
-    .toLowerCase();
-}
 
 // Fix D: detect when org domain doesn't match the email domain
 function domainMismatch(orgDomain: string | null, email: string | null): boolean {
@@ -149,7 +142,7 @@ async function processRows(
     .filter((d) => !domainToOrgId.has(d))
     .map((d) => {
       const row = rowsWithDomain.find((r) => r.safeDomain === d)!;
-      return { name: row.org_name, domain: d, created_at: new Date().toISOString() };
+      return { name: row.org_name, domain: d, domain_source: "manual", created_at: new Date().toISOString() };
     });
 
   const missingNameOrgs = uniqueNames

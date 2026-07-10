@@ -9,6 +9,8 @@ export type LeadSource = "Apollo" | "Excel" | "Manual";
 
 export type EnrichmentStage = "queued" | "scraping" | "done" | "failed";
 
+export type DomainSource = "apollo" | "email_inferred" | "manual";
+
 export type Lead = {
   id: string;
   firstName: string;
@@ -16,6 +18,7 @@ export type Lead = {
   email: string;
   company: string;
   domain: string;
+  domainSource: DomainSource | null;
   jobTitle: string;
   phone: string;
   country: string;
