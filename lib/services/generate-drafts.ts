@@ -6,26 +6,16 @@ import {
   getEmailSignature,
   getProductOfferings,
   getCompanyContext,
-  getDraftTemplateConfig,
-  type DraftTemplateConfig,
 } from "@/lib/services/settings";
 
-// The LLM is asked for the SUBJECT, a short personalised INTRO, and (step 1 only)
-// which pre-approved KEY_STRENGTHS to feature — never the offerings/accolades/
-// closing text itself. The exact figures and claims come from the admin-editable
-// DraftTemplateConfig (see lib/services/settings.ts) so every number and
-// certification sent to a real prospect is guaranteed accurate, while the
-// wording around them still varies per lead and can be changed from Settings
-// without a code deploy.
+// The LLM writes the full email body from the Email Template system prompt
+// (subject patterns, openings, offerings, closings, etc. live there as options).
+// Code only adds greeting + signature and turns "brochure" into a download link.
 
 const DraftSchema = z.object({
   subject: z.string(),
-  intro: z.string(),
+  body: z.string(),
   product_match: z.string(),
-  // Loose on purpose: a hallucinated/mis-worded key here shouldn't fail the whole
-  // draft (subject/intro are the content that matters). buildKeyStrengthsBlock
-  // filters out anything that isn't a real HighlightKey and falls back to defaults.
-  key_highlights: z.array(z.string()).optional(),
 });
 
 type DraftLLMOutput = z.infer<typeof DraftSchema>;
@@ -85,32 +75,6 @@ function plainToHtml(plain: string): string {
     "</p>"
   );
 }
-// Deterministic per-lead rotation so a batch of drafts never converges on the
-// same wording — same lead always gets the same variant across regenerations,
-// but different leads spread across the list. `role` decorrelates which
-// variant each field gets for the same lead (so subject/opening/closing don't
-// all move in lockstep).
-function pickVariant<T>(leadId: string, role: string, arr: readonly T[]): T {
-  const seed = `${leadId}|${role}`;
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  return arr[hash % arr.length];
-}
-
-function pickSubjectPattern(leadId: string, patterns: string[]): string {
-  return pickVariant(leadId, "subject", patterns);
-}
-
-// The LLM picks which 2-3 highlight keys to feature per lead (see key_highlights)
-// — the wording/figures themselves come from the admin-editable template config,
-// never LLM-authored. The key set itself (capacity/global/expertise/revenue)
-// stays fixed in code since it's structural, not copy.
-function buildKeyStrengthsBlock(selected: string[] | undefined, template: DraftTemplateConfig): string {
-  const validKeys = Object.keys(template.highlightText);
-  const unique = [...new Set(selected)].filter((k) => validKeys.includes(k));
-  const keys = unique.length >= 2 ? unique.slice(0, 3) : template.defaultHighlights;
-  return "**Key Strengths:**\n" + keys.map((k) => `• ${template.highlightText[k]}`).join("\n");
-}
 
 // Hard guardrails appended in code so they apply regardless of what the
 // editable settings prompt says.
@@ -119,7 +83,7 @@ function buildDraftGuardrails(stepNumber: number): string {
     return `
 
 NON-NEGOTIABLE RULES (override anything above if in conflict):
-1. This is a FOLLOW-UP to a cold email the prospect never replied to. Your "intro" field is the ENTIRE follow-up message body (2 to 4 short sentences) — a brief, low-pressure nudge referencing the earlier note. Do NOT re-introduce Kuber Polyplast, do NOT repeat the offerings/strengths/accolades, do NOT use bullet points, do NOT write a new sales pitch.
+1. This is a FOLLOW-UP to a cold email the prospect never replied to. Your "body" field is the ENTIRE follow-up message (2 to 4 short sentences) — a brief, low-pressure nudge referencing the earlier note. Do NOT re-introduce Kuber Polyplast, do NOT repeat the offerings/strengths/accolades, do NOT use bullet points, do NOT write a new sales pitch.
 2. ATTACHMENTS: never claim a file, brochure, or attachment is included unless the lead data explicitly says one is attached.
 3. Keep it personal and specific to the lead's business if a fact is available, but brevity matters more than detail here.
 4. NO FABRICATION: never state a price, discount, percentage, certification, technical spec, or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. If none is given, stay qualitative — do not invent a number to sound persuasive.
@@ -130,16 +94,16 @@ NON-NEGOTIABLE RULES (override anything above if in conflict):
   return `
 
 NON-NEGOTIABLE RULES (override anything above if in conflict):
-1. Your "intro" field must contain ONLY the 1-2 personalised opening sentences about the lead's business. Do NOT include the Kuber Polyplast introduction, the offerings list, key strengths, accolades, or closing paragraph — those are appended automatically in code. Do NOT write "Our Offerings", "Key Strengths", "Accolades" or any bullet points yourself.
-2. ATTACHMENTS: The lead data below states whether this email includes a brochure/file. Never reference an attachment or brochure in your intro text either way — the closing paragraph (appended in code) already handles that correctly.
-3. PERSONALISATION: The intro must reference at least one concrete, specific fact from the lead's company description, keywords, or end markets (e.g. what they manufacture, the products they sell, their market or country). Do not use vague filler such as "reliable materials for packaging, housings, and functional components" or "consistent material quality can be valuable for your operations". If the company clearly makes or packages physical products, name them. If it is a software/services company with no obvious plastics use, keep it honest: acknowledge what they do in one sentence, then bridge via their packaging, merchandise, or hardware suppliers rather than inventing a direct need.
-4. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally (e.g. white masterbatch for dairy packaging film) when the lead's industry plausibly uses it. Set product_match accordingly.
-5. SUBJECT: Use exactly the subject pattern given in the lead data, filling the bracketed part with the lead's real company name, industry, or country. Do not use a different pattern.
-6. NO FABRICATION: never state a price, discount, percentage, certification, technical spec (e.g. TiO2 content, MFI, density), or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. Qualitative claims ("consistent opacity", "food-grade options") are fine; invented numbers are not.
-6b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into the intro whenever it's relevant to the lead (e.g. a live promotion, seasonal offer, or specific message they want featured), not just permission to mention it if you feel like it.
-7. FORMATTING: wrap at most one or two concrete facts actually present in the data (the matched product's name, or a real figure/certification from the PRODUCT REFERENCE LIBRARY or lead data) in **double asterisks** so they render bold — matching the bold styling used in the rest of the email. Do not bold whole sentences, generic phrases, or anything not grounded in the supplied data.
-8. KEY HIGHLIGHTS: from the "Available Key Strengths" list below, choose the 2 (max 3) keys most relevant to this lead's industry or scale and return them as key_highlights, e.g. a large manufacturer cares more about capacity/global reach, a niche buyer may care more about expertise. Use only the exact keys given — never invent a new key, wording, or number.
-9. NO EM DASHES: never use an em dash (—) anywhere in your text, including to string together two or three ideas in one sentence. One idea per sentence; split with a period, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.`;
+1. Your "body" field is the FULL first-email body: opening line, personalised intro, company introduction, offerings, key strengths, accolades, and closing — following the structure and approved copy options in the system prompt. Do NOT invent figures, certifications, or claims outside those approved lists / the product library / lead data.
+2. ATTACHMENTS: The lead data below states whether this email includes a brochure/file. If yes, use a closing that mentions "brochure" once. If no, do NOT mention any attachment or brochure.
+3. PERSONALISATION: The personalised intro must reference at least one concrete, specific fact from the lead's company description, keywords, or end markets. Do not use vague filler. If the company clearly makes or packages physical products, name them. If it is a software/services company with no obvious plastics use, keep it honest: acknowledge what they do, then bridge via packaging, merchandise, or hardware suppliers rather than inventing a direct need.
+4. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally when the lead's industry plausibly uses it. Set product_match accordingly.
+5. SUBJECT: Pick one approved subject pattern from the system prompt and fill the bracketed part with the lead's real company name, industry, or country. Do not invent a different pattern.
+6. NO FABRICATION: never state a price, discount, percentage, certification, technical spec (e.g. TiO2 content, MFI, density), or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, the approved copy in the system prompt, or the campaign context given below. Qualitative claims ("consistent opacity", "food-grade options") are fine; invented numbers are not.
+6b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into the personalised intro whenever it's relevant to the lead.
+7. FORMATTING: wrap at most one or two concrete facts actually present in the data in **double asterisks**. Do not bold whole sentences, generic phrases, or anything not grounded in the supplied data.
+8. NO EM DASHES: never use an em dash (—) anywhere in your text. One idea per sentence; split with a period, or use a comma or parentheses instead.
+9. Do NOT include a greeting ("Dear …") or signature/sign-off — those are added in code.`;
 }
 
 function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProductOfferings>>): string {
@@ -152,7 +116,6 @@ function buildUserPrompt(
   lead: LeadRow,
   campaignName: string,
   companyContext: string,
-  template: DraftTemplateConfig,
   customInstruction?: string,
   aiPromptContext?: string,
   stepNumber = 1,
@@ -171,15 +134,8 @@ function buildUserPrompt(
     `What they do: ${org?.company_description ?? "Not available"}`,
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
-    `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email — this is handled in the closing, do not mention it yourself` : "No attachment — do NOT mention any attachment or brochure anywhere in your intro"}`,
-    `Subject pattern to use: ${pickSubjectPattern(lead.id, template.subjectPatterns)}`,
+    `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email — mention "brochure" once in the closing` : "No attachment — do NOT mention any attachment or brochure anywhere in the body"}`,
   ];
-  if (stepNumber === 1) {
-    lines.push(
-      "Available Key Strengths (pick 2-3 by key for key_highlights, do not alter wording/numbers):",
-      ...Object.entries(template.highlightText).map(([key, text]) => `- ${key}: ${text.replace(/\*\*/g, "")}`),
-    );
-  }
   if (companyContext) lines.push(`Company context: ${companyContext}`);
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
   if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
@@ -216,8 +172,7 @@ export async function generateOneDraft(
 
   // Per-lead attachment overrides campaign default. Instantly's API cannot send
   // real file attachments, so an "attachment" is delivered as a hosted download
-  // link embedded in the body — and if there is none, the LLM is told so and the
-  // brochure sentence is stripped as a hard post-processing guarantee.
+  // link embedded in the body — and if there is none, the LLM is told so.
   const effectiveAttachmentName = target.attachment_name ?? campaign?.attachment_name ?? null;
   const effectiveAttachmentPath =
     (target.attachment_name ? target.attachment_path : campaign?.attachment_path) ?? null;
@@ -256,11 +211,10 @@ export async function generateOneDraft(
   const activeDraftId = draftId;
 
   try {
-    const [baseSystemPrompt, products, companyContext, template] = await Promise.all([
+    const [baseSystemPrompt, products, companyContext] = await Promise.all([
       getDraftSystemPrompt(db),
       getProductOfferings(db),
       getCompanyContext(db),
-      getDraftTemplateConfig(db),
     ]);
     const systemPrompt =
       baseSystemPrompt
@@ -270,7 +224,7 @@ export async function generateOneDraft(
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
-      user: buildUserPrompt(lead, campaignName, companyContext, template, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
+      user: buildUserPrompt(lead, campaignName, companyContext, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
     });
 
     const validated = DraftSchema.safeParse(json);
@@ -283,9 +237,9 @@ export async function generateOneDraft(
     }
 
     // Strip any greeting/sign-off/placeholder the LLM emitted despite instructions,
-    // and — defense in depth — any attachment/brochure mention it slipped into the
-    // intro even though the closing (assembled below, in code) already handles that.
-    const aiIntro = validated.data.intro
+    // and — defense in depth — any attachment/brochure mention on follow-ups or when
+    // no attachment is present.
+    let aiBody = validated.data.body
       .trim()
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
@@ -293,41 +247,25 @@ export async function generateOneDraft(
       .replace(/\[Your Company\]/gi, "")
       .replace(/^dear[^,\n]*,?\s*/i, "")
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
-      .replace(/[^.\n]*\b(please find (the\s+)?attached|find attached|attached (our|the|is|you will find)|our attached|brochure)\b[^.\n]*\.\s*/gi, "")
       // Em dashes are a well-known AI-writing tell; the guardrails forbid them,
       // but strip any that slip through as a safety net rather than trust compliance.
       .replace(/\s*[—–]\s*/g, ", ")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
 
+    if (stepNumber > 1 || !effectiveAttachmentName) {
+      aiBody = aiBody.replace(
+        /[^.\n]*\b(please find (the\s+)?attached|find attached|attached (our|the|is|you will find)|our attached|brochure)\b[^.\n]*\.\s*/gi,
+        "",
+      ).replace(/\n{3,}/g, "\n\n").trim();
+    }
+
     const greetingName = lead.first_name?.trim();
     const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
-
-    // Step 1 = full cold intro: code-assembled sections (rotated per lead, see
-    // pickVariant) around the LLM's intro. Step > 1 = follow-up: the LLM's
-    // "intro" IS the entire short nudge, nothing appended.
-    const aiBody =
-      stepNumber > 1
-        ? aiIntro
-        : [
-            pickVariant(lead.id, "opening", template.openingVariants),
-            aiIntro,
-            pickVariant(lead.id, "company", template.companyIntroVariants),
-            template.offeringsBlock,
-            buildKeyStrengthsBlock(validated.data.key_highlights, template),
-            template.accoladesBlock,
-            pickVariant(
-              lead.id,
-              effectiveAttachmentName ? "closing-attach" : "closing-noattach",
-              effectiveAttachmentName ? template.closingWithAttachmentVariants : template.closingNoAttachmentVariants,
-            ),
-          ].filter(Boolean).join("\n\n");
 
     let finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
 
     // Instantly cannot send real attachments, so deliver the brochure as a link.
-    // Only the step-1 closing (code-assembled above) ever mentions a brochure —
-    // follow-ups stay a short nudge and never get a download line appended.
     if (stepNumber === 1 && effectiveAttachmentName && effectiveAttachmentUrl) {
       const anchor = `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`;
       finalBody = finalBody.replace(/brochure/i, anchor);

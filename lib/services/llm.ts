@@ -172,8 +172,8 @@ export interface ExtractionOutput {
 export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Return ONLY valid JSON, no markdown fences: { "description": string (2-3 sentences: what they manufacture and who they sell to), "primary_products": string[] }`;
 
 export const DRAFT_JSON_SUFFIX =
-  '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "intro": string, "product_match": string, "key_highlights": string[]}.\n' +
+  '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string, "product_match": string}.\n' +
   'product_match must be the exact name of the matched product from the PRODUCT REFERENCE LIBRARY, or "none" if no product fits.\n' +
-  '"intro" must contain ONLY the short personalised opening (1-2 sentences for a first email, or the full 2-4 sentence nudge for a follow-up) — never the Kuber Polyplast company pitch, offerings list, key strengths, accolades, or closing, which are appended automatically.\n' +
-  '"key_highlights" (first email only; omit or use [] for a follow-up) must be 2 to 3 of the exact keys listed under "Available Key Strengths" in the user message — never invent a new key.';
+  '"body" is the full email body for a first email (opening through closing, following the structure and approved copy in the system prompt), or the full 2-4 sentence follow-up nudge. Do not include a greeting or signature — those are added in code.\n' +
+  '"subject" is the filled subject line for a first email; for a follow-up you may return an empty string (the subject is cleared in code anyway).';
 

@@ -7,7 +7,7 @@ import {
   User, Bot, LogOut, Plus,
   ChevronRight, PenLine, Bold, Italic, Underline,
   List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type, Palette, Check, Sun, Moon,
-  Building2, Package, FileText, X, Sparkles,
+  Building2, Package, FileText, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,72 +26,9 @@ const PRODUCT_SUGGESTIONS = [
 ];
 
 type Section = "profile" | "ai" | "knowledge" | "appearance" | "account";
-type AiSection = "template" | "content" | "replies" | "footer";
+type AiSection = "template" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
-
-type DraftTemplateConfig = {
-  subjectPatterns: string[];
-  openingVariants: string[];
-  companyIntroVariants: string[];
-  offeringsBlock: string;
-  highlightText: Record<string, string>;
-  defaultHighlights: string[];
-  accoladesBlock: string;
-  closingNoAttachmentVariants: string[];
-  closingWithAttachmentVariants: string[];
-};
-
-// Seeds the editor with the current production copy the first time an admin opens
-// this tab (before draft_template_config has ever been saved to Settings). Once
-// saved, the DB value always wins — this is display-only fallback, not logic.
-const DEFAULT_DRAFT_TEMPLATE: DraftTemplateConfig = {
-  subjectPatterns: [
-    "Greetings from Kuber Polyplast | Exploring Opportunities with [Company Name]",
-    "Introduction: Kuber Polyplast | Masterbatch Solutions for [Industry]",
-    "Kuber Polyplast | Connecting with [Company Name]",
-    "Exploring Synergies: Kuber Polyplast and [Company Name]",
-    "Kuber Polyplast | Masterbatch & Compounds for [Industry/Country] Manufacturers",
-  ],
-  openingVariants: [
-    "I hope this message finds you well.",
-    "I hope you're having a productive week.",
-    "Thank you for taking a moment to read this.",
-    "Reaching out because I think this could be genuinely useful for your team.",
-  ],
-  companyIntroVariants: [
-    "It is my pleasure to introduce Kuber Polyplast, a trusted name in the masterbatch industry with over 30 years of experience. As an ISO 9001:2015 certified company based in Delhi, we specialise in delivering top-quality products tailored to meet your needs.",
-    "Kuber Polyplast has been a trusted masterbatch manufacturer for over 30 years, ISO 9001:2015 certified and based in Delhi, with a track record of tailoring products to what our clients actually need.",
-    "A quick introduction: Kuber Polyplast is an ISO 9001:2015 certified masterbatch manufacturer based in Delhi with 30+ years in the industry, built around tailoring products to each client's specific requirements.",
-    "For context, Kuber Polyplast is a Delhi-based, ISO 9001:2015 certified masterbatch manufacturer with over three decades of experience delivering products tailored to our clients' needs.",
-  ],
-  offeringsBlock: "**Our Offerings:**\n• **Masterbatches**: Black, White, Colour and Additive Masterbatches\n• **Application Suitability**: Tested for film extrusion, sheet extrusion, injection molding, blow molding, and roto molding",
-  highlightText: {
-    capacity: "**Annual Production Capacity**: 18,000 MT",
-    global: "**Global Presence**: Serving 6,670+ clients across 40+ countries",
-    expertise: "**Proven Expertise**: Over 57,000 unique masterbatches developed with 1,042,440 hours of experience",
-    revenue: "**Impressive Revenue**: $2.4 billion (₹20,360 crore) client revenue achieved to date",
-  },
-  defaultHighlights: ["global", "expertise"],
-  accoladesBlock: "**Accolades & Clients:**\n• **Awards**: Udaan Award (Rising Star in Masterbatch)\n• **Trusted Partners**: APL Apollo, UFlex, Wipro, Phillips, BSNL, and more",
-  closingNoAttachmentVariants: [
-    "If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.",
-    "Happy to share more detail or answer any questions if this would be useful to you.",
-    "Let me know if this is relevant to your work. Glad to share more detail or set up a quick call.",
-  ],
-  closingWithAttachmentVariants: [
-    "Please find our brochure for further details on how we can support your needs. If you have any questions or would like to discuss further, I'd be happy to assist. We look forward to collaborating with you.",
-    "I've attached our brochure with more detail on how we could support you. Happy to answer any questions or set up a quick call.",
-    "Our brochure is attached and covers this in more depth. Let me know if you have questions or would like to set up a short call.",
-  ],
-};
-
-const HIGHLIGHT_LABELS: Record<string, string> = {
-  capacity: "Capacity",
-  global: "Global presence",
-  expertise: "Expertise",
-  revenue: "Revenue",
-};
 
 const NAV_ITEMS: { id: Section; label: string }[] = [
   { id: "profile",    label: "My Profile" },
@@ -103,61 +40,9 @@ const NAV_ITEMS: { id: Section; label: string }[] = [
 
 const AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "template", label: "Email Template", icon: PenLine },
-  { id: "content",  label: "Draft Content",  icon: Sparkles },
   { id: "replies",  label: "Reply AI",       icon: Bot },
   { id: "footer",   label: "Email Footer",   icon: Type },
 ];
-
-/** Small add/edit/remove list editor for rotating copy variants (openings, closings, subject patterns...). */
-function VariantListEditor({
-  label, helper, values, onChange, placeholder, multiline,
-}: {
-  label: string; helper?: string; values: string[]; onChange: (v: string[]) => void;
-  placeholder?: string; multiline?: boolean;
-}) {
-  function update(idx: number, value: string) {
-    onChange(values.map((v, i) => i === idx ? value : v));
-  }
-  function remove(idx: number) {
-    onChange(values.filter((_, i) => i !== idx));
-  }
-  function add() {
-    onChange([...values, ""]);
-  }
-  const Field = multiline ? Textarea : Input;
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>{label}</Label>
-        <Button type="button" size="sm" variant="outline" onClick={add} className="h-7 gap-1 px-2 text-xs">
-          <Plus className="size-3" /> Add
-        </Button>
-      </div>
-      {helper && <p className="text-xs text-muted-foreground -mt-1">{helper}</p>}
-      <div className="space-y-2">
-        {values.map((value, idx) => (
-          <div key={idx} className="flex items-start gap-2">
-            <Field
-              value={value}
-              onChange={(e) => update(idx, e.target.value)}
-              placeholder={placeholder}
-              className={cn("flex-1 text-sm", multiline && "min-h-20 resize-y")}
-            />
-            <button type="button" onClick={() => remove(idx)}
-              className="shrink-0 mt-1.5 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
-              <X className="size-3.5" />
-            </button>
-          </div>
-        ))}
-        {values.length === 0 && (
-          <p className="rounded-lg border border-dashed border-border bg-secondary/10 px-3 py-4 text-center text-xs text-muted-foreground">
-            No variants yet — click &quot;Add&quot;.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
 
 const KNOWLEDGE_NAV_ITEMS: { id: KnowledgeSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "company",   label: "Company Details",   icon: Building2 },
@@ -284,8 +169,6 @@ export function SettingsView() {
 
   const [productOfferings, setProductOfferings] = useState<ProductOffering[]>([]);
 
-  const [draftTemplate, setDraftTemplate] = useState<DraftTemplateConfig>(DEFAULT_DRAFT_TEMPLATE);
-
   const [replyDrafterPrompt,    setReplyDrafterPrompt   ] = useState("");
 
   const [userEmail, setUserEmail] = useState("");
@@ -315,10 +198,6 @@ export function SettingsView() {
         setSigContact(s.signature_contact ?? "");
         setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
         try { setProductOfferings(JSON.parse(s.product_offerings ?? "[]") as ProductOffering[]); } catch { setProductOfferings([]); }
-        try {
-          const parsed = s.draft_template_config ? JSON.parse(s.draft_template_config) as Partial<DraftTemplateConfig> : {};
-          setDraftTemplate({ ...DEFAULT_DRAFT_TEMPLATE, ...parsed, highlightText: { ...DEFAULT_DRAFT_TEMPLATE.highlightText, ...parsed.highlightText } });
-        } catch { setDraftTemplate(DEFAULT_DRAFT_TEMPLATE); }
         const l = await fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
         setLogoPath(l.logo_path);
         setLogoUrl(l.logo_url);
@@ -389,7 +268,6 @@ export function SettingsView() {
         signature_contact:       sigContact,
         product_offerings:       JSON.stringify(productOfferings),
         reply_drafter_prompt:    replyDrafterPrompt,
-        draft_template_config:   JSON.stringify(draftTemplate),
       });
       toast.success("Settings saved");
     } catch (e) {
@@ -543,113 +421,17 @@ export function SettingsView() {
                         <h3 className="text-sm font-semibold">AI Writing Instructions</h3>
                       </div>
                       <p className="text-xs text-muted-foreground -mt-2">
-                        The base prompt the AI follows when generating every outreach email. Include your email structure, intro, closing, and tone here.
+                        The base prompt the AI follows when generating every outreach email. Put subject-line patterns, opening/closing options, offerings, key strengths, and tone here — the AI picks from what you write.
                       </p>
                       <RichTextEditor
                         label="Base prompt"
                         value={systemPrompt}
                         onChange={setSystemPrompt}
                         minHeight={400}
-                        placeholder="Write the full email template here including intro, offerings summary, closing..."
+                        placeholder="Write the full email template here including subject patterns, intro options, offerings, closing..."
                         helper="Campaign-level context and matched product details are appended automatically."
                       />
                     </section>
-                  )}
-
-                  {aiSection === "content" && (
-                    <div className="space-y-6">
-                      <div className="rounded-xl border border-border bg-card p-6 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="size-4 text-muted-foreground" />
-                          <h3 className="text-sm font-semibold">Draft Content</h3>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          The building blocks every generated email is assembled from — offerings, key strengths, subject lines, and rotating opening/closing phrasing.
-                          The AI never invents these; it only picks which pre-approved sentence to use, so every figure and claim sent to a prospect stays accurate.
-                        </p>
-                      </div>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Subject line patterns</h4>
-                        <VariantListEditor
-                          label="Patterns"
-                          helper="Use [Company Name], [Industry], or [Industry/Country] as placeholders — the AI fills them in per lead."
-                          values={draftTemplate.subjectPatterns}
-                          onChange={(v) => setDraftTemplate((t) => ({ ...t, subjectPatterns: v }))}
-                          placeholder="Kuber Polyplast | Connecting with [Company Name]"
-                        />
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Opening lines</h4>
-                        <VariantListEditor
-                          label="Variants"
-                          helper="The very first sentence of the email, before the personalised intro."
-                          values={draftTemplate.openingVariants}
-                          onChange={(v) => setDraftTemplate((t) => ({ ...t, openingVariants: v }))}
-                          placeholder="I hope this message finds you well."
-                        />
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Company introduction</h4>
-                        <VariantListEditor
-                          label="Variants"
-                          helper="Introduces the company right after the personalised intro."
-                          values={draftTemplate.companyIntroVariants}
-                          onChange={(v) => setDraftTemplate((t) => ({ ...t, companyIntroVariants: v }))}
-                          multiline
-                        />
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Offerings block</h4>
-                        <Textarea value={draftTemplate.offeringsBlock}
-                          onChange={(e) => setDraftTemplate((t) => ({ ...t, offeringsBlock: e.target.value }))}
-                          className="min-h-28 text-sm resize-y" />
-                        <p className="text-xs text-muted-foreground">Use **double asterisks** for bold — matches the rest of the email.</p>
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Key strengths</h4>
-                        <p className="text-xs text-muted-foreground -mt-2">The AI picks 2-3 of these per lead based on relevance — the wording and figures are fixed here.</p>
-                        <div className="space-y-3">
-                          {Object.entries(draftTemplate.highlightText).map(([key, text]) => (
-                            <div key={key} className="space-y-1">
-                              <Label className="text-xs">{HIGHLIGHT_LABELS[key] ?? key}</Label>
-                              <Input value={text}
-                                onChange={(e) => setDraftTemplate((t) => ({ ...t, highlightText: { ...t.highlightText, [key]: e.target.value } }))}
-                                className="text-sm" />
-                            </div>
-                          ))}
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Accolades &amp; clients block</h4>
-                        <Textarea value={draftTemplate.accoladesBlock}
-                          onChange={(e) => setDraftTemplate((t) => ({ ...t, accoladesBlock: e.target.value }))}
-                          className="min-h-24 text-sm resize-y" />
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Closing lines — no attachment</h4>
-                        <VariantListEditor
-                          label="Variants" values={draftTemplate.closingNoAttachmentVariants}
-                          onChange={(v) => setDraftTemplate((t) => ({ ...t, closingNoAttachmentVariants: v }))}
-                          multiline
-                        />
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <h4 className="text-sm font-semibold">Closing lines — with attachment</h4>
-                        <VariantListEditor
-                          label="Variants" values={draftTemplate.closingWithAttachmentVariants}
-                          onChange={(v) => setDraftTemplate((t) => ({ ...t, closingWithAttachmentVariants: v }))}
-                          multiline
-                        />
-                      </section>
-                    </div>
                   )}
 
                   {aiSection === "replies" && (
