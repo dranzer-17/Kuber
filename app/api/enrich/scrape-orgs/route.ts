@@ -71,7 +71,39 @@ async function markFailed(db: Db, orgId: string, status: string, errorMessage: s
 // Falls back to the org's leads' email domains when Apollo never resolved one.
 // Free/webmail providers (gmail.com etc.) are ignored. Requires a clear
 // majority among candidate domains; ties or no candidates return null.
-async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<string | null> {
+// Reassigns a duplicate org's leads onto the org that already owns their real
+// domain, then deletes the now-empty duplicate. Leads inherit "enriched" if
+// the target org is already done, otherwise they wait on the target's own turn.
+async function mergeDuplicateOrg(db: Db, dupOrgId: string, targetOrgId: string, domain: string) {
+  const { data: targetOrg } = await db
+    .from("organizations")
+    .select("enrichment_stage")
+    .eq("id", targetOrgId)
+    .single();
+
+  const mergedLeadStatus = targetOrg?.enrichment_stage === "done" ? "enriched" : "input_required";
+
+  await db.from("leads")
+    .update({ organization_id: targetOrgId, status: mergedLeadStatus, updated_at: new Date().toISOString() })
+    .eq("organization_id", dupOrgId)
+    .eq("is_deleted", false);
+
+  await insertLog(db, {
+    org_id: dupOrgId,
+    source: "email_fallback",
+    event: "ORG_MERGED_DUPLICATE_DOMAIN",
+    payload: { merged_into: targetOrgId, domain },
+  });
+
+  await db.from("organizations").delete().eq("id", dupOrgId);
+}
+
+type DomainInferenceResult =
+  | { type: "resolved"; domain: string }
+  | { type: "duplicate"; targetOrgId: string; domain: string }
+  | { type: "failed" };
+
+async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<DomainInferenceResult> {
   const { data: leads } = await db
     .from("leads")
     .select("email")
@@ -92,7 +124,7 @@ async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<string 
       event: "DOMAIN_INFERENCE_FAILED",
       payload: { lead_count: leads?.length ?? 0, reason: "no_valid_candidates" },
     });
-    return null;
+    return { type: "failed" };
   }
 
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
@@ -106,14 +138,38 @@ async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<string 
       event: "DOMAIN_INFERENCE_FAILED",
       payload: { lead_count: leads?.length ?? 0, candidates: sorted, candidate_conflict: true },
     });
-    return null;
+    return { type: "failed" };
+  }
+
+  // Another org record may already own this domain (a duplicate company record,
+  // e.g. two Apollo/Excel entries for the same real company). Reuse it instead
+  // of failing — this is what actually resolves the common case.
+  const { data: existingOrg } = await db
+    .from("organizations")
+    .select("id")
+    .eq("domain", topDomain)
+    .neq("id", orgId)
+    .maybeSingle();
+
+  if (existingOrg) {
+    return { type: "duplicate", targetOrgId: existingOrg.id, domain: topDomain };
   }
 
   const { error } = await db.from("organizations")
     .update({ domain: topDomain, domain_source: "email_inferred", updated_at: new Date().toISOString() })
     .eq("id", orgId)
     .is("domain", null);
-  if (error) return null;
+  if (error) {
+    // Race: another org claimed this domain between our check and our write.
+    await insertLog(db, {
+      org_id: orgId,
+      source: "email_fallback",
+      event: "DOMAIN_INFERENCE_CONFLICT",
+      error: error.message,
+      payload: { derived_domain: topDomain, lead_count: leads?.length ?? 0 },
+    });
+    return { type: "failed" };
+  }
 
   await insertLog(db, {
     org_id: orgId,
@@ -122,13 +178,13 @@ async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<string 
     payload: { derived_domain: topDomain, candidate_count: counts.size, lead_count: leads?.length ?? 0 },
   });
 
-  return topDomain;
+  return { type: "resolved", domain: topDomain };
 }
 
 async function processOneOrg(
   db: Db,
   org: { id: string; domain: string | null; name: string },
-) {
+): Promise<"merged" | void> {
   const orgStart = Date.now();
 
   // ── A: Mark SCRAPE_STARTED ─────────────────────────────────────────────────
@@ -146,12 +202,16 @@ async function processOneOrg(
 
   // ── B: Validate domain, falling back to leads' email domains ────────────────
   if (!org.domain) {
-    const inferred = await inferDomainFromLeadEmails(db, org.id);
-    if (!inferred) {
+    const result = await inferDomainFromLeadEmails(db, org.id);
+    if (result.type === "duplicate") {
+      await mergeDuplicateOrg(db, org.id, result.targetOrgId, result.domain);
+      return "merged";
+    }
+    if (result.type === "failed") {
       await markFailed(db, org.id, "SCRAPE_FAILED", "No domain available after Phase 2A and no usable lead email domain");
       return;
     }
-    org.domain = inferred;
+    org.domain = result.domain;
   }
 
   // ── C: Firecrawl scrape ────────────────────────────────────────────────────
@@ -391,15 +451,19 @@ export async function POST(req: NextRequest) {
     processed++;
     const beforeStage = "queued";
     try {
-      await processOneOrg(db, org);
-      // Check if it completed (vs failed inside processOneOrg)
-      const { data: updated } = await db
-        .from("organizations")
-        .select("enrichment_stage")
-        .eq("id", org.id)
-        .single();
-      if (updated?.enrichment_stage === "done") succeeded++;
-      else failed++;
+      const outcome = await processOneOrg(db, org);
+      if (outcome === "merged") {
+        succeeded++;
+      } else {
+        // Check if it completed (vs failed inside processOneOrg)
+        const { data: updated } = await db
+          .from("organizations")
+          .select("enrichment_stage")
+          .eq("id", org.id)
+          .single();
+        if (updated?.enrichment_stage === "done") succeeded++;
+        else failed++;
+      }
     } catch {
       failed++;
       await markFailed(db, org.id, "SCRAPE_FAILED", "Unexpected error in processOneOrg").catch(() => {});
