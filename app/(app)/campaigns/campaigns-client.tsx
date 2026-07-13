@@ -4,11 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
-import { deleteCampaign } from "@/lib/api-client";
+import { deleteCampaign, fetchUsers, type Profile } from "@/lib/api-client";
 import type { Campaign } from "@/components/app/create-campaign-modal";
-import { Search, Trash2 } from "lucide-react";
+import { Trash2, User } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SearchInput } from "@/components/ui/search-input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 type CampaignStatus = "Draft" | "Live" | "Paused";
 
@@ -20,7 +24,7 @@ const CAMPAIGN_STATUS_STYLES: Record<string, { badge: string; dot: string }> = {
 
 export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campaign[] }) {
   const router = useRouter();
-  const { campaigns, setCampaigns, session } = useApp();
+  const { campaigns, setCampaigns, session, role } = useApp();
 
   useEffect(() => {
     setCampaigns(initialCampaigns);
@@ -30,13 +34,23 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CampaignStatus | "All">("All");
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [users, setUsers] = useState<Profile[]>([]);
   const [deletingCampaign, setDeletingCampaign] = useState<Campaign | null>(null);
   const [deleteCampaignLoading, setDeleteCampaignLoading] = useState(false);
+
+  useEffect(() => {
+    if (role !== "manager" || !session) return;
+    fetchUsers(session.access_token).then(setUsers).catch(() => {});
+  }, [role, session]);
+
+  const userMap = new Map(users.map((u) => [u.id, u]));
 
   const filtered = list.filter((c) => {
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "All" || c.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesOwner = ownerFilter === "all" || c.createdBy === ownerFilter;
+    return matchesSearch && matchesStatus && matchesOwner;
   });
 
   const counts: Record<CampaignStatus | "All", number> = {
@@ -54,16 +68,12 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search campaigns…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-sm bg-card border border-border rounded-lg placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-        </div>
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search campaigns…"
+          wrapperClassName="flex-1 min-w-[200px] max-w-xs"
+        />
         <div className="flex items-center gap-1.5">
           {(["All", "Draft", "Live", "Paused"] as const).map((s) => (
             <button
@@ -86,6 +96,17 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
             </button>
           ))}
         </div>
+        {role === "manager" && users.length > 0 && (
+          <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+            <SelectTrigger className="h-9 w-40 bg-card"><SelectValue placeholder="Owner" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All owners</SelectItem>
+              {users.map((u) => (
+                <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {filtered.length === 0 ? (
@@ -132,6 +153,12 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                         {c.humanInLoop ? "Human review" : "Auto-send"}
                       </span>
                       <span className="text-[11px] text-muted-foreground">Created {c.createdAt}</span>
+                      {role === "manager" && c.createdBy && userMap.has(c.createdBy) && (
+                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <User className="size-3" />
+                          {userMap.get(c.createdBy)?.full_name || userMap.get(c.createdBy)?.email}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-px shrink-0 pr-8">

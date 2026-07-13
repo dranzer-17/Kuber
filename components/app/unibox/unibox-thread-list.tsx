@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { Loader2, Menu, Search } from "lucide-react";
+import { Loader2, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UniboxThreadSummary } from "@/lib/api-client";
 import type { UniboxInterestFilter, UniboxReadStateFilter } from "@/components/app/unibox/unibox-status-filter";
 import { hasActiveUniboxFilters, UniboxFiltersPanel } from "@/components/app/unibox/unibox-filters";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SearchInput } from "@/components/ui/search-input";
 
 type Props = {
   threads: UniboxThreadSummary[];
@@ -80,16 +81,12 @@ export function UniboxThreadList({
               <Menu className="size-4" />
               {filtersActive && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary ring-2 ring-card" />}
             </button>
-            <div className="relative flex-1 max-w-xl">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search by lead name…"
-                value={search}
-                onChange={(e) => onSearch(e.target.value)}
-                className="w-full h-9 pl-9 pr-4 rounded-md border border-border bg-card text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
+            <SearchInput
+              value={search}
+              onChange={onSearch}
+              placeholder="Search by lead name…"
+              wrapperClassName="flex-1 max-w-xl"
+            />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-4">

@@ -1,6 +1,6 @@
 "use client";
 
-import { bulkDeleteLeads, fetchImports, type ImportBatch } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, type ImportBatch, type Profile } from "@/lib/api-client";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getBatchColor } from "@/lib/constants";
@@ -27,7 +27,7 @@ import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
 import { KanbanBoard } from "@/components/app/kanban-board";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
@@ -52,7 +52,7 @@ import {
 } from "@/components/ui/pagination";
 import {
   Users, Megaphone, Plus, List, Kanban, RefreshCw, Columns3, Check,
-  Search, Building2, SlidersHorizontal, X, Trash2,
+  Search, Building2, SlidersHorizontal, X, Trash2, UserPlus,
 } from "lucide-react";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ function ColumnsDropdown({ visible, onChange }: {
 
   return (
     <div ref={ref} className="relative">
-      <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOpen((o) => !o)}>
+      <Button variant="outline" size="sm" className="gap-1.5 bg-card" onClick={() => setOpen((o) => !o)}>
         <Columns3 className="size-3.5" />
         Columns
       </Button>
@@ -588,6 +588,17 @@ export default function LeadsPage() {
   const [importBatches,    setImportBatches   ] = useState<ImportBatch[]>([]);
   const [showBulkDelete,   setShowBulkDelete  ] = useState(false);
   const [bulkDeleting,     setBulkDeleting    ] = useState(false);
+  const [showBulkAssign,   setShowBulkAssign  ] = useState(false);
+  const [bulkAssigning,    setBulkAssigning   ] = useState(false);
+  const [assignTarget,     setAssignTarget    ] = useState<string>("unassigned");
+  const [employees,        setEmployees       ] = useState<Profile[]>([]);
+
+  useEffect(() => {
+    if (role !== "manager" || !session) return;
+    fetchUsers(session.access_token).then((users) => {
+      setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
+    }).catch(() => {});
+  }, [role, session]);
 
   // Sync filter/view state into URL so refresh preserves it
   useEffect(() => {
@@ -697,38 +708,8 @@ export default function LeadsPage() {
     <div className="flex flex-col h-full">
       {/* ── Top bar ── */}
       <div className="flex items-center justify-between px-8 py-4 border-b border-border shrink-0">
-        {someChecked ? (
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-sm font-semibold">
-              {checkedCount} selected
-              {ineligibleCheckedCount > 0 && (
-                <span className="text-muted-foreground font-normal"> · {ineligibleCheckedCount} not ready for outreach</span>
-              )}
-            </span>
-            <Button
-              size="sm" variant="destructive" className="gap-1.5 text-white!"
-              onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
-            >
-              <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
-            </Button>
-            <Button
-              size="sm" className="gap-1.5"
-              disabled={!canCreateCampaign}
-              title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
-              onClick={() => { setShowCreateCampaign(true); }}
-            >
-              <Megaphone className="size-3.5" /> Create campaign ({eligibleCheckedCount})
-            </Button>
-            <button
-              type="button"
-              onClick={() => setCheckedIds(new Set())}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Clear
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center rounded-lg border border-border bg-card p-0.5 shrink-0">
             <button
               type="button" onClick={() => setLeadsEntityMode("individual")}
               className={cn(
@@ -748,7 +729,47 @@ export default function LeadsPage() {
               <Building2 className="size-3.5" /> Organization
             </button>
           </div>
-        )}
+
+          {someChecked && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm font-semibold">
+                {checkedCount} selected
+                {ineligibleCheckedCount > 0 && (
+                  <span className="text-muted-foreground font-normal"> · {ineligibleCheckedCount} not ready for outreach</span>
+                )}
+              </span>
+              <Button
+                size="sm" variant="destructive" className="gap-1.5 text-white!"
+                onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
+              >
+                <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
+              </Button>
+              {role === "manager" && (
+                <Button
+                  size="sm" variant="outline" className="gap-1.5"
+                  onClick={() => { if (checkedIds.size > 0) setShowBulkAssign(true); }}
+                >
+                  <UserPlus className="size-3.5" /> Assign ({checkedIds.size})
+                </Button>
+              )}
+              <Button
+                size="sm" className="gap-1.5"
+                disabled={!canCreateCampaign}
+                title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
+                onClick={() => { setShowCreateCampaign(true); }}
+              >
+                <Megaphone className="size-3.5" /> Create campaign ({eligibleCheckedCount})
+              </Button>
+              <button
+                type="button"
+                onClick={() => setCheckedIds(new Set())}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center gap-2">
           {leadsEntityMode === "individual" && (
@@ -792,15 +813,13 @@ export default function LeadsPage() {
       {/* ── Search + Columns toolbar ── */}
       {leadsEntityMode === "individual" && leadsViewMode === "list" && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-border shrink-0">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search leads…"
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search leads…"
+            size="sm"
+            wrapperClassName="flex-1 max-w-xs"
+          />
           <div className="ml-auto flex items-center gap-3">
             <Select value={leadsSort} onValueChange={(value) => setLeadsSort(value as LeadsSort)}>
               <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border px-3 text-xs shadow-sm">
@@ -819,7 +838,7 @@ export default function LeadsPage() {
               className={cn(
                 "relative flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-medium transition-colors",
                 isFiltersEmpty(filters)
-                  ? "border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground"
+                  ? "border-border bg-card text-muted-foreground hover:text-foreground hover:border-muted-foreground"
                   : "border-primary bg-primary/10 text-primary"
               )}
             >
@@ -1145,6 +1164,65 @@ export default function LeadsPage() {
           }
         }}
       />
+
+      {/* Bulk assign modal */}
+      {showBulkAssign && (
+        <div className="fixed inset-0 z-200 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!bulkAssigning) setShowBulkAssign(false); }} />
+          <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 size-10 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center">
+                <UserPlus className="size-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Assign {checkedIds.size} lead{checkedIds.size !== 1 ? "s" : ""}</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">Choose an employee, or leave unassigned to return them to the pool.</p>
+              </div>
+            </div>
+            <Select value={assignTarget} onValueChange={setAssignTarget}>
+              <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkAssign(false)}
+                disabled={bulkAssigning}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={bulkAssigning || !session}
+                onClick={async () => {
+                  if (!session) return;
+                  setBulkAssigning(true);
+                  try {
+                    await bulkAssignLeads(session.access_token, [...checkedIds], assignTarget === "unassigned" ? null : assignTarget);
+                    setCheckedIds(new Set());
+                    setShowBulkAssign(false);
+                    void loadLeads(session.access_token);
+                  } catch (e) {
+                    console.error("Bulk assign failed:", e);
+                  } finally {
+                    setBulkAssigning(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center gap-2"
+              >
+                {bulkAssigning ? <RefreshCw className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />}
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

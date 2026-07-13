@@ -71,6 +71,7 @@ export interface DbCampaign {
   attachment_name: string | null;
   hot_count: number;
   cold_count: number;
+  created_by: string;
 }
 
 // ─── Mapper functions ─────────────────────────────────────────────────────────
@@ -137,5 +138,6 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     attachmentName: c.attachment_name ?? undefined,
     hot: c.hot_count ?? 0,
     cold: c.cold_count ?? 0,
+    createdBy: c.created_by,
   };
 }
