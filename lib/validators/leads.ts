@@ -57,6 +57,7 @@ export const ApolloSearchSchema = z.object({
   batch_name: z.string().min(1),
   color: z.string().default("violet"),
   preview: z.boolean().optional(),
+  assigned_to: z.string().uuid().nullable().optional(),
 });
 
 export const ExcelImportSchema = z.discriminatedUnion("mode", [
@@ -67,6 +68,7 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     mapping: z.record(z.string(), z.string()),
     batch_name: z.string().min(1),
     color: z.string().default("violet"),
+    assigned_to: z.string().uuid().nullable().optional(),
   }),
   z.object({
     mode: z.literal("direct"),
@@ -74,6 +76,7 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     mapping: z.record(z.string(), z.string()),
     batch_name: z.string().min(1),
     color: z.string().default("violet"),
+    assigned_to: z.string().uuid().nullable().optional(),
   }),
 ]);
 

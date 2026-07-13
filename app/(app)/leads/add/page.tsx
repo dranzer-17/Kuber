@@ -7,7 +7,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApolloForm, ExcelForm, ManualForm } from "@/components/app/lead-forms";
 import { useApp } from "@/lib/app-context";
 import { InfoTip } from "@/components/ui/info-tip";
-import { cn } from "@/lib/utils";
 
 // ── Step guide components ──────────────────────────────────────────────────────
 
@@ -98,7 +97,7 @@ export default function AddLeadsPage() {
       <div className="flex-1 overflow-auto px-10 py-6">
         <div className="max-w-5xl mx-auto">
           <Tabs defaultValue={isManager ? "apollo" : "manual"} className="w-full">
-            <TabsList className={cn("grid w-full mb-6 max-w-sm", isManager ? "grid-cols-3" : "grid-cols-1")}>
+            <TabsList className="mb-6 w-full max-w-sm">
               {isManager && <TabsTrigger value="apollo">Apollo Search</TabsTrigger>}
               {isManager && <TabsTrigger value="excel">Excel / CSV</TabsTrigger>}
               <TabsTrigger value="manual">Manual Entry</TabsTrigger>

@@ -1,0 +1,82 @@
+"use client";
+
+import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/** Shared chrome for every segmented tab bar in the app. */
+export const segmentedListClassName =
+  "inline-flex items-center justify-center rounded-lg border border-border bg-card p-0.5 text-muted-foreground";
+
+export function segmentedTriggerClassName(active: boolean, size: "sm" | "md" = "md") {
+  return cn(
+    "inline-flex items-center justify-center gap-1.5 font-medium leading-none transition-colors whitespace-nowrap",
+    size === "sm" ? "h-7 px-2.5 rounded-md text-[10px]" : "h-8 px-3 rounded-md text-xs",
+    active
+      ? "bg-primary/15 text-primary"
+      : "text-muted-foreground hover:text-foreground",
+  );
+}
+
+export type SegmentedTabOption<T extends string = string> = {
+  value: T;
+  label: string;
+  icon?: LucideIcon;
+  count?: number;
+  disabled?: boolean;
+};
+
+export function SegmentedTabs<T extends string>({
+  value,
+  onValueChange,
+  options,
+  className,
+  size = "md",
+  fullWidth = false,
+}: {
+  value: T;
+  onValueChange: (value: T) => void;
+  options: readonly SegmentedTabOption<T>[] | SegmentedTabOption<T>[];
+  className?: string;
+  size?: "sm" | "md";
+  fullWidth?: boolean;
+}) {
+  return (
+    <div
+      role="tablist"
+      className={cn(segmentedListClassName, fullWidth && "w-full", className)}
+    >
+      {options.map((opt) => {
+        const active = value === opt.value;
+        const Icon = opt.icon;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            disabled={opt.disabled}
+            onClick={() => onValueChange(opt.value)}
+            className={cn(
+              segmentedTriggerClassName(active, size),
+              fullWidth && "flex-1",
+              opt.disabled && "opacity-50 pointer-events-none",
+            )}
+          >
+            {Icon ? <Icon className={size === "sm" ? "size-3" : "size-3.5"} /> : null}
+            <span>{opt.label}</span>
+            {typeof opt.count === "number" && opt.count > 0 ? (
+              <span
+                className={cn(
+                  "min-w-[18px] rounded-full px-1 text-[10px] font-semibold tabular-nums text-center",
+                  active ? "bg-primary/20 text-primary" : "bg-border text-muted-foreground",
+                )}
+              >
+                {opt.count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

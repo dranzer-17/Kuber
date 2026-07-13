@@ -67,7 +67,7 @@ export function AddLeadsDrawer({
 
         <div className="flex-1 overflow-y-auto p-6">
           <Tabs defaultValue={initialTab} key={initialTab + (prefillOrg?.id ?? "")} className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-6">
+            <TabsList className="mb-6 w-full">
               <TabsTrigger value="apollo">Apollo Search</TabsTrigger>
               <TabsTrigger value="excel">Excel / CSV</TabsTrigger>
               <TabsTrigger value="manual">Manual Entry</TabsTrigger>

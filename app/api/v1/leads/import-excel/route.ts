@@ -46,7 +46,8 @@ async function processRows(
   mapping: Record<string, string>,
   userId: string,
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
-  importId?: string | null
+  importId?: string | null,
+  assignedTo?: string | null,
 ) {
   const emailCol = mapping["email"];
   const firstNameCol = mapping["first_name"];
@@ -176,6 +177,8 @@ async function processRows(
       lead_source: "excel",
       created_by: userId,
       import_id: importId ?? null,
+      assigned_to: assignedTo ?? null,
+      assigned_at: assignedTo ? new Date().toISOString() : null,
       created_at: new Date().toISOString(),
     };
   }).filter(Boolean) as object[];
@@ -211,15 +214,20 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
 
+  if (parsed.data.mode !== "headers" && parsed.data.assigned_to) {
+    const { data: employee } = await db.from("profiles").select("id, is_active").eq("id", parsed.data.assigned_to).maybeSingle();
+    if (!employee || !employee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
+  }
+
   // Direct mode — rows provided in the request body, no storage needed
   if (parsed.data.mode === "direct") {
-    const { rows, mapping, batch_name, color } = parsed.data;
+    const { rows, mapping, batch_name, color, assigned_to } = parsed.data;
     if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
     const { data: importRow } = await db.from("imports")
       .insert({ label: batch_name, source: "excel", created_by: user.id, lead_count: 0, color: color ?? "violet" })
       .select("id").single();
     const importId = importRow?.id ?? null;
-    const result = await processRows(rows, mapping, user.id, db, importId);
+    const result = await processRows(rows, mapping, user.id, db, importId, assigned_to);
     if (importId && result.inserted > 0) {
       await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId);
     }
@@ -246,13 +254,13 @@ export async function POST(req: NextRequest) {
   }
 
   // mode === "import"
-  const { mapping, batch_name: importBatchName, color: importColor } = parsed.data as { mapping: Record<string, string>; batch_name: string; color: string };
+  const { mapping, batch_name: importBatchName, color: importColor, assigned_to: importAssignedTo } = parsed.data as { mapping: Record<string, string>; batch_name: string; color: string; assigned_to?: string | null };
   if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
   const { data: importRow2 } = await db.from("imports")
     .insert({ label: importBatchName, source: "excel", created_by: user.id, lead_count: 0, color: importColor ?? "violet" })
     .select("id").single();
   const importId2 = importRow2?.id ?? null;
-  const result = await processRows(parsed_excel.rows, mapping, user.id, db, importId2);
+  const result = await processRows(parsed_excel.rows, mapping, user.id, db, importId2, importAssignedTo);
   if (importId2 && result.inserted > 0) {
     await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId2);
   }

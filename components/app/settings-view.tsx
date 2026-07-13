@@ -185,6 +185,11 @@ export function SettingsView() {
   const [userEmail, setUserEmail] = useState("");
   const [userName,  setUserName  ] = useState("");
 
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving  ] = useState(false);
   const [error,   setError   ] = useState("");
@@ -312,6 +317,40 @@ export function SettingsView() {
 
   function addProduct() {
     setProductOfferings((prev) => [...prev, { name: "", description: "" }]);
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!userEmail) return;
+    if (newPassword.length < 8) {
+      toast.error("Password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: currentPassword,
+      });
+      if (reauthError) {
+        toast.error("Current password is incorrect.");
+        return;
+      }
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Password updated");
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSavingPassword(false);
+    }
   }
 
   const contentSkeleton = loading ? (
@@ -666,24 +705,69 @@ export function SettingsView() {
 
               {/* ── Account ── */}
               {section === "account" && (
-                <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                  <h3 className="text-sm font-semibold">Session</h3>
-                  <div className="flex items-center justify-between py-3 border-t border-border">
-                    <div>
-                      <p className="text-sm font-medium">Signed in as</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{userEmail}</p>
-                    </div>
-                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Active</span>
+                <div className="space-y-6">
+                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                    <h3 className="text-sm font-semibold">Change password</h3>
+                    <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5 sm:col-span-2">
+                        <Label>Current password</Label>
+                        <Input
+                          type="password"
+                          value={currentPassword}
+                          onChange={(e) => setCurrentPassword(e.target.value)}
+                          required
+                          autoComplete="current-password"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>New password</Label>
+                        <Input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          required
+                          minLength={8}
+                          autoComplete="new-password"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Confirm password</Label>
+                        <Input
+                          type="password"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          required
+                          minLength={8}
+                          autoComplete="new-password"
+                        />
+                      </div>
+                      <div className="sm:col-span-2 flex justify-end">
+                        <Button type="submit" disabled={savingPassword}>
+                          {savingPassword ? "Updating…" : "Update password"}
+                        </Button>
+                      </div>
+                    </form>
                   </div>
-                  <div className="flex items-center justify-between py-3 border-t border-border">
-                    <div>
-                      <p className="text-sm font-medium">Sign out</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">End your current session on this device.</p>
+
+                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+                    <h3 className="text-sm font-semibold">Session</h3>
+                    <div className="flex items-center justify-between py-3 border-t border-border">
+                      <div>
+                        <p className="text-sm font-medium">Signed in as</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{userEmail}</p>
+                      </div>
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Active</span>
                     </div>
-                    <button type="button" onClick={() => supabase.auth.signOut()}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-colors">
-                      <LogOut className="size-3.5" /> Sign out
-                    </button>
+                    <div className="flex items-center justify-between py-3 border-t border-border">
+                      <div>
+                        <p className="text-sm font-medium">Sign out</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">End your current session on this device.</p>
+                      </div>
+                      <button type="button" onClick={() => supabase.auth.signOut()}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-colors">
+                        <LogOut className="size-3.5" /> Sign out
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

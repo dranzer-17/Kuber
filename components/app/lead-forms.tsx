@@ -6,6 +6,7 @@ import { AlertCircle, Check, CheckCircle2, FileText, Plus, Search, Upload, X } f
 import { Button } from "@/components/ui/button";
 import { badgeVariants } from "@/components/ui/badge";
 import { StatTile } from "@/components/ui/stat-tile";
+import { AppCheckbox } from "@/components/ui/app-checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -57,70 +58,116 @@ function BatchNameField({
   }, []);
 
   return (
-    <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
+    <div className="space-y-3">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Batch</p>
-      <div className="flex items-end gap-3">
-        <div className="flex-1 min-w-0 space-y-1">
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
-            <span className="text-destructive text-xs">*</span>
-            <InfoTip
-              side="right"
-              text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch."
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-end gap-3">
+          <div className="flex-1 min-w-0 space-y-1">
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
+              <span className="text-destructive text-xs">*</span>
+              <InfoTip
+                side="right"
+                text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch."
+              />
+              {value.trim() && (
+                <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
+                  <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />
+                  {value}
+                </span>
+              )}
+            </div>
+            <Input
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder="e.g. India Plastics Q3…"
+              className={cn("h-8 text-sm", error && "border-destructive focus-visible:ring-destructive")}
             />
-            {value.trim() && (
-              <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
-                <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />
-                {value}
-              </span>
+            {error && (
+              <p className="text-[10px] text-destructive flex items-center gap-1">
+                <AlertCircle className="size-3 shrink-0" /> Batch name is required
+              </p>
             )}
           </div>
-          <Input
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="e.g. India Plastics Q3…"
-            className={cn("h-8 text-sm", error && "border-destructive focus-visible:ring-destructive")}
-          />
-          {error && (
-            <p className="text-[10px] text-destructive flex items-center gap-1">
-              <AlertCircle className="size-3 shrink-0" /> Batch name is required
-            </p>
-          )}
-        </div>
-        <div ref={swatchRef} className="relative shrink-0 space-y-1">
-          <span className="text-xs font-medium text-muted-foreground block">Colour</span>
-          <button
-            type="button"
-            onClick={() => setSwatchOpen((o) => !o)}
-            className={cn(
-              "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-transparent text-sm transition-colors hover:bg-secondary",
-              swatchOpen && "ring-2 ring-ring border-transparent",
+          <div ref={swatchRef} className="relative shrink-0 space-y-1">
+            <span className="text-xs font-medium text-muted-foreground block">Colour</span>
+            <button
+              type="button"
+              onClick={() => setSwatchOpen((o) => !o)}
+              className={cn(
+                "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-transparent text-sm transition-colors hover:bg-secondary",
+                swatchOpen && "ring-2 ring-ring border-transparent",
+              )}
+            >
+              <span className={cn("size-3.5 rounded-full shrink-0", c.bg)} />
+              <span className="capitalize text-xs">{color}</span>
+            </button>
+            {swatchOpen && (
+              <div className="absolute right-0 top-full mt-1.5 z-10 rounded-xl border border-border bg-popover shadow-xl p-3.5 grid grid-cols-4 gap-3.5 w-[188px]">
+                {BATCH_COLORS.map((bc) => (
+                  <button
+                    key={bc.name}
+                    type="button"
+                    title={bc.name}
+                    onClick={() => { onColorChange(bc.name); setSwatchOpen(false); }}
+                    className={cn(
+                      "size-8 rounded-full transition-all",
+                      bc.bg,
+                      color === bc.name
+                        ? "ring-2 ring-white ring-offset-2 ring-offset-popover scale-110"
+                        : "hover:scale-110 opacity-80 hover:opacity-100",
+                    )}
+                  />
+                ))}
+              </div>
             )}
-          >
-            <span className={cn("size-3.5 rounded-full shrink-0", c.bg)} />
-            <span className="capitalize text-xs">{color}</span>
-          </button>
-          {swatchOpen && (
-            <div className="absolute right-0 top-full mt-1.5 z-10 rounded-xl border border-border bg-popover shadow-xl p-3.5 grid grid-cols-4 gap-3.5 w-[188px]">
-              {BATCH_COLORS.map((bc) => (
-                <button
-                  key={bc.name}
-                  type="button"
-                  title={bc.name}
-                  onClick={() => { onColorChange(bc.name); setSwatchOpen(false); }}
-                  className={cn(
-                    "size-8 rounded-full transition-all",
-                    bc.bg,
-                    color === bc.name
-                      ? "ring-2 ring-white ring-offset-2 ring-offset-popover scale-110"
-                      : "hover:scale-110 opacity-80 hover:opacity-100",
-                  )}
-                />
-              ))}
-            </div>
-          )}
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── AssignToField ────────────────────────────────────────────────────────────
+// Shared by all three add-lead tabs (Apollo, Excel, Manual): lets the Manager
+// route the whole imported batch to one employee at creation time, instead of
+// leaving every lead in the pool for manual assignment later.
+
+function useAssignableEmployees(enabled: boolean) {
+  const [employees, setEmployees] = useState<Profile[]>([]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    getToken().then((token) => fetchUsers(token)).then((users) => {
+      setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
+    }).catch(() => {});
+  }, [enabled]);
+
+  return employees;
+}
+
+function AssignToField({
+  employees,
+  value,
+  onChange,
+}: {
+  employees: Profile[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (employees.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <Label>Assign to</Label>
+      <Select value={value || "unassigned"} onValueChange={(v) => onChange(v === "unassigned" ? "" : v)}>
+        <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="unassigned">Leave in pool (unassigned)</SelectItem>
+          {employees.map((e) => (
+            <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -209,7 +256,7 @@ function IndustryKeywordsDropdown({
           className={cn(
             "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left",
             open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
-            "bg-transparent",
+            "bg-card",
           )}
         >
           <span className={selectedCount === 0 ? "text-muted-foreground/60" : "text-foreground"}>
@@ -261,14 +308,10 @@ function IndustryKeywordsDropdown({
                             className="w-full flex flex-col items-center gap-1.5 mb-2 group"
                           >
                             <div className="flex items-center gap-2">
-                              <span className={cn(
-                                "size-3.5 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
-                                allCatSelected ? "bg-primary ring-primary" : someCatSelected ? "bg-primary/40 ring-primary/60" : "bg-transparent ring-white",
-                              )}>
-                                {(allCatSelected || someCatSelected) && (
-                                  <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />
-                                )}
-                              </span>
+                              <AppCheckbox
+                                size="sm"
+                                checked={allCatSelected ? true : someCatSelected ? "indeterminate" : false}
+                              />
                               <span className={cn(
                                 "text-[11px] font-bold uppercase tracking-wide transition-colors text-center leading-tight",
                                 isCustom ? "text-amber-400 group-hover:text-amber-300" : "text-foreground group-hover:text-primary",
@@ -295,14 +338,7 @@ function IndustryKeywordsDropdown({
                                     onClick={() => toggleKw(kw.label)}
                                     className="flex items-center gap-2 flex-1 text-left min-w-0"
                                   >
-                                    <span className={cn(
-                                      "size-3 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
-                                      checked ? "bg-primary ring-primary" : "bg-transparent ring-white",
-                                    )}>
-                                      {checked && (
-                                        <Check className="size-2 text-primary-foreground" strokeWidth={3} />
-                                      )}
-                                    </span>
+                                    <AppCheckbox size="sm" checked={checked} />
                                     <span className={cn("text-xs leading-tight truncate", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
                                       {kw.label}
                                     </span>
@@ -443,7 +479,7 @@ function LocationsDropdown({
           type="button"
           onClick={() => setOpen((o) => !o)}
           className={cn(
-            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left bg-transparent",
+            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left bg-card",
             open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
           )}
         >
@@ -489,12 +525,10 @@ function LocationsDropdown({
                             className="w-full flex flex-col items-center gap-1.5 mb-2 group"
                           >
                             <div className="flex items-center gap-2">
-                              <span className={cn(
-                                "size-3.5 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
-                                allSel ? "bg-primary ring-primary" : someSel ? "bg-primary/40 ring-primary/60" : "bg-transparent ring-white",
-                              )}>
-                                {(allSel || someSel) && <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />}
-                              </span>
+                              <AppCheckbox
+                                size="sm"
+                                checked={allSel ? true : someSel ? "indeterminate" : false}
+                              />
                               <span className="text-[11px] font-bold uppercase tracking-wide text-foreground group-hover:text-primary transition-colors text-center leading-tight">
                                 {region.label}
                               </span>
@@ -515,12 +549,7 @@ function LocationsDropdown({
                                     checked ? "bg-primary/10" : "hover:bg-secondary/60",
                                   )}
                                 >
-                                  <span className={cn(
-                                    "size-3 rounded flex items-center justify-center shrink-0 transition-colors ring-1",
-                                    checked ? "bg-primary ring-primary" : "bg-transparent ring-white",
-                                  )}>
-                                    {checked && <Check className="size-2 text-primary-foreground" strokeWidth={3} />}
-                                  </span>
+                                  <AppCheckbox size="sm" checked={checked} />
                                   <span className={cn("text-xs leading-tight", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
                                     {country}
                                   </span>
@@ -576,6 +605,8 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [batchNameError, setBatchNameError] = useState(false);
   const [importing,     setImporting    ] = useState(false);
   const [error,         setError        ] = useState("");
+  const [assignTo,      setAssignTo     ] = useState("");
+  const employees = useAssignableEmployees(true);
 
   function toggleSen(s: string) {
     setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
@@ -609,6 +640,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           seniorities: seniorities.length > 0 ? seniorities : undefined,
           batch_name: batchName,
           color,
+          assigned_to: assignTo || undefined,
         }),
       });
       const json = await response.json().catch(() => ({}));
@@ -632,7 +664,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         <div className="space-y-1.5">
           <Label>Pages to fetch (50 leads/page)</Label>
           <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
             <SelectContent>
               {[1,2,3,5,10].map((n) => (
                 <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
@@ -682,6 +714,8 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           onColorChange={setColor}
           error={batchNameError}
         />
+
+        <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />
 
         <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
           <Search className="size-3.5" />
@@ -733,6 +767,8 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const [showRawPreview,  setShowRawPreview ] = useState(false);
   const [result,          setResult         ] = useState<ParseResult | null>(null);
   const [fileError,       setFileError      ] = useState("");
+  const [assignTo,        setAssignTo       ] = useState("");
+  const employees = useAssignableEmployees(true);
 
   function tryAutoMap(cols: string[]): Record<string, string> {
     const auto: Record<string, string> = {};
@@ -784,7 +820,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     setImporting(true);
     try {
       const token = await getToken();
-      const res = await importExcelDirect(token, rows, mapping, batchName, color);
+      const res = await importExcelDirect(token, rows, mapping, batchName, color, assignTo || undefined);
       setShowConfirm(false);
       setResult(res);
       setStage("result");
@@ -800,7 +836,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   function reset() {
     setStage("upload"); setFileName(""); setHeaders([]); setRows([]); setMapping({});
     setBatchName(""); setColor("violet"); setBatchNameError(false);
-    setResult(null); setFileError("");
+    setResult(null); setFileError(""); setAssignTo("");
   }
 
   const previewLeads: PreviewLead[] = rows.map((row) => ({
@@ -869,7 +905,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
                   {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
                 </div>
                 <Select value={mapped || "__none"} onValueChange={(v) => setMapping((m) => { const next = { ...m }; if (v === "__none") delete next[pf.key]; else next[pf.key] = v; return next; })}>
-                  <SelectTrigger className={cn("h-8 text-xs", mapped && "border-primary/40 bg-primary/5")}>
+                  <SelectTrigger className={cn("h-8 text-xs", mapped ? "border-primary/40 bg-primary/5" : "bg-card")}>
                     <SelectValue placeholder="Not mapped" />
                   </SelectTrigger>
                   <SelectContent>
@@ -896,6 +932,8 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
           onColorChange={setColor}
           error={batchNameError}
         />
+
+        <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />
 
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
@@ -1013,15 +1051,8 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
   const [saved,       setSaved      ] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error,       setError      ] = useState("");
-  const [employees,   setEmployees  ] = useState<Profile[]>([]);
   const [assignTo,    setAssignTo   ] = useState<string>("");
-
-  useEffect(() => {
-    if (editMode) return;
-    getToken().then((token) => fetchUsers(token)).then((users) => {
-      setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
-    }).catch(() => {});
-  }, [editMode]);
+  const employees = useAssignableEmployees(!editMode);
 
   function addLead()                                        { setLeads((p) => [...p, BLANK_LEAD()]); }
   function removeLead(i: number)                            { if (leads.length > 1) setLeads((p) => p.filter((_, j) => j !== i)); }
@@ -1113,24 +1144,26 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       </p>
 
       {/* Org */}
-      <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-4">
+      <div className="space-y-3">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Organization</p>
-        <div className="space-y-1.5">
-          <Label>Organization name <span className="text-destructive">*</span></Label>
-          <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Industry</Label>
-          <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Company website / domain <span className="text-destructive">*</span></Label>
-          <Input value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
-          <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Country</Label>
-          <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
+        <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+          <div className="space-y-1.5">
+            <Label>Organization name <span className="text-destructive">*</span></Label>
+            <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Industry</Label>
+            <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Company website / domain <span className="text-destructive">*</span></Label>
+            <Input value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
+            <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Country</Label>
+            <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
+          </div>
         </div>
       </div>
 
@@ -1138,7 +1171,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       <div className="space-y-3">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">People</p>
         {leads.map((lead, index) => (
-          <div key={index} className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3 relative">
+          <div key={index} className="rounded-xl border border-border bg-card p-4 space-y-3 relative">
             {leads.length > 1 && (
               <button type="button" onClick={() => removeLead(index)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors" aria-label="Remove lead">
                 <X className="size-4" />
@@ -1179,20 +1212,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
         />
       )}
 
-      {!editMode && employees.length > 0 && (
-        <div className="space-y-1.5">
-          <Label>Assign to</Label>
-          <Select value={assignTo || "unassigned"} onValueChange={(v) => setAssignTo(v === "unassigned" ? "" : v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="unassigned">Leave in pool (unassigned)</SelectItem>
-              {employees.map((e) => (
-                <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      {!editMode && <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button type="button" disabled={saving} onClick={handleOpenConfirm}>

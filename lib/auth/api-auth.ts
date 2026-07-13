@@ -6,7 +6,7 @@ import type { AppRole } from "@/lib/auth/roles";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const SERVICE_ROLE_USER_ID = "00000000-0000-0000-0000-000000000000";
 
-export type AuthedUser = { id: string; email?: string; role: AppRole };
+export type AuthedUser = { id: string; email?: string; role: AppRole; isSuperAdmin: boolean };
 
 function unauthorized(message: string) {
   return Response.json(
@@ -35,7 +35,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
   }
 
   if (SERVICE_ROLE_KEY && token === SERVICE_ROLE_KEY) {
-    return { id: SERVICE_ROLE_USER_ID, email: "admin@service", role: "manager" };
+    return { id: SERVICE_ROLE_USER_ID, email: "admin@service", role: "manager", isSuperAdmin: true };
   }
 
   const verified = await verifyAccessToken(token);
@@ -46,7 +46,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
   const db = createAdminClient();
   const { data: profile } = await db
     .from("profiles")
-    .select("role, is_active")
+    .select("role, is_active, is_super_admin")
     .eq("id", verified.id)
     .maybeSingle();
 
@@ -54,7 +54,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
     throw unauthorized("Account is inactive or not provisioned");
   }
 
-  return { id: verified.id, email: verified.email, role: profile.role as AppRole };
+  return { id: verified.id, email: verified.email, role: profile.role as AppRole, isSuperAdmin: profile.is_super_admin };
 }
 
 /** Like requireAuth, but 403s unless the caller is a manager. */

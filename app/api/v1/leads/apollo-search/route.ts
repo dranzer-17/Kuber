@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const parsed = ApolloSearchSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview } = parsed.data;
+  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to } = parsed.data;
 
   if (!process.env.APOLLO_API_KEY) return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured");
 
@@ -50,6 +50,11 @@ export async function POST(req: NextRequest) {
 
   // ── Phase 1: Search all keywords/pages, batch-insert leads ───────────────
   const db = createAdminClient();
+
+  if (assigned_to) {
+    const { data: employee } = await db.from("profiles").select("id, is_active").eq("id", assigned_to).maybeSingle();
+    if (!employee || !employee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
+  }
 
   const { data: importRow } = await db.from("imports")
     .insert({ label: batch_name, source: "apollo", created_by: user.id, lead_count: 0, color })
@@ -148,6 +153,8 @@ export async function POST(req: NextRequest) {
           lead_source: "apollo",
           created_by: user.id,
           import_id: importId,
+          assigned_to: assigned_to ?? null,
+          assigned_at: assigned_to ? new Date().toISOString() : null,
           created_at: new Date().toISOString(),
         }];
       });

@@ -79,6 +79,9 @@ export function TeamView() {
     }
   }
 
+  const me = users.find((u) => u.id === session?.user.id);
+  const isSuperAdmin = me?.is_super_admin ?? false;
+
   if (loadingSession || role !== "manager") return null;
 
   return (
@@ -143,7 +146,14 @@ export function TeamView() {
             {users.map((u) => (
               <div key={u.id} className="flex items-center gap-3 py-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{u.full_name || u.email}</p>
+                  <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {u.full_name || u.email}
+                    {u.is_super_admin && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/25">
+                        Super Admin
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                 </div>
                 {u.role === "employee" && (
@@ -152,19 +162,28 @@ export function TeamView() {
                     <span>{counts[u.id]?.campaign_count ?? 0} campaigns</span>
                   </div>
                 )}
-                {u.role === "manager" ? (
-                  <div className="w-32 h-9 px-3 flex items-center rounded-md border border-border bg-secondary/40 text-sm text-muted-foreground">
-                    Manager
-                  </div>
-                ) : (
-                  <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
-                    <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="employee">Employee</SelectItem>
-                      <SelectItem value="manager">Manager</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
+                {(() => {
+                  // Super Admin's role is locked for everyone. A regular Manager can
+                  // only ever demote (act on a Manager row); promoting an Employee
+                  // back up is Super-Admin-only, so that row shows a static label.
+                  const canEditRole = !u.is_super_admin && (isSuperAdmin || u.role === "manager");
+                  if (!canEditRole) {
+                    return (
+                      <div className="w-32 h-9 px-3 flex items-center rounded-md border border-border bg-secondary/40 text-sm text-muted-foreground">
+                        {u.is_super_admin ? "Super Admin" : u.role === "manager" ? "Manager" : "Employee"}
+                      </div>
+                    );
+                  }
+                  return (
+                    <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
+                      <SelectTrigger className="w-32 bg-card"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="employee">Employee</SelectItem>
+                        <SelectItem value="manager">Manager</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  );
+                })()}
                 {u.role === "employee" && (
                   <Select
                     value={u.territory ?? "none"}
@@ -178,13 +197,15 @@ export function TeamView() {
                     </SelectContent>
                   </Select>
                 )}
-                <Button
-                  size="sm"
-                  variant={u.is_active ? "ghost" : "outline"}
-                  onClick={() => handlePatch(u.id, { is_active: !u.is_active })}
-                >
-                  {u.is_active ? "Deactivate" : "Reactivate"}
-                </Button>
+                {!u.is_super_admin && (
+                  <Button
+                    size="sm"
+                    variant={u.is_active ? "ghost" : "outline"}
+                    onClick={() => handlePatch(u.id, { is_active: !u.is_active })}
+                  >
+                    {u.is_active ? "Deactivate" : "Reactivate"}
+                  </Button>
+                )}
               </div>
             ))}
           </div>

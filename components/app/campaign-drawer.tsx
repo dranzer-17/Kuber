@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Input } from "@/components/ui/input";
 import { SearchInput } from "@/components/ui/search-input";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { AppCheckbox } from "@/components/ui/app-checkbox";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import {
@@ -1189,12 +1191,12 @@ export function CampaignDetail({
     .map((cl) => cl.email_drafts!.id);
   const outboxCertifyDraftIds = outboxCheckedDraftIds.length > 0 ? outboxCheckedDraftIds : outboxFilteredDraftIds;
 
-  const campaignTabs: Array<{ id: CampaignViewTab; label: string; icon?: React.ComponentType<{ className?: string }>; count?: number }> = [
-    { id: "analytics", label: "Analytics", icon: BarChart2 },
-    { id: "leads",     label: "Leads",     icon: List,        count: campaign.leads },
-    { id: "outbox",    label: "Outbox",    icon: Send,        count: outboxActionableCount || undefined },
-    { id: "sequences", label: "Sequences", icon: Layers },
-    { id: "options",   label: "Options",   icon: Gauge },
+  const campaignTabs = [
+    { value: "analytics" as const, label: "Analytics", icon: BarChart2 },
+    { value: "leads" as const,     label: "Leads",     icon: List,   count: campaign.leads },
+    { value: "outbox" as const,    label: "Outbox",    icon: Send,   count: outboxActionableCount || undefined },
+    { value: "sequences" as const, label: "Sequences", icon: Layers },
+    { value: "options" as const,   label: "Options",   icon: Gauge },
   ];
 
   // Computed for sequences tab (follow-up steps only)
@@ -1297,37 +1299,13 @@ export function CampaignDetail({
         )}
       </div>
 
-      {/* ── Tab navigation — pill style ──────────────────────────────────── */}
+      {/* ── Tab navigation ──────────────────────────────────────────────── */}
       <div className="shrink-0 border-b border-border px-6 py-3">
-        <div className="inline-flex items-center gap-0.5 rounded-full border border-border bg-card p-1">
-          {campaignTabs.map(({ id, label, icon: Icon, count }) => {
-            const isActive = viewTab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setViewTab(id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap",
-                  isActive
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {Icon && <Icon className="size-3.5" />}
-                {label}
-                {typeof count === "number" && count > 0 && (
-                  <span className={cn(
-                    "min-w-[18px] rounded-full px-1 text-[10px] font-semibold tabular-nums text-center",
-                    isActive ? "bg-primary/20 text-primary" : "bg-border text-muted-foreground",
-                  )}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedTabs
+          value={viewTab}
+          onValueChange={setViewTab}
+          options={campaignTabs}
+        />
       </div>
 
       {/* ── Tab content ──────────────────────────────────────────────────── */}
@@ -1565,52 +1543,27 @@ export function CampaignDetail({
             />
 
             {/* Sort pills */}
-            <div className="flex items-center rounded-lg border border-border p-0.5">
-              <button
-                type="button"
-                onClick={() => setLeadsSort("az")}
-                className={cn(
-                  "flex items-center px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors",
-                  leadsSort === "az" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                A–Z
-              </button>
-              <button
-                type="button"
-                onClick={() => setLeadsSort("newest")}
-                className={cn(
-                  "flex items-center px-2.5 py-1 rounded-md text-[10px] font-medium transition-colors",
-                  leadsSort === "newest" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Newest
-              </button>
-            </div>
+            <SegmentedTabs
+              size="sm"
+              value={leadsSort}
+              onValueChange={setLeadsSort}
+              options={[
+                { value: "az", label: "A–Z" },
+                { value: "newest", label: "Newest" },
+              ]}
+            />
 
             {/* List/Kanban toggle */}
-            <div className="inline-flex items-center rounded-full border border-border bg-muted/40 p-1 gap-0.5 ml-auto">
-              <button
-                type="button"
-                onClick={() => setLeadsViewMode("list")}
-                className={cn(
-                  "inline-flex h-6 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
-                  leadsViewMode === "list" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <List className="size-3" /> List
-              </button>
-              <button
-                type="button"
-                onClick={() => setLeadsViewMode("kanban")}
-                className={cn(
-                  "inline-flex h-6 items-center gap-1 rounded-full px-3 text-xs font-medium transition-all",
-                  leadsViewMode === "kanban" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <LayoutGrid className="size-3" /> Kanban
-              </button>
-            </div>
+            <SegmentedTabs
+              size="sm"
+              className="ml-auto"
+              value={leadsViewMode}
+              onValueChange={setLeadsViewMode}
+              options={[
+                { value: "list", label: "List", icon: List },
+                { value: "kanban", label: "Kanban", icon: LayoutGrid },
+              ]}
+            />
           </div>
 
           {leadsViewMode === "kanban" ? (
@@ -1945,21 +1898,10 @@ export function CampaignDetail({
                       }}
                     >
                       {showCheckbox ? (
-                        <span
-                          role="checkbox"
-                          aria-checked={isChecked}
-                          aria-disabled={!canCheck}
-                          className={cn(
-                            "flex size-4 rounded items-center justify-center transition-colors shrink-0",
-                            !canCheck && "cursor-not-allowed opacity-40",
-                            canCheck && "cursor-pointer",
-                            isChecked && canCheck
-                              ? "bg-primary ring-2 ring-primary"
-                              : "bg-transparent ring-2 ring-muted-foreground/70",
-                          )}
-                        >
-                          {isChecked && canCheck && <Check className="size-2.5 text-primary-foreground" />}
-                        </span>
+                        <AppCheckbox
+                          checked={isChecked && canCheck}
+                          disabled={!canCheck}
+                        />
                       ) : null}
                     </div>
                     <div className="flex items-center gap-2 flex-1 min-w-0 py-3 pl-3 pr-3">

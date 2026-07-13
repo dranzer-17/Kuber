@@ -252,13 +252,20 @@ export async function createLead(token: string, body: {
   return { ...mapDbLead(data), import_id: data.import_id };
 }
 
-export async function importExcelDirect(token: string, rows: Record<string, string>[], mapping: Record<string, string>, batch_name: string, color = "violet"): Promise<{
+export async function importExcelDirect(
+  token: string,
+  rows: Record<string, string>[],
+  mapping: Record<string, string>,
+  batch_name: string,
+  color = "violet",
+  assigned_to?: string,
+): Promise<{
   inserted: number; skipped_blank_email: number; skipped_invalid_email: number;
   skipped_duplicate_in_file: number; skipped_duplicate_in_db: number;
 }> {
   return apiFetch("/api/v1/leads/import-excel", {
     method: "POST",
-    body: JSON.stringify({ mode: "direct", rows, mapping, batch_name, color }),
+    body: JSON.stringify({ mode: "direct", rows, mapping, batch_name, color, assigned_to }),
   }, token);
 }
 
@@ -431,6 +438,7 @@ export type Profile = {
   role: "manager" | "employee";
   territory: "india" | "foreign" | null;
   is_active: boolean;
+  is_super_admin: boolean;
   created_at: string;
 };
 

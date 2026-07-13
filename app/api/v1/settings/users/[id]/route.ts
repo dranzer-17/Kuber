@@ -5,7 +5,8 @@ import { ok, fail } from "@/lib/api-response";
 import { PatchUserSchema } from "@/lib/validators/users";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let caller: Awaited<ReturnType<typeof requireManager>>;
+  try { caller = await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
@@ -17,15 +18,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { data: existing, error: existingErr } = await db
     .from("profiles")
-    .select("id, role")
+    .select("id, role, is_super_admin")
     .eq("id", id)
     .maybeSingle();
   if (existingErr) return fail(500, "INTERNAL", existingErr.message);
   if (!existing) return fail(404, "NOT_FOUND", "User not found");
 
-  // Never demote a manager to employee — prevents locking everyone out of Team settings.
-  if (existing.role === "manager" && role === "employee") {
-    return fail(400, "VALIDATION_ERROR", "Managers cannot be changed to Employee.");
+  // The Super Admin's own role and active status are locked — nobody, including
+  // the Super Admin themselves, can change them through this endpoint.
+  if (existing.is_super_admin) {
+    if (role !== undefined && role !== existing.role) {
+      return fail(400, "VALIDATION_ERROR", "The Super Admin's role cannot be changed.");
+    }
+    if (is_active === false) {
+      return fail(400, "VALIDATION_ERROR", "The Super Admin account cannot be deactivated.");
+    }
+  }
+
+  // Regular managers may only demote Manager -> Employee (one-way). Promoting an
+  // Employee to Manager — including restoring one they previously demoted — is
+  // reserved for the Super Admin.
+  if (!caller.isSuperAdmin && role !== undefined && role !== existing.role) {
+    if (!(existing.role === "manager" && role === "employee")) {
+      return fail(403, "FORBIDDEN", "Only the Super Admin can promote an Employee to Manager.");
+    }
   }
 
   if (password || role) {
@@ -46,7 +62,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .from("profiles")
     .update(patch)
     .eq("id", id)
-    .select("id, email, full_name, role, territory, is_active, created_at")
+    .select("id, email, full_name, role, territory, is_active, is_super_admin, created_at")
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);

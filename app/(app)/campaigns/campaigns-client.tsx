@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { deleteCampaign, fetchUsers, type Profile } from "@/lib/api-client";
@@ -26,11 +27,15 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   const router = useRouter();
   const { campaigns, setCampaigns, session, role } = useApp();
 
+  // After first sync, always trust client state — even when empty after deleting
+  // the last campaign. Falling back to initialCampaigns made deleted rows reappear.
+  const [seeded, setSeeded] = useState(false);
   useEffect(() => {
     setCampaigns(initialCampaigns);
+    setSeeded(true);
   }, [initialCampaigns, setCampaigns]);
 
-  const list = campaigns.length > 0 ? campaigns : initialCampaigns;
+  const list = seeded ? campaigns : (campaigns.length > 0 ? campaigns : initialCampaigns);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CampaignStatus | "All">("All");
@@ -196,12 +201,17 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
         loading={deleteCampaignLoading}
         onClose={() => { if (!deleteCampaignLoading) setDeletingCampaign(null); }}
         onConfirm={async () => {
-          if (!deletingCampaign || !session) return;
+          if (!deletingCampaign || !session || deleteCampaignLoading) return;
+          const id = deletingCampaign.id;
           setDeleteCampaignLoading(true);
           try {
-            await deleteCampaign(session.access_token, deletingCampaign.id);
-            setCampaigns((prev) => prev.filter((c) => c.id !== deletingCampaign.id));
+            await deleteCampaign(session.access_token, id);
+            setCampaigns((prev) => prev.filter((c) => c.id !== id));
             setDeletingCampaign(null);
+            toast.success("Campaign deleted");
+            router.refresh();
+          } catch (e) {
+            toast.error((e as Error).message || "Failed to delete campaign");
           } finally {
             setDeleteCampaignLoading(false);
           }

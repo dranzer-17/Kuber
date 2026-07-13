@@ -27,6 +27,8 @@ import { KanbanBoard } from "@/components/app/kanban-board";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { AppCheckbox } from "@/components/ui/app-checkbox";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
@@ -228,14 +230,7 @@ function ColumnsDropdown({ visible, onChange }: {
                 onClick={() => toggle(col.key)}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-secondary transition-colors"
               >
-                <span className={cn(
-                  "size-4 rounded border flex items-center justify-center shrink-0 transition-colors",
-                  visible[col.key]
-                    ? "bg-primary border-primary"
-                    : "border-border bg-transparent",
-                )}>
-                  {visible[col.key] && <Check className="size-2.5 text-primary-foreground" />}
-                </span>
+                <AppCheckbox checked={!!visible[col.key]} />
                 <span className="text-sm text-foreground">{col.label}</span>
               </button>
             ))}
@@ -737,26 +732,15 @@ export default function LeadsPage() {
       {/* ── Top bar ── */}
       <div className="flex items-center justify-between px-8 py-4 border-b border-border shrink-0">
         <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center rounded-lg border border-border bg-card p-0.5 shrink-0">
-            <button
-              type="button" onClick={() => setLeadsEntityMode("individual")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                leadsEntityMode === "individual" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Users className="size-3.5" /> Individual
-            </button>
-            <button
-              type="button" onClick={() => setLeadsEntityMode("orgs")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                leadsEntityMode === "orgs" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Building2 className="size-3.5" /> Organization
-            </button>
-          </div>
+          <SegmentedTabs
+            value={leadsEntityMode}
+            onValueChange={setLeadsEntityMode}
+            className="shrink-0"
+            options={[
+              { value: "individual", label: "Individual", icon: Users },
+              { value: "orgs", label: "Organization", icon: Building2 },
+            ]}
+          />
 
           {role === "manager" && (
             <Button
@@ -790,26 +774,14 @@ export default function LeadsPage() {
 
         <div className="flex items-center gap-2">
           {leadsEntityMode === "individual" && (
-            <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
-              <button
-                type="button" onClick={() => setLeadsViewMode("list")}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                  leadsViewMode === "list" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <List className="size-3.5" /> List
-              </button>
-              <button
-                type="button" onClick={() => setLeadsViewMode("kanban")}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
-                  leadsViewMode === "kanban" ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <Kanban className="size-3.5" /> Kanban
-              </button>
-            </div>
+            <SegmentedTabs
+              value={leadsViewMode}
+              onValueChange={setLeadsViewMode}
+              options={[
+                { value: "list", label: "List", icon: List },
+                { value: "kanban", label: "Kanban", icon: Kanban },
+              ]}
+            />
           )}
           <Button
             variant="outline" size="sm" className="gap-1.5"
@@ -988,15 +960,10 @@ export default function LeadsPage() {
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="w-10 pl-4">
-                    <span
+                    <AppCheckbox
+                      checked={allEligibleChecked ? true : someChecked ? "indeterminate" : false}
                       onClick={toggleAll}
-                      className={cn(
-                        "flex size-4 cursor-pointer rounded items-center justify-center transition-colors",
-                        allEligibleChecked ? "bg-primary ring-2 ring-primary" : someChecked ? "bg-primary/40 ring-2 ring-primary/60" : "bg-transparent ring-2 ring-border",
-                      )}
-                    >
-                      {(allEligibleChecked || someChecked) && <Check className="size-2.5 text-primary-foreground" />}
-                    </span>
+                    />
                   </TableHead>
                   <TableHead className="text-xs font-semibold text-muted-foreground">Lead</TableHead>
                   {visibleCols.organization && <TableHead className="text-xs font-semibold text-muted-foreground">Organization</TableHead>}
@@ -1044,19 +1011,11 @@ export default function LeadsPage() {
                         )}
                       >
                         <TableCell className="pl-4" onClick={(e) => toggleOne(lead.id, e)}>
-                          <span
+                          <AppCheckbox
+                            checked={isChecked && eligible}
+                            disabled={!eligible}
                             title={ineligibleReason ?? undefined}
-                            className={cn(
-                              "flex size-4 rounded items-center justify-center transition-colors shrink-0",
-                              !eligible && "cursor-not-allowed opacity-40",
-                              eligible && "cursor-pointer",
-                              isChecked && eligible
-                                ? "bg-primary ring-2 ring-primary"
-                                : "bg-transparent ring-2 ring-border",
-                            )}
-                          >
-                            {isChecked && eligible && <Check className="size-2.5 text-primary-foreground" />}
-                          </span>
+                          />
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2.5">
