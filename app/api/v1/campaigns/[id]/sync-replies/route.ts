@@ -6,6 +6,7 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 import { listInstantlyCampaignReplies, getInstantlyLeadStatus } from "@/lib/services/instantly";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { ok } from "@/lib/api-response";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 function stripQuotedText(text: string | null | undefined): string | null {
   if (!text) return null;
@@ -22,12 +23,12 @@ function stripQuotedText(text: string | null | undefined): string | null {
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let session: Awaited<ReturnType<typeof requireAuth>>;
-  try { session = await requireAuth(req); } catch (r) { return r as Response; }
-  void session;
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id: masterCampaignId } = await params;
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, masterCampaignId); } catch (r) { return r as Response; }
 
   // 1. Get all sub-campaign Instantly IDs for this master campaign
   const { data: subs } = await db

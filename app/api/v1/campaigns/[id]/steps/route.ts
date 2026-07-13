@@ -4,14 +4,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CampaignStepsSchema } from "@/lib/validators/campaigns";
 import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/instantly";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
   const { data } = await db
     .from("campaign_steps")
     .select("id,step_order,delay,delay_unit,subject,body")
@@ -24,12 +27,14 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
   const parsed = CampaignStepsSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid steps", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   // Replace all steps for this campaign
   await db.from("campaign_steps").delete().eq("campaign_id", id);

@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchLeadSchema } from "@/lib/validators/leads";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(_req); } catch (r) { return r as Response; }
+  let user: { id: string; role: "manager" | "employee" };
+  try { user = await requireAuth(_req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();
@@ -18,6 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (error) return fail(500, "INTERNAL", error.message);
   if (!lead) return fail(404, "NOT_FOUND", "Lead not found");
+  if (user.role === "employee" && lead.assigned_to !== user.id) return fail(404, "NOT_FOUND", "Lead not found");
 
   const { data: cls } = await db
     .from("campaign_leads")
@@ -34,7 +36,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(_req); } catch (r) { return r as Response; }
+  try { await requireManager(_req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();
@@ -46,7 +48,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: { id: string };
+  let user: { id: string; role: "manager" | "employee" };
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -55,6 +57,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+
+  if (user.role === "employee") {
+    const { data: owned } = await db.from("leads").select("assigned_to").eq("id", id).maybeSingle();
+    if (!owned || owned.assigned_to !== user.id) return fail(404, "NOT_FOUND", "Lead not found");
+  }
+
   const { email, ...rest } = parsed.data;
 
   // Email dedup check if email is being changed

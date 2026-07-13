@@ -4,13 +4,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { FollowUpRegenerateSchema } from "@/lib/validators/drafts";
 import { regenerateFollowUpText } from "@/lib/services/followup-regenerate";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 // Deliberately separate from /drafts/[id]/regenerate (the step-1 draft's
 // regenerate endpoint) and from generateOneDraft entirely. Follow-up
 // regeneration only ever sees the current follow-up text + the user's
 // instruction — no lead/org context, no product library, no shared prompt.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
@@ -18,6 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: cl } = await db
     .from("campaign_leads")

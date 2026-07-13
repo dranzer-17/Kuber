@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { RegenerateDraftSchema } from "@/lib/validators/drafts";
 import { generateOneDraft } from "@/lib/services/generate-drafts";
+import { assertDraftAccess } from "@/lib/auth/scope";
 
 export const maxDuration = 60;
 
@@ -11,7 +12,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -20,6 +21,7 @@ export async function POST(
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertDraftAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: oldDraft } = await db
     .from("email_drafts")

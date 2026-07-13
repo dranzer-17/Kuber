@@ -18,21 +18,31 @@ function parseReadState(raw: string | null): UniboxReadState | undefined {
 }
 
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const sp = req.nextUrl.searchParams;
   const db = createAdminClient();
 
   const campaignIdsRaw = sp.get("campaign_ids");
-  const campaign_ids = campaignIdsRaw
+  let campaign_ids = campaignIdsRaw
     ? campaignIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
+  const campaign_id: string | undefined = sp.get("campaign_id") ?? undefined;
+
+  if (user.role === "employee") {
+    const { data: owned } = await db.from("campaigns").select("id").eq("created_by", user.id);
+    const ownedIds = new Set((owned ?? []).map((c) => c.id));
+    if (campaign_id && !ownedIds.has(campaign_id)) return ok({ threads: [], cursor: null });
+    campaign_ids = campaign_ids ? campaign_ids.filter((id) => ownedIds.has(id)) : [...ownedIds];
+    if (!campaign_id && campaign_ids.length === 0) return ok({ threads: [], cursor: null });
+  }
 
   const tabRaw = sp.get("tab");
   const tab = tabRaw ? (tabRaw as UniboxTab) : undefined;
 
   const result = await getThreads(db, {
     tab,
-    campaign_id: sp.get("campaign_id") ?? undefined,
+    campaign_id,
     campaign_ids: campaign_ids?.length ? campaign_ids : undefined,
     eaccount: sp.get("eaccount") ?? undefined,
     q: sp.get("q") ?? undefined,

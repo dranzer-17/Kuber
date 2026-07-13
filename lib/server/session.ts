@@ -1,14 +1,14 @@
 import { redirect } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
-import { isAdminUser } from "@/lib/auth/admin";
+import { isAppUser } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 
-/** Cookie session validated via getUser — redirects if not admin. */
-export async function requireAdminSession(): Promise<Session> {
+/** Cookie session validated via getUser — redirects if not a provisioned manager/employee. */
+export async function requireAppSession(): Promise<Session> {
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
 
-  if (error || !user || !isAdminUser(user)) {
+  if (error || !user || !isAppUser(user)) {
     redirect("/");
   }
 

@@ -7,14 +7,18 @@ import { buildDefaultCampaignSteps } from "@/lib/constants";
 
 
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: { id: string; role: "manager" | "employee" };
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const db = createAdminClient();
-  const { data, error } = await db
+  let q = db
     .from("campaigns")
     .select("*")
-    .eq("is_deleted", false)
-    .order("created_at", { ascending: false });
+    .eq("is_deleted", false);
+
+  if (user.role === "employee") q = q.eq("created_by", user.id);
+
+  const { data, error } = await q.order("created_at", { ascending: false });
 
   if (error) return fail(500, "INTERNAL", error.message);
   return ok({ campaigns: data });

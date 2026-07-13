@@ -1,26 +1,26 @@
-export type UserRole = "super_admin" | "admin" | "manager";
+import type { Session, User } from "@supabase/supabase-js";
 
-const ROLE_HIERARCHY: Record<UserRole, number> = {
-  manager: 0,
-  admin: 1,
-  super_admin: 2,
-};
+export type AppRole = "manager" | "employee";
 
-/** Extract role from Supabase user's app_metadata. Defaults to 'admin'. */
-export function getUserRole(user: { app_metadata?: Record<string, unknown> }): UserRole {
-  const role = user.app_metadata?.role as string | undefined;
-  if (role && role in ROLE_HIERARCHY) return role as UserRole;
-  return "admin";
+type RoleBearer = { app_metadata?: Record<string, unknown> } | null | undefined;
+
+/** Extract role from a Supabase user's app_metadata. Null if not provisioned. */
+export function getUserRole(user: RoleBearer): AppRole | null {
+  const role = user?.app_metadata?.role;
+  return role === "manager" || role === "employee" ? role : null;
 }
 
-/** Check if the user's role meets the minimum required level. */
-export function hasRole(user: { app_metadata?: Record<string, unknown> }, minRole: UserRole): boolean {
-  const userRole = getUserRole(user);
-  return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[minRole];
+export function isAppUser(user: User | RoleBearer): boolean {
+  return getUserRole(user) !== null;
 }
 
-export const ROLE_LABELS: Record<UserRole, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  manager: "Manager",
-};
+export function isManagerUser(user: User | RoleBearer): boolean {
+  return getUserRole(user) === "manager";
+}
+
+export function isValidSession(session: Session | null): boolean {
+  if (!session?.user) return false;
+  if (!isAppUser(session.user)) return false;
+  if (!session.expires_at) return true;
+  return session.expires_at * 1000 > Date.now();
+}

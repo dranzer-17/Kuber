@@ -4,9 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchDraftSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
+import { assertDraftAccess } from "@/lib/auth/scope";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -15,6 +16,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertDraftAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: draft } = await db
     .from("email_drafts")

@@ -3,19 +3,23 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { AddLeadsToCampaignSchema, CampaignLeadsQuerySchema, PatchCampaignLeadSchema } from "@/lib/validators/campaigns";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 const TERMINAL_STATUSES = new Set(["completed", "paused"]);
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
+  const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
+
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
   const parsed = CampaignLeadsQuerySchema.safeParse(sp);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
   const { crm_status, page, limit } = parsed.data;
-  const db = createAdminClient();
 
   // Fetch campaign default attachment (once)
   const { data: campaign } = await db
@@ -72,7 +76,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -81,6 +85,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   // Validate campaign status
   const { data: campaign } = await db.from("campaigns").select("status").eq("id", id).maybeSingle();
@@ -97,11 +102,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const leadIds = parsed.data.lead_ids;
 
-  // Bulk-fetch all leads in one query
-  const { data: leads } = await db
+  // Bulk-fetch all leads in one query — employees can only add leads assigned to them.
+  let leadsQuery = db
     .from("leads")
-    .select("id, email, organization_id, organizations(domain, enrichment_stage, unsubscribed)")
+    .select("id, email, organization_id, assigned_to, organizations(domain, enrichment_stage, unsubscribed)")
     .in("id", leadIds);
+  if (user.role === "employee") leadsQuery = leadsQuery.eq("assigned_to", user.id);
+  const { data: leads } = await leadsQuery;
 
   const leadMap = new Map((leads ?? []).map((l) => [l.id, l]));
 
@@ -153,7 +160,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
@@ -161,6 +169,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: campaign } = await db.from("campaigns").select("id").eq("id", id).maybeSingle();
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");

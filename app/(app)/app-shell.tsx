@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings, Inbox,
-  RefreshCw, Trash2, AlertTriangle, Menu,
+  RefreshCw, Trash2, AlertTriangle, Menu, Eye, UserCog,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { ThemeProvider } from "@/lib/theme-context";
@@ -72,23 +72,27 @@ function DeleteConfirmModal({
 const SIDEBAR_COLLAPSED_KEY = "kuber_sidebar_collapsed";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard",  icon: LayoutDashboard, exact: true  },
-  { href: "/leads",     label: "Leads",      icon: Users,           exact: false },
-  { href: "/campaigns", label: "Campaigns",  icon: Megaphone,       exact: false },
-  { href: "/unibox",    label: "Unibox",     icon: Inbox,           exact: false },
-  { href: "/settings",  label: "Settings",   icon: Settings,        exact: false },
+  { href: "/dashboard", label: "Dashboard",  icon: LayoutDashboard, exact: true,  managerOnly: false },
+  { href: "/leads",     label: "Leads",      icon: Users,           exact: false, managerOnly: false },
+  { href: "/campaigns", label: "Campaigns",  icon: Megaphone,       exact: false, managerOnly: false },
+  { href: "/unibox",    label: "Unibox",     icon: Inbox,           exact: false, managerOnly: false },
+  { href: "/oversight", label: "Oversight",  icon: Eye,             exact: false, managerOnly: true  },
+  { href: "/settings/team", label: "Team",   icon: UserCog,         exact: false, managerOnly: true  },
+  { href: "/settings",  label: "Settings",   icon: Settings,        exact: false, managerOnly: false },
 ] as const;
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const {
-    session, loadingSession, leads, setLeads, leadsTotal, loadCampaigns, setCampaigns,
+    session, loadingSession, role, leads, setLeads, leadsTotal, loadCampaigns, setCampaigns,
     checkedIds, setCheckedIds, selectedLead, setSelectedLead, selectedOrgId, setSelectedOrgId,
     showAddLeads, setShowAddLeads, manualPrefill, setManualPrefill,
     showCreateCampaign, setShowCreateCampaign, deletingLead, setDeletingLead,
     deleteLeadLoading, setDeleteLeadLoading,
   } = useApp();
+
+  const visibleNavItems = NAV_ITEMS.filter((item) => !item.managerOnly || role === "manager");
 
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uniboxUnread, setUniboxUnread] = useState<number | null>(null);
@@ -163,9 +167,16 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const showRouteSkeleton = pendingHref !== null && pendingHref !== pathname;
   const skeletonHref = pendingHref ?? pathname;
 
+  // Among items whose href matches the current path, only the most specific
+  // (longest href) one should highlight — otherwise a nested route like
+  // /settings/team matches both "Team" (/settings/team) and "Settings" (/settings).
+  const bestMatchHref = visibleNavItems
+    .filter(({ href, exact }) => (exact ? pathname === href : pathname.startsWith(href)))
+    .reduce<string | null>((best, item) => (best === null || item.href.length > best.length ? item.href : best), null);
+
   function isActive(href: string, exact: boolean) {
     if (exact) return pathname === href;
-    return pathname.startsWith(href);
+    return href === bestMatchHref;
   }
 
   return (
@@ -206,7 +217,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
           <nav className="flex-1 p-2 space-y-0.5">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
+            {visibleNavItems.map(({ href, label, icon: Icon, exact }) => {
               const active = isActive(href, exact);
               const badge = label === "Leads" ? leadsTotal : label === "Unibox" ? uniboxUnread : null;
               return (
@@ -323,7 +334,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
             setSelectedLead(found);
           } else {
             setSelectedOrgId(null);
-            setSelectedLead({ id: leadId, firstName: "", lastName: "", email: "", company: "", domain: "", domainSource: null, phone: "", jobTitle: "", country: "", status: "Enriched", score: "—", source: "Apollo", campaign: "", campaigns: [], createdAt: new Date().toISOString(), orgId: null, enrichmentStage: null, companyDescription: null, sellsTo: null, lastError: null, hasScraped: false, importId: null, batchLabel: null, batchColor: null } satisfies Lead);
+            setSelectedLead({ id: leadId, firstName: "", lastName: "", email: "", company: "", domain: "", domainSource: null, phone: "", jobTitle: "", country: "", status: "Enriched", score: "—", source: "Apollo", campaign: "", campaigns: [], createdAt: new Date().toISOString(), orgId: null, enrichmentStage: null, companyDescription: null, sellsTo: null, lastError: null, hasScraped: false, importId: null, batchLabel: null, batchColor: null, assignedTo: null } satisfies Lead);
           }
         }}
         onAddLead={(org) => {
