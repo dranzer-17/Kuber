@@ -13,19 +13,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { TagInput } from "@/components/app/lead-forms";
+import { TagInput } from "@/components/app/tag-input";
 import { fetchLogo, fetchSettings, patchSettings, removeLogo, uploadLogo } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/branding";
 import { useTheme } from "@/lib/theme-context";
+import { useApp } from "@/lib/app-context";
+import dynamic from "next/dynamic";
+
+const TeamView = dynamic(
+  () => import("@/components/app/team-view").then((m) => m.TeamView),
+  { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
+);
 
 const PRODUCT_SUGGESTIONS = [
   "Masterbatch", "Color Concentrates", "White Masterbatch", "Black Masterbatch",
   "Additive Masterbatch", "Filler Masterbatch",
 ];
 
-type Section = "profile" | "ai" | "knowledge" | "appearance" | "account";
+type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team";
 type AiSection = "template" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
@@ -37,6 +44,8 @@ const NAV_ITEMS: { id: Section; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "account",    label: "Account" },
 ];
+
+const TEAM_NAV_ITEM: { id: Section; label: string } = { id: "team", label: "Team" };
 
 const AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "template", label: "Email Template", icon: PenLine },
@@ -152,6 +161,8 @@ function RichTextEditor({
 
 export function SettingsView() {
   const { theme, mode, setTheme, setMode, savingTheme } = useTheme();
+  const { role } = useApp();
+  const navItems = role === "manager" ? [...NAV_ITEMS, TEAM_NAV_ITEM] : NAV_ITEMS;
   const [section, setSection] = useState<Section>("profile");
   const [aiSection, setAiSection] = useState<AiSection>("template");
   const [knowledgeSection, setKnowledgeSection] = useState<KnowledgeSection>("company");
@@ -182,7 +193,7 @@ export function SettingsView() {
   const activeKnowledgeNavItem = KNOWLEDGE_NAV_ITEMS.find((i) => i.id === knowledgeSection);
 
   // The breadcrumb shows the ancestor trail; the deepest active item becomes the page title.
-  const sectionLabel = NAV_ITEMS.find((n) => n.id === section)?.label ?? "Settings";
+  const sectionLabel = navItems.find((n) => n.id === section)?.label ?? "Settings";
   const pageTitle =
     (section === "ai" && activeAiNavItem?.label) ||
     (section === "knowledge" && activeKnowledgeNavItem?.label) ||
@@ -196,7 +207,12 @@ export function SettingsView() {
         const token = session?.access_token ?? "";
         setUserEmail(session?.user?.email ?? "");
         setUserName(session?.user?.user_metadata?.full_name ?? session?.user?.user_metadata?.name ?? "");
-        const s = await fetchSettings(token);
+
+        // Settings unlocks the form; logo can arrive after (storage signed URLs are slow).
+        const settingsPromise = fetchSettings(token);
+        const logoPromise = fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
+
+        const s = await settingsPromise;
         setSenderName(s.default_sender_name ?? "");
         setClientIndustry(s.client_industry ?? "");
         setClientProducts((s.client_products ?? "").split(",").map((p: string) => p.trim()).filter(Boolean));
@@ -205,12 +221,13 @@ export function SettingsView() {
         setSigContact(s.signature_contact ?? "");
         setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
         try { setProductOfferings(JSON.parse(s.product_offerings ?? "[]") as ProductOffering[]); } catch { setProductOfferings([]); }
-        const l = await fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
+        setLoading(false);
+
+        const l = await logoPromise;
         setLogoPath(l.logo_path);
         setLogoUrl(l.logo_url);
       } catch (e) {
         setError((e as Error).message);
-      } finally {
         setLoading(false);
       }
     }
@@ -335,7 +352,7 @@ export function SettingsView() {
         {/* Primary sidebar */}
         <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">General</p>
-          {NAV_ITEMS.map(({ id, label }) => (
+          {navItems.map(({ id, label }) => (
             <button key={id} type="button" onClick={() => setSection(id)}
               className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full",
                 section === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
@@ -409,7 +426,9 @@ export function SettingsView() {
                       <p className="text-sm font-medium">Role</p>
                       <p className="text-xs text-muted-foreground mt-0.5">Your access level in this workspace.</p>
                     </div>
-                    <span className="text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">Admin</span>
+                    <span className="text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                      {role === "manager" ? "Manager" : role === "employee" ? "Employee" : "—"}
+                    </span>
                   </div>
                 </>
               )}
@@ -666,6 +685,12 @@ export function SettingsView() {
                       <LogOut className="size-3.5" /> Sign out
                     </button>
                   </div>
+                </div>
+              )}
+
+              {section === "team" && role === "manager" && (
+                <div className="-m-8">
+                  <TeamView />
                 </div>
               )}
 

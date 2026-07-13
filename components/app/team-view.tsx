@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserPlus, Shield, RefreshCw } from "lucide-react";
+import { UserPlus, RefreshCw } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,11 +83,6 @@ export function TeamView() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
-      <div>
-        <h1 className="text-xl font-bold flex items-center gap-2"><Shield className="size-5" /> Team</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage Manager/Employee accounts.</p>
-      </div>
-
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">Users</h2>
@@ -157,13 +152,19 @@ export function TeamView() {
                     <span>{counts[u.id]?.campaign_count ?? 0} campaigns</span>
                   </div>
                 )}
-                <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
-                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="employee">Employee</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                  </SelectContent>
-                </Select>
+                {u.role === "manager" ? (
+                  <div className="w-32 h-9 px-3 flex items-center rounded-md border border-border bg-secondary/40 text-sm text-muted-foreground">
+                    Manager
+                  </div>
+                ) : (
+                  <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
+                    <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="employee">Employee</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
                 {u.role === "employee" && (
                   <Select
                     value={u.territory ?? "none"}

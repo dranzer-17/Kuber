@@ -15,6 +15,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const db = createAdminClient();
 
+  const { data: existing, error: existingErr } = await db
+    .from("profiles")
+    .select("id, role")
+    .eq("id", id)
+    .maybeSingle();
+  if (existingErr) return fail(500, "INTERNAL", existingErr.message);
+  if (!existing) return fail(404, "NOT_FOUND", "User not found");
+
+  // Never demote a manager to employee — prevents locking everyone out of Team settings.
+  if (existing.role === "manager" && role === "employee") {
+    return fail(400, "VALIDATION_ERROR", "Managers cannot be changed to Employee.");
+  }
+
   if (password || role) {
     const { error: authError } = await db.auth.admin.updateUserById(id, {
       ...(password ? { password } : {}),

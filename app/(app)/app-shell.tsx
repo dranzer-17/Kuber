@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings, Inbox,
-  Menu, UserCog,
+  Menu,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useApp } from "@/lib/app-context";
@@ -41,7 +41,6 @@ const NAV_ITEMS = [
   { href: "/leads",     label: "Leads",      icon: Users,           exact: false, managerOnly: false },
   { href: "/campaigns", label: "Campaigns",  icon: Megaphone,       exact: false, managerOnly: false },
   { href: "/unibox",    label: "Unibox",     icon: Inbox,           exact: false, managerOnly: false },
-  { href: "/settings/team", label: "Team",   icon: UserCog,         exact: false, managerOnly: true  },
   { href: "/settings",  label: "Settings",   icon: Settings,        exact: false, managerOnly: false },
 ] as const;
 
@@ -122,18 +121,9 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!session) return null;
 
-  function handleNavClick(href: string) {
-    if (href === pathname || (href !== "/dashboard" && pathname.startsWith(href))) return;
-    setPendingHref(href);
-    startTransition(() => { router.push(href); });
-  }
-
-  const showRouteSkeleton = pendingHref !== null && pendingHref !== pathname;
-  const skeletonHref = pendingHref ?? pathname;
-
   // Among items whose href matches the current path, only the most specific
-  // (longest href) one should highlight — otherwise a nested route like
-  // /settings/team matches both "Team" (/settings/team) and "Settings" (/settings).
+  // (longest href) one should highlight — guards against nested routes matching
+  // more than one top-level nav item at once.
   const bestMatchHref = visibleNavItems
     .filter(({ href, exact }) => (exact ? pathname === href : pathname.startsWith(href)))
     .reduce<string | null>((best, item) => (best === null || item.href.length > best.length ? item.href : best), null);
@@ -142,6 +132,17 @@ function AppShell({ children }: { children: React.ReactNode }) {
     if (exact) return pathname === href;
     return href === bestMatchHref;
   }
+
+  function handleNavClick(href: string, exact: boolean) {
+    // Skip only when this nav item is already the active highlight — otherwise
+    // a nested route could block navigating to its own parent (startsWith trap).
+    if (isActive(href, exact)) return;
+    setPendingHref(href);
+    startTransition(() => { router.push(href); });
+  }
+
+  const showRouteSkeleton = pendingHref !== null && pendingHref !== pathname;
+  const skeletonHref = pendingHref ?? pathname;
 
   return (
     <>
@@ -193,7 +194,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     e.preventDefault();
-                    handleNavClick(href);
+                    handleNavClick(href, exact);
                   }}
                   className={cn(
                     "w-full flex items-center rounded-lg text-sm font-medium transition-colors relative",
