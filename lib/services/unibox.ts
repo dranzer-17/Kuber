@@ -134,6 +134,41 @@ function emailToRow(email: InstantlyEmail, opts: {
   };
 }
 
+/**
+ * Instantly tags its own AI interest read directly onto each synced email
+ * (ai_interest_value) — but campaign_leads.interest_status (what the Unibox
+ * "Instantly status" filter and dashboard hot/cold counts actually read) was
+ * previously only ever written by the dedicated lead_interested-family webhook
+ * event. If that event was missed, delayed, or failed to resolve a campaign_lead,
+ * the CRM status silently stayed null even though the raw synced email already
+ * proved Instantly had classified the lead — leads showed as "Interested" on a
+ * per-email basis but never surfaced in the filter.
+ *
+ * Only fills a currently-null status (never overwrites an existing value, whether
+ * set by the webhook or by a human override) so this can't clobber anything.
+ */
+async function backfillInterestFromEmail(
+  db: Db,
+  campaignLeadId: string | null,
+  direction: string,
+  aiInterestValue: number | null | undefined,
+): Promise<void> {
+  if (!campaignLeadId || direction !== "received" || aiInterestValue == null) return;
+
+  const { data: cl } = await db
+    .from("campaign_leads")
+    .select("interest_status")
+    .eq("id", campaignLeadId)
+    .maybeSingle();
+  if (!cl || cl.interest_status !== null) return;
+
+  await db.from("campaign_leads").update({
+    interest_status: aiInterestValue,
+    lead_temperature: INTEREST_TO_TEMPERATURE[aiInterestValue] ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq("id", campaignLeadId);
+}
+
 export async function ingestInstantlyEmail(
   db: Db,
   email: InstantlyEmail,
@@ -168,10 +203,11 @@ export async function ingestInstantlyEmail(
       updated_at: row.updated_at,
       ...(existing.body_text ? {} : { body_text: row.body_text, body_html: row.body_html, content_preview: row.content_preview }),
     }).eq("id", existing.id);
-    return;
+  } else {
+    await db.from("unibox_emails").insert(row);
   }
 
-  await db.from("unibox_emails").insert(row);
+  await backfillInterestFromEmail(db, campaignLeadId, row.direction, email.ai_interest_value ?? null);
 }
 
 export async function sendThreadReply(
@@ -262,7 +298,7 @@ export async function sendThreadReply(
 
 export async function setLeadInterestStatus(
   db: Db,
-  opts: { leadEmail: string; interestValue: number | null; actorId?: string },
+  opts: { leadEmail: string; interestValue: number | null; actorId?: string; campaignLeadId?: string | null },
 ): Promise<void> {
   await updateLeadInterestStatus({
     leadEmail: opts.leadEmail,
@@ -280,11 +316,19 @@ export async function setLeadInterestStatus(
     updated_at: new Date().toISOString(),
   };
 
-  const { data: leads } = await db.from("leads").select("id").eq("email", opts.leadEmail);
-  const leadIds = (leads ?? []).map((l) => l.id);
-  if (leadIds.length === 0) return;
-
-  await db.from("campaign_leads").update(patch).in("lead_id", leadIds);
+  if (opts.campaignLeadId) {
+    // Scoped to the exact campaign this thread belongs to. A lead can be enrolled
+    // in several campaigns at once (each with its own campaign_leads row) — setting
+    // status from one thread must not bleed into the others.
+    await db.from("campaign_leads").update(patch).eq("id", opts.campaignLeadId);
+  } else {
+    // Fallback for the rare case where this thread's campaign_lead couldn't be
+    // resolved at all — only reachable when ingest never linked a campaign_lead_id.
+    const { data: leads } = await db.from("leads").select("id").eq("email", opts.leadEmail);
+    const leadIds = (leads ?? []).map((l) => l.id);
+    if (leadIds.length === 0) return;
+    await db.from("campaign_leads").update(patch).in("lead_id", leadIds);
+  }
 
   if (opts.actorId) {
     await db.from("audit_log").insert({

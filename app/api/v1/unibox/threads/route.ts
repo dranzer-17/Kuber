@@ -29,12 +29,14 @@ export async function GET(req: NextRequest) {
     : undefined;
   const campaign_id: string | undefined = sp.get("campaign_id") ?? undefined;
 
+  const EMPTY_RESULT = { threads: [], next_cursor: null, counts: { unread_total: 0 } };
+
   if (user.role === "employee") {
     const { data: owned } = await db.from("campaigns").select("id").eq("created_by", user.id);
     const ownedIds = new Set((owned ?? []).map((c) => c.id));
-    if (campaign_id && !ownedIds.has(campaign_id)) return ok({ threads: [], cursor: null });
+    if (campaign_id && !ownedIds.has(campaign_id)) return ok(EMPTY_RESULT);
     campaign_ids = campaign_ids ? campaign_ids.filter((id) => ownedIds.has(id)) : [...ownedIds];
-    if (!campaign_id && campaign_ids.length === 0) return ok({ threads: [], cursor: null });
+    if (!campaign_id && campaign_ids.length === 0) return ok(EMPTY_RESULT);
   }
 
   const tabRaw = sp.get("tab");

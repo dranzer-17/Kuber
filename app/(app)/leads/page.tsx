@@ -802,11 +802,9 @@ export default function LeadsPage() {
             <RefreshCw className={cn("size-3.5", loadingLeads && "animate-spin")} />
             Refresh
           </Button>
-          {role === "manager" && (
-            <Button size="sm" onClick={() => router.push("/leads/add")} className="gap-1.5">
-              <Plus className="size-3.5" /> Add leads
-            </Button>
-          )}
+          <Button size="sm" onClick={() => router.push("/leads/add")} className="gap-1.5">
+            <Plus className="size-3.5" /> Add leads
+          </Button>
         </div>
       </div>
 

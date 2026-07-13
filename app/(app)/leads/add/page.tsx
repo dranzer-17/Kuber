@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApolloForm, ExcelForm, ManualForm } from "@/components/app/lead-forms";
 import { useApp } from "@/lib/app-context";
 import { InfoTip } from "@/components/ui/info-tip";
+import { cn } from "@/lib/utils";
 
 // ── Step guide components ──────────────────────────────────────────────────────
 
@@ -60,9 +61,10 @@ const EXCEL_STEPS: Step[] = [
 export default function AddLeadsPage() {
   const router = useRouter();
   const { session, role, loadingSession, loadLeads } = useApp();
+  const isManager = role === "manager";
 
   useEffect(() => {
-    if (!loadingSession && role !== "manager") router.replace("/leads");
+    if (!loadingSession && role !== "manager" && role !== "employee") router.replace("/leads");
   }, [loadingSession, role, router]);
 
   async function handleImport() {
@@ -70,7 +72,7 @@ export default function AddLeadsPage() {
     router.push("/leads");
   }
 
-  if (loadingSession || role !== "manager") return null;
+  if (loadingSession || (role !== "manager" && role !== "employee")) return null;
 
   return (
     <div className="flex flex-col h-full">
@@ -95,21 +97,25 @@ export default function AddLeadsPage() {
       {/* Content */}
       <div className="flex-1 overflow-auto px-10 py-6">
         <div className="max-w-5xl mx-auto">
-          <Tabs defaultValue="apollo" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-6 max-w-sm">
-              <TabsTrigger value="apollo">Apollo Search</TabsTrigger>
-              <TabsTrigger value="excel">Excel / CSV</TabsTrigger>
+          <Tabs defaultValue={isManager ? "apollo" : "manual"} className="w-full">
+            <TabsList className={cn("grid w-full mb-6 max-w-sm", isManager ? "grid-cols-3" : "grid-cols-1")}>
+              {isManager && <TabsTrigger value="apollo">Apollo Search</TabsTrigger>}
+              {isManager && <TabsTrigger value="excel">Excel / CSV</TabsTrigger>}
               <TabsTrigger value="manual">Manual Entry</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="apollo" className="mt-0">
-              <ApolloForm onImport={handleImport} />
-            </TabsContent>
+            {isManager && (
+              <TabsContent value="apollo" className="mt-0">
+                <ApolloForm onImport={handleImport} />
+              </TabsContent>
+            )}
 
-            <TabsContent value="excel" className="mt-0">
-              <StepGuide steps={EXCEL_STEPS} />
-              <ExcelForm onImport={handleImport} />
-            </TabsContent>
+            {isManager && (
+              <TabsContent value="excel" className="mt-0">
+                <StepGuide steps={EXCEL_STEPS} />
+                <ExcelForm onImport={handleImport} />
+              </TabsContent>
+            )}
 
             <TabsContent value="manual" className="mt-0">
               <ManualForm onImport={handleImport} />

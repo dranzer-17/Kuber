@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import crypto from "crypto";
-import { requireAuth, requireManager } from "@/lib/auth/api-auth";
+import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
@@ -128,14 +128,18 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let user: { id: string };
-  try { user = await requireManager(req); } catch (r) { return r as Response; }
+  let user: { id: string; role: "manager" | "employee" };
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, assigned_to, ...leadFields } = parsed.data;
+  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, assigned_to: requestedAssignedTo, ...leadFields } = parsed.data;
+  // Employees always work their own leads — force self-assignment regardless of
+  // what was sent, rather than letting one employee assign leads to another.
+  // Managers keep full control (assign to anyone, or leave unassigned).
+  const assigned_to = user.role === "employee" ? user.id : (requestedAssignedTo ?? null);
   const db = createAdminClient();
 
   // Check email uniqueness

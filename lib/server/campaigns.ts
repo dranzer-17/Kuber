@@ -2,7 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapDbCampaign, type DbCampaign } from "@/lib/mappers";
 
 export async function getCampaigns(db: SupabaseClient, createdBy?: string) {
-  let q = db.from("campaigns").select("*").order("created_at", { ascending: false });
+  let q = db
+    .from("campaigns")
+    .select("*")
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false });
   if (createdBy) q = q.eq("created_by", createdBy);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
