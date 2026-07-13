@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { isManagerUser } from "@/lib/auth/roles";
 
-const MANAGER_ONLY_PATHS = ["/dashboard/settings/users", "/dashboard/settings/assignment", "/dashboard/oversight"];
+// Actual authenticated routes (the (app) group adds no URL segment).
+const MANAGER_ONLY_PATHS = ["/oversight", "/settings/team", "/settings/assignment"];
 
 export async function middleware(request: NextRequest) {
   const { response, user } = await updateSession(request);

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { safeSecretEqual } from "@/lib/auth/secret";
 import {
   fetchDraftTargets,
   generateOneDraft,
@@ -10,7 +11,7 @@ import {
 export const maxDuration = 55;
 
 export async function POST(req: NextRequest) {
-  if (req.headers.get("x-internal-secret") !== process.env.INTERNAL_SECRET) {
+  if (!safeSecretEqual(req.headers.get("x-internal-secret"), process.env.INTERNAL_SECRET)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

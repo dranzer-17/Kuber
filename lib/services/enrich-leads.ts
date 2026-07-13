@@ -144,7 +144,7 @@ export async function enrichLeads(
 
         await db.from("leads").update({
           last_name: match.last_name ?? null,
-          email: match.email ?? null,
+          email: match.email?.toLowerCase() ?? null,
           email_status: match.email_status ?? null,
           headline: match.headline ?? null,
           linkedin_url: match.linkedin_url ?? null,

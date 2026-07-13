@@ -4,6 +4,7 @@ import { complete } from "@/lib/services/llm";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { deriveDomainFromEmail } from "@/lib/utils/domain";
 import { autoAssignEnrichedLeads } from "@/lib/services/assignment";
+import { safeSecretEqual } from "@/lib/auth/secret";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const maxDuration = 55;
@@ -398,7 +399,7 @@ Rules:
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  if (req.headers.get("x-internal-secret") !== process.env.INTERNAL_SECRET) {
+  if (!safeSecretEqual(req.headers.get("x-internal-secret"), process.env.INTERNAL_SECRET)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -1,7 +1,7 @@
-"use client";
-
+import { requireManagerSession } from "@/lib/server/session";
 import { TeamView } from "@/components/app/team-view";
 
-export default function TeamPage() {
+export default async function TeamPage() {
+  await requireManagerSession();
   return <TeamView />;
 }

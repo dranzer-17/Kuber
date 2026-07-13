@@ -5,6 +5,8 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { getInstantlyEmail } from "@/lib/services/instantly";
 import { ingestInstantlyEmail } from "@/lib/services/unibox";
+import { safeSecretEqual } from "@/lib/auth/secret";
+import { findActiveLeadIdByEmail } from "@/lib/services/lead-lookup";
 
 const CRM_BY_EVENT: Record<string, string | undefined> = {
   reply_received:    "replied",
@@ -59,7 +61,7 @@ function stripQuotedText(text: string | null | undefined): string | null {
 export async function POST(req: NextRequest) {
   // 1) Verify shared secret
   const secret = req.headers.get("x-webhook-secret");
-  if (!process.env.INSTANTLY_WEBHOOK_SECRET || secret !== process.env.INSTANTLY_WEBHOOK_SECRET) {
+  if (!safeSecretEqual(secret, process.env.INSTANTLY_WEBHOOK_SECRET)) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
@@ -93,17 +95,13 @@ export async function POST(req: NextRequest) {
   // 4) Resolve campaign_lead via master + lead_email
   let campaignLeadId: string | null = null;
   if (masterId && p.lead_email) {
-    const { data: lead } = await db
-      .from("leads")
-      .select("id")
-      .eq("email", p.lead_email)
-      .maybeSingle();
-    if (lead) {
+    const leadId = await findActiveLeadIdByEmail(db, p.lead_email);
+    if (leadId) {
       const { data: cl } = await db
         .from("campaign_leads")
         .select("id")
         .eq("campaign_id", masterId)
-        .eq("lead_id", lead.id)
+        .eq("lead_id", leadId)
         .maybeSingle();
       if (cl) campaignLeadId = cl.id;
     }
@@ -196,16 +194,19 @@ export async function POST(req: NextRequest) {
 
   // 7) Org-level hard opt-out: unsubscribe blocks the whole org
   if (p.event_type === "lead_unsubscribed" && p.lead_email) {
-    const { data: lead } = await db
-      .from("leads")
-      .select("organization_id")
-      .eq("email", p.lead_email)
-      .maybeSingle();
-    if (lead?.organization_id) {
-      await db
-        .from("organizations")
-        .update({ unsubscribed: true })
-        .eq("id", lead.organization_id);
+    const leadId = await findActiveLeadIdByEmail(db, p.lead_email);
+    if (leadId) {
+      const { data: lead } = await db
+        .from("leads")
+        .select("organization_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      if (lead?.organization_id) {
+        await db
+          .from("organizations")
+          .update({ unsubscribed: true })
+          .eq("id", lead.organization_id);
+      }
     }
   }
 

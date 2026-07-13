@@ -26,7 +26,7 @@ export async function syncApprovedDraftToInstantly(
   const [{ data: campaign }, { data: drafts }] = await Promise.all([
     db.from("campaigns").select("sender_name").eq("id", campaignId).maybeSingle(),
     db.from("email_drafts")
-      .select("step_number, subject, body")
+      .select("step_number, subject, body, version")
       .eq("campaign_id", campaignId)
       .eq("lead_id", leadId)
       .in("status", ["approved", "sent"]),
@@ -34,7 +34,17 @@ export async function syncApprovedDraftToInstantly(
 
   if (!drafts || drafts.length === 0) return { attempted: false, synced: false };
 
-  const customVariables = buildCustomVariables(drafts, campaign?.sender_name);
+  // Keep only the HIGHEST version per step. Without this, approved + sent rows for
+  // the same step coexist and buildCustomVariables lets the last row win — which
+  // could push an OLDER version than the one just approved. (Matches sendCampaign.)
+  const activeByStep = new Map<number, { step_number: number; subject: string | null; body: string | null }>();
+  for (const d of [...drafts].sort((a, b) => (b.version ?? 0) - (a.version ?? 0))) {
+    if (!activeByStep.has(d.step_number)) {
+      activeByStep.set(d.step_number, { step_number: d.step_number, subject: d.subject, body: d.body });
+    }
+  }
+
+  const customVariables = buildCustomVariables([...activeByStep.values()], campaign?.sender_name);
   try {
     await updateInstantlyLeadVariables(cl.instantly_lead_id, customVariables);
     return { attempted: true, synced: true };
