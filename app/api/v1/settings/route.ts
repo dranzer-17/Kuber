@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAuth, requireManager } from "@/lib/auth/api-auth";
+import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchSettingsSchema, SETTINGS_KEYS } from "@/lib/validators/settings";
@@ -23,9 +23,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  // Global config (email template, signatures, product library, generic template, …)
-  // affects every user's campaigns — managers only.
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  // Settings (prompts/email template, signatures, product library, etc.) are
+  // editable by any signed-in user, including employees — business decision.
+  try { await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = PatchSettingsSchema.safeParse(body);

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAuth, requireManager } from "@/lib/auth/api-auth";
+import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  try { await requireAuth(req); } catch (r) { return r as Response; }
 
   const form = await req.formData();
   const file = form.get("file") as File | null;
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  try { await requireAuth(req); } catch (r) { return r as Response; }
 
   const db = createAdminClient();
   const { data, error } = await db
