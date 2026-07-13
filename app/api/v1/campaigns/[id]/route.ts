@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchCampaignSchema } from "@/lib/validators/campaigns";
 import { assertCampaignAccess } from "@/lib/auth/scope";
-import { pauseCampaign } from "@/lib/services/campaign-lifecycle";
+import { deleteCampaignInstantly } from "@/lib/services/campaign-lifecycle";
 
 export const maxDuration = 60;
 
@@ -45,13 +45,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
-  // Stop Instantly from sending BEFORE removing the campaign from the UI — otherwise
-  // a "deleted" campaign keeps emailing (including up-to-90-day follow-ups). Best-effort:
+  // "Delete" means delete: remove the campaign from Instantly (stops all sending AND
+  // takes it out of Instantly's dashboard) before soft-deleting it here. Best-effort:
   // if Instantly is unreachable we still soft-delete, but log so it can be retried.
   try {
-    await pauseCampaign(db, id);
+    await deleteCampaignInstantly(db, id);
   } catch (e) {
-    console.error(`Failed to pause Instantly on delete for campaign ${id}:`, (e as Error).message);
+    console.error(`Failed to delete from Instantly on delete for campaign ${id}:`, (e as Error).message);
   }
 
   const { error } = await db.from("campaigns").update({ is_deleted: true }).eq("id", id);

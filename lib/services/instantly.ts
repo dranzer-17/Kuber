@@ -208,6 +208,18 @@ export async function pauseInstantlyCampaign(instantlyCampaignId: string): Promi
   await iJson<unknown>(res);
 }
 
+/** Permanently delete a campaign from Instantly. 404 = already gone (idempotent). */
+export async function deleteInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
+  const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const data = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(`Instantly delete ${res.status}: ${data.message ?? "failed"}`);
+  }
+}
+
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
 export async function addLeadsToInstantly(
