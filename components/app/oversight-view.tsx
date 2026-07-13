@@ -34,7 +34,7 @@ export function OversightView() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8">
       <div>
-        <h1 className="text-xl font-bold flex items-center gap-2"><Eye className="size-5" /> Oversight</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2"><Eye className="size-5" /> Oversight</h1>
         <p className="text-sm text-muted-foreground mt-1">Which campaigns are running, and which employee owns them.</p>
       </div>
 

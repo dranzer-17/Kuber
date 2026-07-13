@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { emailPreview } from "@/lib/email-display";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
+import { StatTile } from "@/components/ui/stat-tile";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -65,6 +66,7 @@ import {
   type CampaignLeadsSort,
 } from "@/lib/leads";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
+import { EmptyState } from "@/components/ui/empty-state";
 
 /**
  * Strips quoted-reply lines from a stored email plain-text body for display.
@@ -1359,23 +1361,14 @@ export function CampaignDetail({
                   { label: "Hot",        value: analyticsHot,        icon: Flame,          accent: "red" },
                   { label: "Cold",       value: analyticsCold,       icon: Snowflake,      accent: "sky" },
                 ].map(({ label, value, icon: Icon, accent, sub }) => (
-                  <div key={label} className="rounded-xl border border-border bg-card p-3 flex flex-col gap-2">
-                    <div
-                      className={cn(
-                        "size-7 rounded-lg flex items-center justify-center border",
-                        accent === "red" ? "bg-red-500/10 border-red-500/20 text-red-400"
-                        : accent === "sky" ? "bg-sky-500/10 border-sky-500/20 text-sky-400"
-                        : "bg-primary/10 border-primary/20 text-primary",
-                      )}
-                    >
-                      <Icon className="size-3.5" />
-                    </div>
-                    <div>
-                      <p className="text-xl font-bold tabular-nums leading-tight">{value}</p>
-                      <p className="text-[10px] text-muted-foreground">{label}</p>
-                      {sub && <p className="text-[9px] text-muted-foreground/60 mt-0.5">{sub}</p>}
-                    </div>
-                  </div>
+                  <StatTile
+                    key={label}
+                    label={label}
+                    value={value}
+                    icon={Icon}
+                    sub={sub}
+                    tone={accent === "red" ? "red" : accent === "sky" ? "sky" : "neutral"}
+                  />
                 ))}
               </div>
 
@@ -1643,9 +1636,7 @@ export function CampaignDetail({
                   ))}
                 </div>
               ) : filteredLeads.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card shadow-sm py-16 text-center text-sm text-muted-foreground">
-                  {leadsSearch ? "No leads match your search." : "No leads yet."}
-                </div>
+                <EmptyState message={leadsSearch ? "No leads match your search." : "No leads yet."} />
               ) : (
                 <div className="block w-full rounded-xl border border-border bg-card shadow-sm overflow-x-auto overflow-y-hidden">
                 <table className="w-full text-sm border-collapse">
@@ -1752,7 +1743,7 @@ export function CampaignDetail({
             <div className="border-b border-border shrink-0">
               <div className="px-3 pt-2 flex items-center gap-1.5">
                 <Select value={outboxFilter} onValueChange={(v) => setOutboxFilter(v as typeof outboxFilter)}>
-                  <SelectTrigger className="h-7 flex-1 min-w-0 gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
+                  <SelectTrigger className="h-7 flex-1 min-w-0 gap-1.5 rounded-md border-border px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1762,7 +1753,7 @@ export function CampaignDetail({
                   </SelectContent>
                 </Select>
                 <Select value={leadsSort} onValueChange={(v) => setLeadsSort(v as CampaignLeadsSort)}>
-                  <SelectTrigger className="h-7 w-auto shrink-0 gap-1.5 rounded-md border-border bg-secondary/30 px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
+                  <SelectTrigger className="h-7 w-auto shrink-0 gap-1.5 rounded-md border-border px-2 py-0 text-[11px] font-medium text-foreground [&>svg]:size-3 [&>svg]:opacity-70">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -2025,12 +2016,12 @@ export function CampaignDetail({
 
                 {/* Initial email — editor while pending, bubble once sent */}
                 {selected.email_drafts?.status === "generating" || regenerating ? (
-                  <div className="max-w-2xl mx-auto flex flex-col items-center py-20 gap-3 rounded-lg border border-border bg-card">
+                  <div className="max-w-2xl mx-auto flex flex-col items-center py-20 gap-3 rounded-xl border border-border bg-card">
                     <Loader2 className="size-6 text-muted-foreground animate-spin" />
                     <p className="text-sm text-muted-foreground">Generating personalised email…</p>
                   </div>
                 ) : selected.email_drafts && selected.email_drafts.status !== "sent" ? (
-                  <div className="max-w-2xl mx-auto rounded-lg border border-border bg-card p-5 space-y-4">
+                  <div className="max-w-2xl mx-auto rounded-xl border border-border bg-card p-5 space-y-4">
                     <div className="space-y-1.5">
                       <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
                       <Input
@@ -2156,7 +2147,7 @@ export function CampaignDetail({
 
                     {/* Version history */}
                     {historyOpen && versions.length > 1 && (
-                      <div className="space-y-2 rounded-lg border border-border bg-secondary/20 p-3">
+                      <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
                         <div className="flex flex-wrap gap-2">
                           {versions.map((v) => (
                             <button
@@ -2227,9 +2218,7 @@ export function CampaignDetail({
                     ))}
                   </div>
                 ) : (
-                  <div className="max-w-2xl mx-auto rounded-lg border border-border bg-card p-12 text-center">
-                    <p className="text-sm text-muted-foreground">No draft available for this lead.</p>
-                  </div>
+                  <EmptyState message="No draft available for this lead." className="max-w-2xl mx-auto" />
                 )}
 
                 {/* Reply — AI-generated draft (with manual rich-text edit) for the latest inbound message */}
@@ -2377,24 +2366,27 @@ export function CampaignDetail({
                   </div>
                   {seqHasContent && (
                     <div className="flex items-center gap-2">
-                      <button
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="sm"
                         onClick={() => setSeqRegenOpen((o) => !o)}
                         disabled={seqRegenerating}
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 disabled:opacity-60 transition-colors"
+                        className="h-7 gap-1.5 px-3 text-xs text-muted-foreground hover:text-foreground [&_svg]:size-3"
                       >
-                        <RotateCcw className="size-3" />
+                        <RotateCcw />
                         Regenerate
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
+                        size="sm"
                         disabled={seqStepSaving || seqRegenerating}
                         onClick={() => void handleSaveSeqDraft()}
-                        className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
+                        className="h-7 gap-1.5 px-3 text-xs [&_svg]:size-3"
                       >
-                        {seqStepSaving ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                        {seqStepSaving ? <Loader2 className="animate-spin" /> : <Save />}
                         Save
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>

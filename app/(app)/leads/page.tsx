@@ -1,6 +1,8 @@
 "use client";
 
 import { bulkDeleteLeads, fetchImports, type ImportBatch } from "@/lib/api-client";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { getBatchColor } from "@/lib/constants";
 
 import { useRef, useEffect, useState } from "react";
@@ -50,7 +52,7 @@ import {
 } from "@/components/ui/pagination";
 import {
   Users, Megaphone, Plus, List, Kanban, RefreshCw, Columns3, Check,
-  Search, Building2, SlidersHorizontal, X, Trash2, AlertTriangle,
+  Search, Building2, SlidersHorizontal, X, Trash2,
 } from "lucide-react";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
@@ -801,7 +803,7 @@ export default function LeadsPage() {
           </div>
           <div className="ml-auto flex items-center gap-3">
             <Select value={leadsSort} onValueChange={(value) => setLeadsSort(value as LeadsSort)}>
-              <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border bg-background/80 px-3 text-xs shadow-sm">
+              <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border px-3 text-xs shadow-sm">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent align="end" className="min-w-36">
@@ -896,8 +898,8 @@ export default function LeadsPage() {
                   <TableBody>
                     {orgRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-sm text-muted-foreground">
-                          No organizations found. Add leads with a domain to populate this view.
+                        <TableCell colSpan={6} className="p-0">
+                          <EmptyState boxed={false} message="No organizations found. Add leads with a domain to populate this view." />
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -978,8 +980,11 @@ export default function LeadsPage() {
               <TableBody>
                 {pagedLeads.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-center py-12 text-sm text-muted-foreground">
-                      {searchQuery ? `No leads match "${searchQuery}".` : "No leads yet. Click \"Add leads\" to get started."}
+                    <TableCell colSpan={13} className="p-0">
+                      <EmptyState
+                        boxed={false}
+                        message={searchQuery ? `No leads match "${searchQuery}".` : "No leads yet. Click \"Add leads\" to get started."}
+                      />
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1118,54 +1123,28 @@ export default function LeadsPage() {
       )}
 
       {/* Bulk delete confirmation modal */}
-      {showBulkDelete && (
-        <div className="fixed inset-0 z-200 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!bulkDeleting) setShowBulkDelete(false); }} />
-          <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
-            <div className="flex items-start gap-4">
-              <div className="shrink-0 size-10 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center">
-                <AlertTriangle className="size-5 text-red-400" />
-              </div>
-              <div>
-                <p className="font-semibold text-sm">Delete {checkedIds.size} lead{checkedIds.size !== 1 ? "s" : ""}?</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">This will permanently remove the selected leads. This cannot be undone.</p>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowBulkDelete(false)}
-                disabled={bulkDeleting}
-                className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={bulkDeleting || !session}
-                onClick={async () => {
-                  if (!session) return;
-                  setBulkDeleting(true);
-                  try {
-                    await bulkDeleteLeads(session.access_token, [...checkedIds]);
-                    setCheckedIds(new Set());
-                    setShowBulkDelete(false);
-                    void loadLeads(session.access_token);
-                  } catch (e) {
-                    console.error("Bulk delete failed:", e);
-                  } finally {
-                    setBulkDeleting(false);
-                  }
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center gap-2"
-              >
-                {bulkDeleting ? <RefreshCw className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={showBulkDelete}
+        title={`Delete ${checkedIds.size} lead${checkedIds.size !== 1 ? "s" : ""}?`}
+        description="This will permanently remove the selected leads. This cannot be undone."
+        loading={bulkDeleting}
+        confirmDisabled={!session}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={async () => {
+          if (!session) return;
+          setBulkDeleting(true);
+          try {
+            await bulkDeleteLeads(session.access_token, [...checkedIds]);
+            setCheckedIds(new Set());
+            setShowBulkDelete(false);
+            void loadLeads(session.access_token);
+          } catch (e) {
+            console.error("Bulk delete failed:", e);
+          } finally {
+            setBulkDeleting(false);
+          }
+        }}
+      />
     </div>
   );
 }

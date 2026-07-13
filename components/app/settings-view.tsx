@@ -120,7 +120,7 @@ function RichTextEditor({
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <div className="overflow-hidden rounded-lg border border-border bg-background shadow-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center gap-1 border-b border-border bg-secondary/20 p-1.5">
           <span className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground">
             <Type className="size-3.5" /> Compose
@@ -180,6 +180,13 @@ export function SettingsView() {
 
   const activeAiNavItem        = AI_NAV_ITEMS.find((i) => i.id === aiSection);
   const activeKnowledgeNavItem = KNOWLEDGE_NAV_ITEMS.find((i) => i.id === knowledgeSection);
+
+  // The breadcrumb shows the ancestor trail; the deepest active item becomes the page title.
+  const sectionLabel = NAV_ITEMS.find((n) => n.id === section)?.label ?? "Settings";
+  const pageTitle =
+    (section === "ai" && activeAiNavItem?.label) ||
+    (section === "knowledge" && activeKnowledgeNavItem?.label) ||
+    sectionLabel;
 
   useEffect(() => {
     async function load() {
@@ -299,7 +306,7 @@ export function SettingsView() {
           <div className="h-9 bg-secondary rounded-lg" />
         </div>
       </div>
-      <div className="rounded-xl border border-border bg-secondary/20 p-6 h-24" />
+      <div className="rounded-xl border border-border bg-card p-6 h-24" />
     </div>
   ) : null;
 
@@ -313,19 +320,15 @@ export function SettingsView() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Breadcrumb */}
+      {/* Breadcrumb + page title */}
       <div className="px-8 py-5 border-b border-border shrink-0">
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <span>Settings</span>
-          <ChevronRight className="size-3.5" />
-          <span className="text-foreground font-medium">{NAV_ITEMS.find((n) => n.id === section)?.label}</span>
-          {section === "ai" && activeAiNavItem && (
-            <><ChevronRight className="size-3.5" /><span className="text-foreground font-medium">{activeAiNavItem.label}</span></>
-          )}
-          {section === "knowledge" && activeKnowledgeNavItem && (
-            <><ChevronRight className="size-3.5" /><span className="text-foreground font-medium">{activeKnowledgeNavItem.label}</span></>
+          {sectionLabel !== pageTitle && (
+            <><ChevronRight className="size-3" /><span>{sectionLabel}</span></>
           )}
         </div>
+        <h1 className="text-2xl font-bold mt-1">{pageTitle}</h1>
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -493,7 +496,7 @@ export function SettingsView() {
                       </div>
 
                       {/* Logo */}
-                      <div className="rounded-lg border border-border bg-secondary/10 p-4">
+                      <div className="rounded-lg border border-border bg-secondary/30 p-4">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold">Logo</p>

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { AlertCircle, Check, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { badgeVariants } from "@/components/ui/badge";
+import { StatTile } from "@/components/ui/stat-tile";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -92,11 +94,11 @@ export function TagInput({
         {tip && <InfoTip text={tip} side="right" />}
       </div>
       <div
-        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-transparent px-3 py-2 cursor-text focus-within:ring-1 focus-within:ring-ring focus-within:border-transparent transition-shadow"
+        className="relative min-h-9 flex flex-wrap gap-1.5 items-center rounded-md border border-input bg-card px-3 py-2 cursor-text focus-within:ring-1 focus-within:ring-ring focus-within:border-transparent transition-shadow"
         onClick={() => !maxReached && inputRef.current?.focus()}
       >
         {pills.map((p) => (
-          <span key={p} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-xs font-medium text-primary">
+          <span key={p} className={cn(badgeVariants({ variant: "selected" }), "gap-1 px-2")}>
             {p}
             <button type="button" onClick={(e) => { e.stopPropagation(); remove(p); }} className="hover:text-destructive transition-colors">
               <X className="size-2.5" />
@@ -169,7 +171,7 @@ function BatchNameField({
   }, []);
 
   return (
-    <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+    <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Batch</p>
       <div className="flex items-end gap-3">
         <div className="flex-1 min-w-0 space-y-1">
@@ -457,14 +459,15 @@ function IndustryKeywordsDropdown({
                   placeholder="e.g. masterbatch manufacturer…"
                   className="flex-1 bg-transparent text-xs border border-input rounded-md px-3 py-1.5 outline-none focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
                 />
-                <button
+                <Button
                   type="button"
+                  size="sm"
                   onClick={addCustomKeyword}
                   disabled={!customInput.trim() || selected.includes(customInput.trim())}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors shrink-0"
+                  className="h-auto shrink-0 gap-1 px-3 py-1.5 text-xs [&_svg]:size-3"
                 >
-                  <Plus className="size-3" /> Add
-                </button>
+                  <Plus /> Add
+                </Button>
               </div>
             </div>
 
@@ -486,7 +489,7 @@ function IndustryKeywordsDropdown({
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 pt-1">
           {selected.map((kw) => (
-            <span key={kw} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-[10px] font-medium text-primary">
+            <span key={kw} className={cn(badgeVariants({ variant: "selected" }), "gap-1 px-2")}>
               {kw}
               <button type="button" onClick={() => toggleKw(kw)} className="hover:text-destructive transition-colors">
                 <X className="size-2.5" />
@@ -661,9 +664,9 @@ function LocationsDropdown({
       {selected.length > 0 && (
         <div className="flex flex-wrap gap-1 pt-1">
           {selected.map((c) => (
-            <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-primary/15 border-primary/30 text-[10px] font-medium text-primary">
+            <span key={c} className={cn(badgeVariants({ variant: "selected" }), "gap-1 px-2")}>
               {c}
-              <button type="button" onClick={() => toggleCountry(c)} className="hover:opacity-70 transition-opacity">
+              <button type="button" onClick={() => toggleCountry(c)} className="hover:text-destructive transition-colors">
                 <X className="size-2.5" />
               </button>
             </span>
@@ -771,8 +774,8 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
               <button
                 key={s} type="button" onClick={() => toggleSen(s)}
                 className={cn(
-                  "px-2.5 py-1 text-xs rounded-full border transition-colors",
-                  seniorities.includes(s) ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-foreground",
+                  badgeVariants({ variant: seniorities.includes(s) ? "selected" : "unselected" }),
+                  "py-1",
                 )}
               >
                 {s.replace("_", " ")}
@@ -1084,14 +1087,11 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
       </div>
       <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Duplicates removed",   value: (result?.skipped_duplicate_in_file ?? 0) + (result?.skipped_duplicate_in_db ?? 0), accent: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
-          { label: "Blank emails skipped", value: result?.skipped_blank_email,   accent: "text-zinc-400", bg: "bg-zinc-500/10",  border: "border-zinc-500/20"  },
-          { label: "Invalid format",       value: result?.skipped_invalid_email, accent: "text-red-400",  bg: "bg-red-500/10",   border: "border-red-500/20"   },
-        ].map(({ label, value, accent, bg, border }) => (
-          <div key={label} className={cn("rounded-lg border px-3 py-3 text-center", bg, border)}>
-            <p className={cn("text-xl font-bold tabular-nums", accent)}>{value ?? 0}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">{label}</p>
-          </div>
+          { label: "Duplicates removed",   value: (result?.skipped_duplicate_in_file ?? 0) + (result?.skipped_duplicate_in_db ?? 0), tone: "amber" as const },
+          { label: "Blank emails skipped", value: result?.skipped_blank_email,   tone: "zinc" as const },
+          { label: "Invalid format",       value: result?.skipped_invalid_email, tone: "red" as const },
+        ].map(({ label, value, tone }) => (
+          <StatTile key={label} label={label} value={value ?? 0} tone={tone} />
         ))}
       </div>
       <Button variant="outline" onClick={reset}>Upload another file</Button>
@@ -1227,7 +1227,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       </p>
 
       {/* Org */}
-      <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-4">
+      <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-4">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Organization</p>
         <div className="space-y-1.5">
           <Label>Organization name <span className="text-destructive">*</span></Label>
@@ -1252,7 +1252,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       <div className="space-y-3">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">People</p>
         {leads.map((lead, index) => (
-          <div key={index} className="rounded-xl border border-border bg-card p-4 space-y-3 relative">
+          <div key={index} className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3 relative">
             {leads.length > 1 && (
               <button type="button" onClick={() => removeLead(index)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors" aria-label="Remove lead">
                 <X className="size-4" />

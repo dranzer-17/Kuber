@@ -70,6 +70,7 @@ export function LoginForm() {
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 aria-label={showPwd ? "Hide password" : "Show password"}
                 disabled={isPending}
+                suppressHydrationWarning
               >
                 {showPwd ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
@@ -78,7 +79,7 @@ export function LoginForm() {
           {state.error && (
             <p className="text-xs text-destructive font-mono">{state.error}</p>
           )}
-          <Button type="submit" disabled={isPending} className="w-full">
+          <Button type="submit" disabled={isPending} className="w-full" suppressHydrationWarning>
             {isPending ? "Signing in..." : "Sign in"}
           </Button>
         </form>

@@ -6,7 +6,9 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import { deleteCampaign } from "@/lib/api-client";
 import type { Campaign } from "@/components/app/create-campaign-modal";
-import { Search, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
+import { Search, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type CampaignStatus = "Draft" | "Live" | "Paused";
 
@@ -15,42 +17,6 @@ const CAMPAIGN_STATUS_STYLES: Record<string, { badge: string; dot: string }> = {
   Live:   { badge: "bg-green-500/15 text-green-400 border-green-500/25", dot: "bg-green-400" },
   Paused: { badge: "bg-amber-500/15 text-amber-400 border-amber-500/25", dot: "bg-amber-400" },
 };
-
-function DeleteConfirmModal({
-  open, title, description, loading, onClose, onConfirm,
-}: {
-  open: boolean; title: string; description: string; loading?: boolean;
-  onClose: () => void; onConfirm: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
-        <div className="flex items-start gap-4">
-          <div className="shrink-0 size-10 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center">
-            <AlertTriangle className="size-5 text-red-400" />
-          </div>
-          <div>
-            <p className="font-semibold text-sm">{title}</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
-            Cancel
-          </button>
-          <button type="button" onClick={onConfirm} disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center gap-2">
-            {loading ? <RefreshCw className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campaign[] }) {
   const router = useRouter();
@@ -123,13 +89,13 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-border bg-card p-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            {list.length === 0
+        <EmptyState
+          message={
+            list.length === 0
               ? "No campaigns yet. Create one to start sending outreach emails."
-              : "No campaigns match your filters."}
-          </p>
-        </div>
+              : "No campaigns match your filters."
+          }
+        />
       ) : (
         <div className="space-y-2">
           {filtered.map((c) => {
@@ -196,7 +162,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
         </div>
       )}
 
-      <DeleteConfirmModal
+      <ConfirmDialog
         open={!!deletingCampaign}
         title={`Delete "${deletingCampaign?.name}"?`}
         description="This will permanently delete the campaign and all its leads, drafts, and send history. This cannot be undone."

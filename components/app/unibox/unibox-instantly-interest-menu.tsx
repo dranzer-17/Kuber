@@ -57,7 +57,7 @@ export function UniboxInstantlyInterestMenu({ interestStatus, onChange, disabled
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search…"
-            className="w-full h-7 px-2 rounded-md border border-border bg-background text-xs"
+            className="w-full h-7 px-2 rounded-md border border-border bg-card text-xs"
           />
         </div>
         <div className="max-h-56 overflow-y-auto p-1.5 space-y-0.5">

@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { BarChart2, CheckCircle2, Loader2, RotateCcw, Send, Users, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { StatTile } from "@/components/ui/stat-tile";
 
 const DONUT_COLORS = ["#71717a", "#3b82f6", "#06b6d4", "#14b8a6", "#ef4444"];
 
@@ -136,10 +137,7 @@ export function CampaignReportView({
             { label: "Succeeded", value: draftGeneration.succeeded },
             { label: "Failed", value: draftGeneration.failed, red: true },
           ].map(({ label, value, red }) => (
-            <div key={label} className="text-center rounded-lg border border-border bg-secondary/20 py-3 px-2">
-              <p className={cn("text-2xl font-bold tabular-nums", red && value > 0 && "text-red-400")}>{value}</p>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">{label}</p>
-            </div>
+            <StatTile key={label} label={label} value={value} tone={red && value > 0 ? "red" : "neutral"} />
           ))}
         </div>
 

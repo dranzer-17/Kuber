@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Avatar } from "@/components/leads/lead-ui";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type Props = {
   messages: UniboxMessage[];
@@ -215,7 +216,7 @@ function ManualReplyEditor({
         </button>
       </div>
       <div className="p-4 space-y-3">
-        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm bg-background/60" />
+        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm" />
         <RichTextEditor value={body} onChange={setBody} placeholder="Write your reply…" minHeight={120} />
         <div className="flex justify-end">
           <Button size="sm" disabled={sending} onClick={() => void handleSend()} className="gap-1.5">
@@ -290,7 +291,7 @@ export function UniboxThreadView({
   if (messages.length === 0) {
     return (
       <div className="p-6">
-        <p className="text-sm text-muted-foreground text-center py-12">No messages in this thread yet.</p>
+        <EmptyState boxed={false} message="No messages in this thread yet." />
       </div>
     );
   }

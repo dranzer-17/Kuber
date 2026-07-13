@@ -179,7 +179,7 @@ export function RichTextEditor({
   if (!editor) return null;
 
   return (
-    <div className={cn("rounded-lg border border-border bg-background overflow-hidden", className)}>
+    <div className={cn("rounded-lg border border-border bg-card overflow-hidden", className)}>
       {/* Toolbar */}
       <div className={cn(
         "flex items-center gap-0.5 border-b border-border px-2 py-1.5 flex-wrap",

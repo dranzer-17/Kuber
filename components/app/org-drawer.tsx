@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/ui/empty-state";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ function Section({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+    <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
           <Icon className="size-3" /> {label}
@@ -406,7 +407,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                     ) : undefined}
                   >
                     {(org.leads ?? []).length === 0 ? (
-                      <p className="text-sm text-muted-foreground italic">No leads linked to this org.</p>
+                      <EmptyState boxed={false} message="No leads linked to this org." className="py-6" />
                     ) : (
                       <div className="space-y-2">
                         {(org.leads ?? []).map((lead) => (

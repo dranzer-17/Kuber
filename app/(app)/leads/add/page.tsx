@@ -85,7 +85,7 @@ export default function AddLeadsPage() {
           <ArrowLeft className="size-4" />
         </button>
         <div>
-          <h1 className="text-base font-bold">Add Leads</h1>
+          <h1 className="text-2xl font-bold">Add Leads</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
             Source leads via Apollo search, Excel/CSV upload, or manual entry.
           </p>

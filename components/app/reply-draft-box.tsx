@@ -194,7 +194,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
         </Button>
       </div>
       <div className="p-4 space-y-3">
-        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm font-medium bg-background/60" />
+        <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm font-medium" />
         <RichTextEditor value={body} onChange={setBody} minHeight={180} />
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -239,7 +239,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
         </div>
 
         {regenOpen && (
-          <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
             <Input
               value={regenQuery}
               onChange={(e) => setRegenQuery(e.target.value)}

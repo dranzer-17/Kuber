@@ -72,7 +72,7 @@ function Section({
   icon: Icon, label, children,
 }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-1.5">
+    <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-1.5">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         <Icon className="size-3" /> {label}
       </div>
@@ -462,7 +462,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   type="button"
                   onClick={() => display.orgId && onOrgClick?.(display.orgId)}
                   disabled={!display.orgId || !onOrgClick}
-                  className="w-full text-left rounded-xl border border-border bg-secondary/20 p-4 hover:border-muted-foreground/50 hover:bg-secondary/40 transition-colors group disabled:cursor-default disabled:hover:border-border disabled:hover:bg-secondary/20"
+                  className="w-full text-left rounded-xl border border-border bg-secondary/30 p-4 hover:border-muted-foreground/50 hover:bg-secondary/50 transition-colors group disabled:cursor-default disabled:hover:border-border disabled:hover:bg-secondary/30"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">

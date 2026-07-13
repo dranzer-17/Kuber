@@ -49,7 +49,7 @@ function DayPill({ day, active, onClick }: { day: string; active: boolean; onCli
 function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-9 w-32 bg-background tabular-nums">
+      <SelectTrigger className="h-9 w-32 tabular-nums">
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="center" className="min-w-32 max-h-56">
@@ -178,7 +178,7 @@ export function EditCampaignForm({
           ) : null}
           <div
             className={cn(
-              "flex items-center rounded-lg border border-border bg-background",
+              "flex items-center rounded-lg border border-border bg-secondary/30",
               isPage ? "w-fit gap-1 px-2 py-1.5" : "w-full flex-1 min-w-0 gap-1.5 px-3 py-2",
             )}
           >
@@ -258,7 +258,7 @@ export function EditCampaignForm({
             <div className={fieldBlock}>
               <Label className="text-sm font-medium">Sender name</Label>
               <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
-              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" className="bg-background" />
+              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
             </div>
 
             <div className={cn(fieldBlock, "flex flex-1 flex-col")}>
@@ -290,7 +290,7 @@ export function EditCampaignForm({
                   max={500}
                   value={dailyLimit}
                   onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                  className="h-9 w-24 text-center bg-background"
+                  className="h-9 w-24 text-center"
                 />
               </div>
 
@@ -374,7 +374,7 @@ export function EditCampaignForm({
         />
       </div>
 
-      <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden">
+      <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden">
         <div className="grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0">
 
           {/* Daily limit */}
@@ -419,7 +419,7 @@ export function EditCampaignForm({
               <p className="text-sm font-medium leading-none">Timezone</p>
             </div>
             <Select value={timezone} onValueChange={setTimezone}>
-              <SelectTrigger className="h-9 w-full sm:w-45 bg-background">
+              <SelectTrigger className="h-9 w-full sm:w-45">
                 <SelectValue placeholder="Select timezone" />
               </SelectTrigger>
               <SelectContent align="start" className="min-w-45">
@@ -491,7 +491,7 @@ export function EditCampaignModal({
 }) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-3xl overflow-hidden border-border bg-background p-0 shadow-2xl">
+      <DialogContent className="max-w-3xl overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
           <p className="text-xs text-muted-foreground mb-1">Editing · {campaign.name}</p>
           <DialogTitle className="text-xl">Edit campaign</DialogTitle>

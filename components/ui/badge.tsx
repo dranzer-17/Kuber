@@ -15,6 +15,11 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
+        /** A chosen value — selected filter chips, removable tokens, active toggles. */
+        selected: "border-primary/30 bg-primary/15 text-primary",
+        /** The unselected half of a toggle pair; pairs with `selected`. */
+        unselected:
+          "border-border text-muted-foreground hover:border-foreground hover:text-foreground",
       },
     },
     defaultVariants: {

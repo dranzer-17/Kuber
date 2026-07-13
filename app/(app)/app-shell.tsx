@@ -6,8 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings, Inbox,
-  RefreshCw, Trash2, AlertTriangle, Menu, Eye, UserCog,
+  Menu, Eye, UserCog,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useApp } from "@/lib/app-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { APP_LOGO_INITIAL, APP_NAME } from "@/lib/branding";
@@ -32,42 +33,6 @@ const AddLeadsDrawer = dynamic(
   () => import("@/components/app/add-leads-drawer").then((m) => m.AddLeadsDrawer),
   { ssr: false },
 );
-
-function DeleteConfirmModal({
-  open, title, description, loading, onClose, onConfirm,
-}: {
-  open: boolean; title: string; description: string; loading?: boolean;
-  onClose: () => void; onConfirm: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
-        <div className="flex items-start gap-4">
-          <div className="shrink-0 size-10 rounded-full bg-red-500/15 border border-red-500/25 flex items-center justify-center">
-            <AlertTriangle className="size-5 text-red-400" />
-          </div>
-          <div>
-            <p className="font-semibold text-sm">{title}</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50">
-            Cancel
-          </button>
-          <button type="button" onClick={onConfirm} disabled={loading}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 flex items-center gap-2">
-            {loading ? <RefreshCw className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const SIDEBAR_COLLAPSED_KEY = "kuber_sidebar_collapsed";
 
@@ -273,7 +238,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
-      <DeleteConfirmModal
+      <ConfirmDialog
         open={!!deletingLead}
         title={`Delete ${deletingLead ? `${deletingLead.firstName} ${deletingLead.lastName}`.trim() : "lead"}?`}
         description="This will permanently remove the lead and all associated data. This cannot be undone."

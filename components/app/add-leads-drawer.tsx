@@ -72,22 +72,20 @@ export function AddLeadsDrawer({
               <TabsTrigger value="excel">Excel / CSV</TabsTrigger>
               <TabsTrigger value="manual">Manual Entry</TabsTrigger>
             </TabsList>
-            <div className="rounded-xl border border-border bg-secondary/20 p-5">
-              <TabsContent value="apollo" className="mt-0">
-                <ApolloForm onImport={handleImport} />
-              </TabsContent>
-              <TabsContent value="excel" className="mt-0">
-                <ExcelForm onImport={handleImport} />
-              </TabsContent>
-              <TabsContent value="manual" className="mt-0">
-                <ManualForm
-                  onImport={handleImport}
-                  prefillOrg={prefillOrg ? { ...prefillOrg, id: prefillOrg.id } : undefined}
-                  prefillLeads={prefillLeads}
-                  editMode={editMode}
-                />
-              </TabsContent>
-            </div>
+            <TabsContent value="apollo" className="mt-0">
+              <ApolloForm onImport={handleImport} />
+            </TabsContent>
+            <TabsContent value="excel" className="mt-0">
+              <ExcelForm onImport={handleImport} />
+            </TabsContent>
+            <TabsContent value="manual" className="mt-0">
+              <ManualForm
+                onImport={handleImport}
+                prefillOrg={prefillOrg ? { ...prefillOrg, id: prefillOrg.id } : undefined}
+                prefillLeads={prefillLeads}
+                editMode={editMode}
+              />
+            </TabsContent>
           </Tabs>
         </div>
       </div>

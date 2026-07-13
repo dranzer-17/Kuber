@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { getBatchColor } from "@/lib/constants";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import type { ImportBatch } from "@/lib/api-client";
+import { EmptyState } from "@/components/ui/empty-state";
 
 // ─── Chart helpers ────────────────────────────────────────────────────────────
 
@@ -187,9 +188,11 @@ export function DashboardView({
             </div>
           </div>
           {stageDonutData.length === 0 ? (
-            <div className="h-[180px] flex items-center justify-center text-xs text-muted-foreground">
-              No leads yet — add some to see the distribution
-            </div>
+            <EmptyState
+              boxed={false}
+              message="No leads yet — add some to see the distribution"
+              className="h-[180px] py-0"
+            />
           ) : (
             <div className="flex items-center gap-6">
               <div className="shrink-0">

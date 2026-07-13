@@ -81,7 +81,7 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
 function TimeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="h-9 w-32 bg-transparent tabular-nums">
+      <SelectTrigger className="h-9 w-32 tabular-nums">
         <SelectValue placeholder="Select time" />
       </SelectTrigger>
       <SelectContent align="center" className="min-w-32 max-h-56">
@@ -251,7 +251,7 @@ export function CreateCampaignModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="max-w-3xl overflow-hidden border-border bg-background p-0 shadow-2xl">
+      <DialogContent className="max-w-3xl overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
           <p className="text-xs text-muted-foreground mb-1">
             New Campaign · {leads.length} lead{leads.length !== 1 ? "s" : ""} ready for outreach
@@ -282,7 +282,7 @@ export function CreateCampaignModal({
             />
           </div>
 
-          <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden">
+          <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="flex items-start gap-2">
                 <div>
@@ -295,7 +295,7 @@ export function CreateCampaignModal({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card/60 shadow-sm overflow-hidden divide-y divide-border">
+          <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden divide-y divide-border">
             <div className="flex items-center justify-between gap-4 px-5 py-4">
               <div className="flex items-center gap-2.5">
                 <Clock className="size-4 text-muted-foreground shrink-0" />
@@ -328,7 +328,7 @@ export function CreateCampaignModal({
                   </button>
                 ) : (
                   <Select value={timezone} onValueChange={setTimezone}>
-                    <SelectTrigger className="h-9 w-45 bg-transparent">
+                    <SelectTrigger className="h-9 w-45">
                       <SelectValue placeholder="Select timezone" />
                     </SelectTrigger>
                     <SelectContent align="end" className="min-w-45">
@@ -392,7 +392,7 @@ export function CreateCampaignModal({
               </div>
               <div className="space-y-2">
                 {followupSteps.map((step, idx) => (
-                  <div key={idx} className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                  <div key={idx} className="flex items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2">
                     <span className="text-xs text-muted-foreground shrink-0 w-24">Follow-up {idx + 1} after</span>
                     <Input
                       type="number"
@@ -452,7 +452,7 @@ export function CreateCampaignModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
             <div className="flex items-start gap-2">
               <Paperclip className="size-4 text-muted-foreground mt-0.5" />
               <div>
@@ -481,7 +481,7 @@ export function CreateCampaignModal({
               </>
             ) : (
               <div className="space-y-2">
-                <div className="flex items-center justify-between rounded-lg border border-border bg-background p-2.5">
+                <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/30 p-2.5">
                   <div className="flex items-center gap-2 min-w-0">
                     <FileText className="size-4 text-muted-foreground shrink-0" />
                     <span className="text-sm truncate">{attachment.attachment_name}</span>

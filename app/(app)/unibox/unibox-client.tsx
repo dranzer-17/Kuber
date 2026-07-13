@@ -200,7 +200,7 @@ export function UniboxClient() {
     <div className="flex flex-col h-full">
       <div className="border-b border-border px-6 py-3 flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-lg font-semibold">Unibox</h1>
+          <h1 className="text-2xl font-bold">Unibox</h1>
           <p className="text-xs text-muted-foreground">All conversations across campaigns and inboxes</p>
         </div>
         <div className="flex items-center gap-2">

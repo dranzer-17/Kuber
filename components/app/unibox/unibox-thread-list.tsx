@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { UniboxThreadSummary } from "@/lib/api-client";
 import type { UniboxInterestFilter, UniboxReadStateFilter } from "@/components/app/unibox/unibox-status-filter";
 import { hasActiveUniboxFilters, UniboxFiltersPanel } from "@/components/app/unibox/unibox-filters";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type Props = {
   threads: UniboxThreadSummary[];
@@ -97,9 +98,7 @@ export function UniboxThreadList({
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
           ) : threads.length === 0 ? (
-            <div className="rounded-xl border border-border bg-card shadow-sm py-16 text-center text-sm text-muted-foreground">
-              No conversations match your filters.
-            </div>
+            <EmptyState message="No conversations match your filters." />
           ) : (
             <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden divide-y divide-border">
               {threads.map((t) => {

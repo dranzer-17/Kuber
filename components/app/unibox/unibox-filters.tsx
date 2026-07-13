@@ -41,7 +41,7 @@ function FilterDropdown({
         <button
           type="button"
           onClick={onToggle}
-          className="w-full flex items-center justify-between gap-2 h-9 px-3.5 rounded-lg border border-border bg-background text-sm hover:bg-secondary/40 transition-colors"
+          className="w-full flex items-center justify-between gap-2 h-9 px-3.5 rounded-lg border border-border bg-card text-sm hover:bg-secondary/40 transition-colors"
         >
           <span className="truncate text-foreground/80">{summary}</span>
           <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} />
@@ -174,7 +174,7 @@ export function UniboxFiltersPanel({
               value={campaignSearch}
               onChange={(e) => setCampaignSearch(e.target.value)}
               placeholder="Search campaigns…"
-              className="w-full h-8 px-2.5 rounded-md border border-border bg-background text-xs"
+              className="w-full h-8 px-2.5 rounded-md border border-border bg-card text-xs"
             />
           </div>
           <div className="px-2 space-y-0.5 max-h-48 overflow-y-auto">
@@ -208,7 +208,7 @@ export function UniboxFiltersPanel({
               value={inboxSearch}
               onChange={(e) => setInboxSearch(e.target.value)}
               placeholder="Search inboxes…"
-              className="w-full h-8 px-2.5 rounded-md border border-border bg-background text-xs"
+              className="w-full h-8 px-2.5 rounded-md border border-border bg-card text-xs"
             />
           </div>
           <div className="px-2 space-y-0.5 pb-1 max-h-48 overflow-y-auto">
