@@ -452,6 +452,7 @@ export async function POST(req: NextRequest) {
   }).in("id", orgIds);
 
   // ── Step 3: Process each org sequentially ─────────────────────────────────
+  const failedOrgIds: string[] = [];
   for (const org of orgs) {
     processed++;
     const beforeStage = "queued";
@@ -467,13 +468,22 @@ export async function POST(req: NextRequest) {
           .eq("id", org.id)
           .single();
         if (updated?.enrichment_stage === "done") succeeded++;
-        else failed++;
+        else { failed++; failedOrgIds.push(org.id); }
       }
     } catch {
       failed++;
+      failedOrgIds.push(org.id);
       await markFailed(db, org.id, "SCRAPE_FAILED", "Unexpected error in processOneOrg").catch(() => {});
     }
     void beforeStage; // suppress unused warning
+  }
+
+  // Enrichment succeeded → autoAssignEnrichedLeads already ran inline. But leads
+  // whose enrichment FAILED become input_required and are now campaign-eligible via
+  // the generic template — assign them too, so they don't silently pile up in the
+  // manager's pool under a non-manual assignment strategy. (§2.6)
+  for (const orgId of failedOrgIds) {
+    await autoAssignEnrichedLeads(db, orgId).catch(() => {});
   }
 
   // ── Step 4: Self-trigger if more queued orgs remain ───────────────────────

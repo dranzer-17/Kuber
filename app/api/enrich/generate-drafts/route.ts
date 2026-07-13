@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { after } from "next/server";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import {
@@ -79,14 +80,19 @@ export async function POST(req: NextRequest) {
 
   if (remaining > 0) {
     const baseUrl = internalAppBaseUrl(req);
-    fetch(`${baseUrl}/api/enrich/generate-drafts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": process.env.INTERNAL_SECRET!,
-      },
-      body: JSON.stringify({ campaign_id: campaignId, step_number: stepNumber }),
-    }).catch(() => {});
+    const secret = process.env.INTERNAL_SECRET!;
+    // after() keeps the lambda alive until the next batch kickoff actually leaves
+    // the machine, so generation doesn't silently stop mid-campaign. (§1.2)
+    after(async () => {
+      await fetch(`${baseUrl}/api/enrich/generate-drafts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": secret,
+        },
+        body: JSON.stringify({ campaign_id: campaignId, step_number: stepNumber }),
+      }).catch(() => {});
+    });
   } else {
     await db.from("campaigns").update({
       status: "draft",

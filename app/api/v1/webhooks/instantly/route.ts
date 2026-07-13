@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
 import { internalAppBaseUrl } from "@/lib/internal-url";
@@ -235,22 +235,29 @@ export async function POST(req: NextRequest) {
 
     if (ev?.id) {
       const baseUrl = internalAppBaseUrl(req);
-      fetch(`${baseUrl}/api/internal/process-reply`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-internal-secret": process.env.INTERNAL_SECRET,
-        },
-        body: JSON.stringify({
-          reply_event_id: ev.id,
-          reply_text: p.reply_text ?? p.reply_text_snippet ?? "",
-          reply_subject: p.reply_subject ?? null,
-          email_id: p.email_id ?? null,
-          campaign_lead_id: campaignLeadId,
-          master_campaign_id: masterId,
-          lead_email: p.lead_email ?? null,
-        }),
-      }).catch(() => {});
+      const secret = process.env.INTERNAL_SECRET;
+      const evId = ev.id;
+      // after() ensures the reply-draft worker is actually invoked before the
+      // webhook lambda freezes — otherwise a customer's reply could silently
+      // never get an AI draft. (§1.2)
+      after(async () => {
+        await fetch(`${baseUrl}/api/internal/process-reply`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-internal-secret": secret,
+          },
+          body: JSON.stringify({
+            reply_event_id: evId,
+            reply_text: p.reply_text ?? p.reply_text_snippet ?? "",
+            reply_subject: p.reply_subject ?? null,
+            email_id: p.email_id ?? null,
+            campaign_lead_id: campaignLeadId,
+            master_campaign_id: masterId,
+            lead_email: p.lead_email ?? null,
+          }),
+        }).catch(() => {});
+      });
     }
   }
 
