@@ -6,7 +6,21 @@ import {
   getEmailSignature,
   getProductOfferings,
   getCompanyContext,
+  getGenericTemplate,
 } from "@/lib/services/settings";
+
+// Short generic nudge used for follow-up steps (step > 1) on un-enriched leads,
+// mirroring the "brief low-pressure nudge" rule the AI follow-ups also follow.
+const GENERIC_FOLLOWUP_BODY =
+  "Just following up on my earlier note about Kuber Polyplast's masterbatch and polymer compounds. " +
+  "If it is worth a quick look, I would be glad to share details suited to your requirements.";
+
+// Fills {{first_name}} / {{name}} / {{company}} placeholders in a template.
+function fillTemplate(text: string, vars: { first_name: string; company: string }): string {
+  return text.replace(/\{\{\s*(first_name|name|company)\s*\}\}/gi, (_m, key: string) =>
+    key.toLowerCase() === "company" ? vars.company : vars.first_name,
+  );
+}
 
 // The LLM writes the full email body from the Email Template system prompt
 // (subject patterns, openings, offerings, closings, etc. live there as options).
@@ -209,6 +223,72 @@ export async function generateOneDraft(
   if (!draftId) return { ok: false, reason: "No draft row created" };
 
   const activeDraftId = draftId;
+
+  // ── Un-enriched lead → generic (name-swap) template, no LLM call ─────────────
+  // When the company has no usable profile (no website / unscrapeable / enrichment
+  // failed → lead status "input_required"), there is nothing to personalise with.
+  // Use the ready-made template and only fill in the recipient's name/company.
+  const org = unwrapOrg(lead.organizations);
+  const hasOrgData = !!org?.company_description?.trim();
+
+  if (!hasOrgData) {
+    try {
+      const template = await getGenericTemplate(db);
+      const firstName = lead.first_name?.trim() ?? "";
+      const vars = { first_name: firstName, company: org?.name?.trim() || "your company" };
+
+      const greeting = firstName ? `Dear ${firstName},` : "Dear Sir/Ma'am,";
+      let genericBody =
+        (stepNumber > 1 ? fillTemplate(GENERIC_FOLLOWUP_BODY, vars) : fillTemplate(template.body, vars)).trim();
+
+      // Defense in depth: never mention a brochure on follow-ups or when none is attached.
+      if (stepNumber > 1 || !effectiveAttachmentName) {
+        genericBody = genericBody
+          .replace(/[^.\n]*\bbrochure\b[^.\n]*\.\s*/gi, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+      }
+
+      let finalBody = plainToHtml([greeting, genericBody, signatureBlock].filter(Boolean).join("\n\n"));
+      if (stepNumber === 1 && effectiveAttachmentName && effectiveAttachmentUrl && /brochure/i.test(finalBody)) {
+        const anchor = `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`;
+        finalBody = finalBody.replace(/brochure/i, anchor);
+      }
+      const finalSubject = stepNumber > 1 ? "" : fillTemplate(template.subject, vars);
+
+      const finalStatus = humanInLoop ? "draft" : "approved";
+      const now = new Date().toISOString();
+
+      await db.from("email_drafts").update({
+        subject: finalSubject,
+        body: finalBody,
+        status: finalStatus,
+        ...(finalStatus === "approved" ? { approved_at: now, reviewed_by: userId ?? null } : {}),
+        updated_at: now,
+      }).eq("id", activeDraftId);
+
+      if (stepNumber === 1) {
+        await db.from("campaign_leads").update({
+          draft_id: activeDraftId,
+          crm_status: finalStatus === "approved" ? "approved" : "draft",
+          updated_at: now,
+        }).eq("id", target.id);
+      }
+
+      return { ok: true, draftId: activeDraftId, status: finalStatus };
+    } catch (err) {
+      const now = new Date().toISOString();
+      await db.from("email_drafts").update({ status: "failed", updated_at: now }).eq("id", activeDraftId);
+      if (stepNumber === 1) {
+        await db.from("campaign_leads").update({
+          draft_id: activeDraftId,
+          crm_status: "draft",
+          updated_at: now,
+        }).eq("id", target.id);
+      }
+      return { ok: false, reason: (err as Error).message };
+    }
+  }
 
   try {
     const [baseSystemPrompt, products, companyContext] = await Promise.all([

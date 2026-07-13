@@ -15,6 +15,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { data: rd } = await db.from("reply_drafts").select("*").eq("id", id).maybeSingle();
   if (!rd) return fail(404, "NOT_FOUND", "Reply draft not found");
   if (rd.status === "sent") return fail(409, "ALREADY_SENT", "This reply was already sent");
+  // Approval gate (§3.13): only a reviewed draft/approved reply may be sent —
+  // never a rejected, failed, or still-generating one.
+  if (!["draft", "approved"].includes(rd.status)) {
+    return fail(409, "NOT_SENDABLE", `A reply in status '${rd.status}' cannot be sent`);
+  }
   if (!rd.reply_to_uuid || !rd.eaccount) {
     return fail(400, "MISSING_THREAD", "Missing reply_to_uuid or eaccount — cannot thread the reply");
   }

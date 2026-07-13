@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  // Settings (prompts/email template, signatures, product library, etc.) are
+  // editable by any signed-in user, including employees — business decision.
   try { await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);

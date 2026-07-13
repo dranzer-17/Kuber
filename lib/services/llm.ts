@@ -128,8 +128,6 @@ async function callOpenAI(opts: CompletionOpts): Promise<object> {
   return parseJsonResponse(content);
 }
 
-const NON_RETRYABLE_STATUSES = new Set([401, 402, 403]);
-
 export async function complete<T = object>(opts: CompletionOpts): Promise<LlmResult<T>> {
   const hasOpenRouter = !!process.env.OPENROUTER_API_KEY?.trim();
   const hasOpenAI = !!process.env.OPENAI_API_KEY?.trim();
@@ -141,12 +139,10 @@ export async function complete<T = object>(opts: CompletionOpts): Promise<LlmRes
       return { json, tier: 1 };
     } catch (err) {
       openRouterError = err instanceof Error ? err : new Error(String(err));
-      const status = (err as { status?: number }).status;
-      // Retryable HTTP errors (429, 5xx) should surface immediately.
-      if (status && !NON_RETRYABLE_STATUSES.has(status)) {
-        throw openRouterError;
-      }
-      // 401/402/403 or non-HTTP errors (e.g. JSON parse): try OpenAI fallback if configured.
+      // Fall through to the OpenAI fallback for ANY OpenRouter failure. This is
+      // deliberate: transient 429/5xx and credit/auth errors (401/402/403) are
+      // exactly what a second provider exists for. (Previously 429/5xx were
+      // re-thrown WITHOUT trying OpenAI — the inverse of what a fallback is for.)
     }
   }
 
@@ -155,7 +151,8 @@ export async function complete<T = object>(opts: CompletionOpts): Promise<LlmRes
       const json = (await callOpenAI(opts)) as T;
       return { json, tier: 2 };
     } catch (err) {
-      throw err instanceof Error ? err : new Error(String(err));
+      // Both providers failed — surface OpenRouter's (usually richer) error if we have it.
+      throw openRouterError ?? (err instanceof Error ? err : new Error(String(err)));
     }
   }
 

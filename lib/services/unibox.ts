@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import sanitizeHtml from "sanitize-html";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { emailPreview, stripQuotedText, ueTypeToDirection } from "@/lib/email-display";
+import { findActiveLeadIdByEmail } from "@/lib/services/lead-lookup";
 import {
   type InstantlyEmail,
   listEmails,
@@ -68,13 +69,13 @@ export async function resolveCampaignLead(
   leadEmail: string | null,
 ): Promise<string | null> {
   if (!masterCampaignId || !leadEmail) return null;
-  const { data: lead } = await db.from("leads").select("id").eq("email", leadEmail).maybeSingle();
-  if (!lead) return null;
+  const leadId = await findActiveLeadIdByEmail(db, leadEmail);
+  if (!leadId) return null;
   const { data: cl } = await db
     .from("campaign_leads")
     .select("id")
     .eq("campaign_id", masterCampaignId)
-    .eq("lead_id", lead.id)
+    .eq("lead_id", leadId)
     .maybeSingle();
   return cl?.id ?? null;
 }

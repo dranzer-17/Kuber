@@ -142,28 +142,34 @@ export async function enrichLeads(
 
         if (orgId) enrichedOrgIds.add(orgId);
 
-        await db.from("leads").update({
-          last_name: match.last_name ?? null,
-          email: match.email ?? null,
-          email_status: match.email_status ?? null,
-          headline: match.headline ?? null,
-          linkedin_url: match.linkedin_url ?? null,
-          city: match.city ?? null,
-          state: match.state ?? null,
-          country: match.country ?? null,
-          time_zone: match.time_zone ?? null,
-          email_domain_catchall: match.email_domain_catchall ?? null,
-          seniority: match.seniority ?? null,
-          departments: match.departments ?? null,
-          is_likely_to_engage: match.is_likely_to_engage ?? null,
+        // Only overwrite fields the match actually returned. A partial Apollo re-match
+        // must NOT erase previously-good values with null (§3.1).
+        const leadUpdate: Record<string, unknown> = {
           organization_id: orgId,
           updated_at: new Date().toISOString(),
-        }).eq("apollo_id", match.id);
+        };
+        if (match.last_name != null) leadUpdate.last_name = match.last_name;
+        if (match.email != null) leadUpdate.email = match.email.toLowerCase();
+        if (match.email_status != null) leadUpdate.email_status = match.email_status;
+        if (match.headline != null) leadUpdate.headline = match.headline;
+        if (match.linkedin_url != null) leadUpdate.linkedin_url = match.linkedin_url;
+        if (match.city != null) leadUpdate.city = match.city;
+        if (match.state != null) leadUpdate.state = match.state;
+        if (match.country != null) leadUpdate.country = match.country;
+        if (match.time_zone != null) leadUpdate.time_zone = match.time_zone;
+        if (match.email_domain_catchall != null) leadUpdate.email_domain_catchall = match.email_domain_catchall;
+        if (match.seniority != null) leadUpdate.seniority = match.seniority;
+        if (match.departments != null) leadUpdate.departments = match.departments;
+        if (match.is_likely_to_engage != null) leadUpdate.is_likely_to_engage = match.is_likely_to_engage;
+        await db.from("leads").update(leadUpdate).eq("apollo_id", match.id);
 
+        // Only reset the CRM status of leads still in a pre-send stage — never clobber
+        // a lead that's already sent/replied/won in another campaign (§3.1).
         const crm = match.email_status === "verified" ? "enriched" : "skipped";
         await db.from("campaign_leads")
           .update({ crm_status: crm, updated_at: new Date().toISOString() })
-          .eq("lead_id", lead.id);
+          .eq("lead_id", lead.id)
+          .in("crm_status", ["new", "enriching", "enriched", "skipped"]);
       }
 
       processedCount += chunkTargets.length;

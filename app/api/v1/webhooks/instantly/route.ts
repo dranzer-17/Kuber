@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { getInstantlyEmail } from "@/lib/services/instantly";
 import { ingestInstantlyEmail } from "@/lib/services/unibox";
+import { safeSecretEqual } from "@/lib/auth/secret";
+import { findActiveLeadIdByEmail } from "@/lib/services/lead-lookup";
 
 const CRM_BY_EVENT: Record<string, string | undefined> = {
   reply_received:    "replied",
@@ -59,7 +61,7 @@ function stripQuotedText(text: string | null | undefined): string | null {
 export async function POST(req: NextRequest) {
   // 1) Verify shared secret
   const secret = req.headers.get("x-webhook-secret");
-  if (!process.env.INSTANTLY_WEBHOOK_SECRET || secret !== process.env.INSTANTLY_WEBHOOK_SECRET) {
+  if (!safeSecretEqual(secret, process.env.INSTANTLY_WEBHOOK_SECRET)) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
@@ -93,17 +95,13 @@ export async function POST(req: NextRequest) {
   // 4) Resolve campaign_lead via master + lead_email
   let campaignLeadId: string | null = null;
   if (masterId && p.lead_email) {
-    const { data: lead } = await db
-      .from("leads")
-      .select("id")
-      .eq("email", p.lead_email)
-      .maybeSingle();
-    if (lead) {
+    const leadId = await findActiveLeadIdByEmail(db, p.lead_email);
+    if (leadId) {
       const { data: cl } = await db
         .from("campaign_leads")
         .select("id")
         .eq("campaign_id", masterId)
-        .eq("lead_id", lead.id)
+        .eq("lead_id", leadId)
         .maybeSingle();
       if (cl) campaignLeadId = cl.id;
     }
@@ -196,16 +194,19 @@ export async function POST(req: NextRequest) {
 
   // 7) Org-level hard opt-out: unsubscribe blocks the whole org
   if (p.event_type === "lead_unsubscribed" && p.lead_email) {
-    const { data: lead } = await db
-      .from("leads")
-      .select("organization_id")
-      .eq("email", p.lead_email)
-      .maybeSingle();
-    if (lead?.organization_id) {
-      await db
-        .from("organizations")
-        .update({ unsubscribed: true })
-        .eq("id", lead.organization_id);
+    const leadId = await findActiveLeadIdByEmail(db, p.lead_email);
+    if (leadId) {
+      const { data: lead } = await db
+        .from("leads")
+        .select("organization_id")
+        .eq("id", leadId)
+        .maybeSingle();
+      if (lead?.organization_id) {
+        await db
+          .from("organizations")
+          .update({ unsubscribed: true })
+          .eq("id", lead.organization_id);
+      }
     }
   }
 
@@ -234,22 +235,29 @@ export async function POST(req: NextRequest) {
 
     if (ev?.id) {
       const baseUrl = internalAppBaseUrl(req);
-      fetch(`${baseUrl}/api/internal/process-reply`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-internal-secret": process.env.INTERNAL_SECRET,
-        },
-        body: JSON.stringify({
-          reply_event_id: ev.id,
-          reply_text: p.reply_text ?? p.reply_text_snippet ?? "",
-          reply_subject: p.reply_subject ?? null,
-          email_id: p.email_id ?? null,
-          campaign_lead_id: campaignLeadId,
-          master_campaign_id: masterId,
-          lead_email: p.lead_email ?? null,
-        }),
-      }).catch(() => {});
+      const secret = process.env.INTERNAL_SECRET;
+      const evId = ev.id;
+      // after() ensures the reply-draft worker is actually invoked before the
+      // webhook lambda freezes — otherwise a customer's reply could silently
+      // never get an AI draft. (§1.2)
+      after(async () => {
+        await fetch(`${baseUrl}/api/internal/process-reply`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-internal-secret": secret,
+          },
+          body: JSON.stringify({
+            reply_event_id: evId,
+            reply_text: p.reply_text ?? p.reply_text_snippet ?? "",
+            reply_subject: p.reply_subject ?? null,
+            email_id: p.email_id ?? null,
+            campaign_lead_id: campaignLeadId,
+            master_campaign_id: masterId,
+            lead_email: p.lead_email ?? null,
+          }),
+        }).catch(() => {});
+      });
     }
   }
 

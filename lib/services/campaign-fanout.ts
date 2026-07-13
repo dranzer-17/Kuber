@@ -85,6 +85,28 @@ export async function sendCampaign(
   const fallbackTz = campaign.schedule_timezone ?? "Asia/Kolkata";
   const sendDays = (campaign.send_days as Record<string, boolean>) ?? {};
 
+  // Idempotency guard (§1.5): claim an exclusive send lock so a double-click or a
+  // second admin cannot push the same leads to Instantly twice. Auto-expires after
+  // 10 minutes so a crashed prior send doesn't wedge the campaign. Requires the
+  // campaigns.send_lock_at column (2026_07_14 migration).
+  const LOCK_STALE_MS = 10 * 60 * 1000;
+  const staleBefore = new Date(Date.now() - LOCK_STALE_MS).toISOString();
+  const { data: claimed, error: lockErr } = await db
+    .from("campaigns")
+    .update({ send_lock_at: new Date().toISOString() })
+    .eq("id", campaignId)
+    .or(`send_lock_at.is.null,send_lock_at.lt.${staleBefore}`)
+    .select("id");
+  if (lockErr) {
+    // Column not present yet (migration not applied) — degrade to NO lock rather
+    // than block every send. The lock activates automatically once the migration runs.
+    console.warn("send lock unavailable (skipping):", lockErr.message);
+  } else if (!claimed || claimed.length === 0) {
+    throw new Error("A send is already in progress for this campaign — please wait for it to finish.");
+  }
+
+  try {
+
   // ── TEST MODE ──────────────────────────────────────────────────────────────
   // INSTANTLY_TEST_MODE=true => override schedule so Instantly sends ASAP
   // (24h window, all 7 days) instead of queuing until the next configured window.
@@ -265,6 +287,7 @@ export async function sendCampaign(
         });
 
         // Push in batches of 100 with a 2s gap
+        let bucketSent = 0;
         for (let i = 0; i < payloads.length; i += BATCH) {
           const slice = payloads.slice(i, i + BATCH);
           const result = await addLeadsToInstantly(instId, slice);
@@ -273,9 +296,14 @@ export async function sendCampaign(
           );
           const now = new Date().toISOString();
 
-          // Mark campaign_leads as sent + capture Instantly lead id + link sub-campaign
+          // Only leads present in created_leads were actually accepted by Instantly.
+          // The rest (invalid/duplicate/skipped) must NOT be reported as 'sent'.
+          const sentSlice = slice.filter((p) => byEmail.has(p.email.toLowerCase()));
+          const rejectedSlice = slice.filter((p) => !byEmail.has(p.email.toLowerCase()));
+
+          // Accepted → mark sent + capture Instantly lead id + link sub-campaign.
           await Promise.all(
-            slice.map((p) =>
+            sentSlice.map((p) =>
               db.from("campaign_leads").update({
                 instantly_campaign_id: sub!.id,
                 instantly_lead_id: byEmail.get(p.email.toLowerCase()) ?? null,
@@ -285,33 +313,49 @@ export async function sendCampaign(
             ),
           );
 
-          // Mark their drafts as sent so the UI badge + Send count update correctly
-          await db.from("email_drafts")
-            .update({ status: "sent", updated_at: now })
-            .eq("campaign_id", campaignId)
-            .in("lead_id", slice.map((p) => p.leadId))
-            .in("status", ["approved", "draft_ready"]);
+          // Rejected → mark failed and still link the sub, so they are visible as
+          // needing attention and are NOT silently re-picked as "eligible" forever.
+          await Promise.all(
+            rejectedSlice.map((p) =>
+              db.from("campaign_leads").update({
+                instantly_campaign_id: sub!.id,
+                crm_status: "failed",
+                updated_at: now,
+              }).eq("id", p.campaignLeadId),
+            ),
+          );
 
-          totalSent += slice.length;
+          // Mark ONLY the accepted leads' drafts as sent.
+          if (sentSlice.length > 0) {
+            await db.from("email_drafts")
+              .update({ status: "sent", updated_at: now })
+              .eq("campaign_id", campaignId)
+              .in("lead_id", sentSlice.map((p) => p.leadId))
+              .in("status", ["approved", "draft_ready"]);
+          }
+
+          bucketSent += sentSlice.length;
+          totalSent += sentSlice.length;
           if (i + BATCH < payloads.length) await sleep(2000);
         }
 
-        // Update sub-campaign counters
+        // Update sub-campaign counters with the ACTUAL accepted count.
         await db.from("instantly_campaigns").update({
           lead_count: b.rows.length,
-          sent_count: b.rows.length,
+          sent_count: bucketSent,
           updated_at: new Date().toISOString(),
         }).eq("id", sub!.id);
       } catch (e) {
         const message = (e as Error).message;
         console.error(`Bucket ${b.code} failed:`, message);
         bucketErrors.push(`${b.countryName ?? b.code}: ${message}`);
-        await db.from("instantly_campaigns").upsert({
-          campaign_id: campaignId,
-          country_code: b.code,
-          status: "failed",
-          last_error: message,
-        }, { onConflict: "campaign_id,country_code" });
+        // UPDATE (not upsert): the sub row was already created above, and an upsert-insert
+        // path here would violate NOT NULL (country/timezone). Records last_error (column
+        // added in the 2026_07_14 migration) so the failure is traceable.
+        await db.from("instantly_campaigns")
+          .update({ status: "failed", last_error: message, updated_at: new Date().toISOString() })
+          .eq("campaign_id", campaignId)
+          .eq("country_code", b.code);
         continue;
       }
     }
@@ -333,6 +377,7 @@ export async function sendCampaign(
     .eq("campaign_id", campaignId)
     .not("instantly_campaign_id", "is", null);
 
+  const activationErrors: string[] = [];
   for (const sub of subs ?? []) {
     if (!sub.instantly_campaign_id) continue;
     try {
@@ -343,20 +388,40 @@ export async function sendCampaign(
         updated_at: new Date().toISOString(),
       }).eq("id", sub.id);
     } catch (e) {
+      const message = (e as Error).message;
+      activationErrors.push(`sub ${sub.id}: ${message}`);
       await db.from("instantly_campaigns").update({
         status: "failed",
+        last_error: message,
         updated_at: new Date().toISOString(),
       }).eq("id", sub.id);
-      throw new Error(`Activation failed for sub-campaign ${sub.id}: ${(e as Error).message}`);
+      // Do NOT throw here — keep activating the remaining sub-campaigns so one
+      // bad bucket can't strand the others (and the master rollup below still runs).
     }
   }
 
-  // 7) Roll up master campaign status + counter
+  // 7) Roll up master campaign status + counter. sent_count is RECONCILED from the
+  //    actual data rather than a racy read-modify-write on a value read minutes ago.
+  const { count: reconciledSent } = await db
+    .from("campaign_leads")
+    .select("id", { count: "exact", head: true })
+    .eq("campaign_id", campaignId)
+    .eq("crm_status", "sent");
+
   await db.from("campaigns").update({
     status: "active",
-    sent_count: (campaign.sent_count ?? 0) + totalSent,
+    sent_count: reconciledSent ?? 0,
     updated_at: new Date().toISOString(),
   }).eq("id", campaignId);
 
+  // Only fail the whole send if EVERY sub-campaign activation failed.
+  if ((subs?.length ?? 0) > 0 && activationErrors.length === (subs?.length ?? 0)) {
+    throw new Error(`All sub-campaign activations failed: ${activationErrors.join("; ")}`);
+  }
+
   return { buckets: (subs ?? []).length, sent: totalSent };
+  } finally {
+    // Always release the send lock — on success or failure.
+    await db.from("campaigns").update({ send_lock_at: null }).eq("id", campaignId);
+  }
 }

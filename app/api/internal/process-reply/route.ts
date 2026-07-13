@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateReplyDraft } from "@/lib/services/generate-reply";
 import { getInstantlyEmail, listThreadEmails } from "@/lib/services/instantly";
+import { safeSecretEqual } from "@/lib/auth/secret";
 
 export const maxDuration = 55;
 
@@ -15,7 +16,7 @@ export const maxDuration = 55;
  * here without confirming with the team first.
  */
 export async function POST(req: NextRequest) {
-  if (req.headers.get("x-internal-secret") !== process.env.INTERNAL_SECRET) {
+  if (!safeSecretEqual(req.headers.get("x-internal-secret"), process.env.INTERNAL_SECRET)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

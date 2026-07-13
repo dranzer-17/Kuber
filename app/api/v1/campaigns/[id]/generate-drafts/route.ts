@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
@@ -38,14 +38,20 @@ export async function POST(
 
   if (process.env.INTERNAL_SECRET) {
     const baseUrl = internalAppBaseUrl(req);
-    fetch(`${baseUrl}/api/enrich/generate-drafts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": process.env.INTERNAL_SECRET,
-      },
-      body: JSON.stringify({ campaign_id: id }),
-    }).catch(() => {});
+    const secret = process.env.INTERNAL_SECRET;
+    // after() keeps the serverless function alive until this kickoff actually
+    // leaves the machine — a plain un-awaited fetch can be dropped when the
+    // response returns and the lambda freezes. (§1.2)
+    after(async () => {
+      await fetch(`${baseUrl}/api/enrich/generate-drafts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": secret,
+        },
+        body: JSON.stringify({ campaign_id: id }),
+      }).catch(() => {});
+    });
   }
 
   return ok({ queued: true, lead_count: leadCount ?? 0 });

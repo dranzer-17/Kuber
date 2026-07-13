@@ -21,6 +21,13 @@ async function pickRoundRobin(
   cursor: string | null,
   candidateIds: string[],
 ): Promise<string> {
+  // Atomic pick-and-advance (concurrency-safe) via RPC. Falls back to the old
+  // read-modify-write only if the function isn't present yet (pre-migration §2.5).
+  const { data, error } = await db.rpc("assignment_pick_round_robin", {
+    p_candidate_ids: candidateIds,
+  });
+  if (!error && typeof data === "string" && data) return data;
+
   const lastIdx = cursor ? candidateIds.indexOf(cursor) : -1;
   const next = candidateIds[(lastIdx + 1) % candidateIds.length];
   await db
@@ -53,13 +60,19 @@ export async function resolveAssignee(db: Db, leadCountry: string | null | undef
   return pickRoundRobin(db, settings.id, settings.round_robin_cursor, candidates);
 }
 
-/** Auto-assigns any still-unassigned leads under an org right after it finishes enrichment. */
+/**
+ * Auto-assigns still-unassigned leads under an org once they are ready to work —
+ * that is, either fully enriched OR input_required (the company had no usable
+ * website / enrichment failed, but the lead has an email and can be worked with
+ * the generic template). New/enriching leads are intentionally left in the pool.
+ */
 export async function autoAssignEnrichedLeads(db: Db, orgId: string): Promise<void> {
   const { data: leads } = await db
     .from("leads")
     .select("id, country")
     .eq("organization_id", orgId)
     .eq("is_deleted", false)
+    .in("status", ["enriched", "input_required"])
     .is("assigned_to", null);
 
   for (const lead of leads ?? []) {
