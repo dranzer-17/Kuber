@@ -728,44 +728,33 @@ export default function LeadsPage() {
             </button>
           </div>
 
+          {role === "manager" && (
+            <Button
+              size="sm" variant="outline" className="gap-1.5"
+              disabled={checkedIds.size === 0}
+              onClick={() => { if (checkedIds.size > 0) setShowBulkAssign(true); }}
+            >
+              <UserPlus className="size-3.5" /> Assign{checkedIds.size > 0 ? ` (${checkedIds.size})` : ""}
+            </Button>
+          )}
           {someChecked && (
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-sm font-semibold">
-                {checkedCount} selected
-                {ineligibleCheckedCount > 0 && (
-                  <span className="text-muted-foreground font-normal"> · {ineligibleCheckedCount} not ready for outreach</span>
-                )}
-              </span>
-              <Button
-                size="sm" variant="destructive" className="gap-1.5 text-white!"
-                onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
-              >
-                <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
-              </Button>
-              {role === "manager" && (
-                <Button
-                  size="sm" variant="outline" className="gap-1.5"
-                  onClick={() => { if (checkedIds.size > 0) setShowBulkAssign(true); }}
-                >
-                  <UserPlus className="size-3.5" /> Assign ({checkedIds.size})
-                </Button>
-              )}
-              <Button
-                size="sm" className="gap-1.5"
-                disabled={!canCreateCampaign}
-                title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
-                onClick={() => { setShowCreateCampaign(true); }}
-              >
-                <Megaphone className="size-3.5" /> Create campaign ({eligibleCheckedCount})
-              </Button>
-              <button
-                type="button"
-                onClick={() => setCheckedIds(new Set())}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Clear
-              </button>
-            </div>
+            <Button
+              size="sm" className="gap-1.5"
+              disabled={!canCreateCampaign}
+              title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
+              onClick={() => { setShowCreateCampaign(true); }}
+            >
+              <Megaphone className="size-3.5" /> Create campaign{eligibleCheckedCount > 0 ? ` (${eligibleCheckedCount})` : ""}
+            </Button>
+          )}
+          {someChecked && (
+            <button
+              type="button"
+              onClick={() => setCheckedIds(new Set())}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
           )}
         </div>
 
@@ -818,6 +807,14 @@ export default function LeadsPage() {
             size="sm"
             wrapperClassName="flex-1 max-w-xs"
           />
+          {someChecked && (
+            <Button
+              size="sm" variant="destructive" className="gap-1.5 text-white!"
+              onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
+            >
+              <Trash2 className="size-3.5" /> Delete ({checkedIds.size})
+            </Button>
+          )}
           <div className="ml-auto flex items-center gap-3">
             <Select value={leadsSort} onValueChange={(value) => setLeadsSort(value as LeadsSort)}>
               <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border bg-card px-3 text-xs shadow-sm">
