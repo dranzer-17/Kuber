@@ -198,7 +198,7 @@ export function CreateCampaignModal({
     setError("");
     const eligibleLeads = leads.filter(isCampaignEligible);
     if (eligibleLeads.length === 0) {
-      setError("None of the selected leads have completed company enrichment. Only leads with a domain and finished Firecrawl can be added.");
+      setError("None of the selected leads are ready for a campaign. Add leads that are Enriched, or Input Required (they'll use the generic template). New leads are still being enriched — wait for them to finish.");
       return;
     }
     setCreating(true);

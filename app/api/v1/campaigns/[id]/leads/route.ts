@@ -100,7 +100,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Bulk-fetch all leads in one query
   const { data: leads } = await db
     .from("leads")
-    .select("id, email, organization_id, organizations(domain, enrichment_stage, unsubscribed)")
+    .select("id, email, status, organization_id, organizations(domain, enrichment_stage, unsubscribed)")
     .in("id", leadIds);
 
   const leadMap = new Map((leads ?? []).map((l) => [l.id, l]));
@@ -125,7 +125,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (org?.unsubscribed) { blockedUnsubscribed.push(leadId); continue; }
 
-    const isEligible = !!lead.email && !!org?.domain && org.enrichment_stage === "done";
+    // Eligible = has an email AND is either enriched (→ AI-personalised draft) or
+    // input_required (no usable company profile → generic name-swap template).
+    // New / enriching leads are still in the enrichment pipeline and are blocked.
+    const isEligible = !!lead.email && (lead.status === "enriched" || lead.status === "input_required");
     if (!isEligible) { blockedNotEnriched.push(leadId); continue; }
 
     toInsert.push({ campaign_id: id, lead_id: leadId, crm_status: "enriched", created_by: user.id, created_at: now });

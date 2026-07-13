@@ -91,18 +91,31 @@ export function isRecentlyAdded(lead: Lead): boolean {
   return lead.source === "Apollo" && new Date(lead.createdAt).getTime() > cutoff;
 }
 
+/**
+ * A lead can join a campaign if it has an email AND is either:
+ *   • Enriched — gets an AI-personalised draft, or
+ *   • Input Required — no usable company profile (no website / unscrapeable /
+ *     enrichment failed), so it gets the generic name-swap template instead.
+ * New / Enriching leads are NOT eligible — enrichment is still in flight.
+ */
 export function isCampaignEligible(lead: Lead): boolean {
-  return !!lead.email && !!lead.domain && hasEnrichmentData(lead);
+  return !!lead.email && (lead.status === "Enriched" || lead.status === "Input Required");
+}
+
+/**
+ * True when an eligible lead has no usable company data and will therefore be
+ * drafted from the generic (name-swap) template rather than AI-personalised.
+ */
+export function usesGenericTemplate(lead: Lead): boolean {
+  return isCampaignEligible(lead) && !hasEnrichmentData(lead);
 }
 
 export function campaignIneligibleReason(lead: Lead): string | null {
-  if (!lead.email) return "No email address";
-  if (!lead.domain) return "No company domain — enrichment incomplete";
-  if (lead.enrichmentStage === "failed") return "Company enrichment failed";
-  if (lead.enrichmentStage === "done" && !hasEnrichmentData(lead))
-    return "Company scraped but no usable data found — retry enrichment";
-  if (lead.enrichmentStage !== "done") return "Company enrichment not finished yet";
-  return null;
+  if (!lead.email) return "No email address — cannot send to this lead";
+  if (lead.status === "Enriched" || lead.status === "Input Required") return null;
+  if (lead.status === "Enriching") return "Company enrichment in progress — wait until it finishes";
+  if (lead.status === "New") return "Not enriched yet — waiting for enrichment to run";
+  return "This lead is not eligible for campaigns";
 }
 
 // ── Status sub-color classifier ─────────────────────────────────────────────
@@ -120,7 +133,7 @@ export const ENRICHMENT_DOT_HELP: Record<EnrichmentStage | "none", string> = {
   queued: "Company queued for website scrape. Not ready for campaigns yet.",
   scraping: "Firecrawl is scraping the company website. Wait until enrichment completes.",
   done: "Company profile ready — safe to add to campaigns.",
-  failed: "Enrichment failed (often no domain). Cannot add to campaigns.",
+  failed: "Enrichment failed (often no website). This lead can still join a campaign — it will use the generic template.",
   none: "Not enriched yet. Cannot add to campaigns until company data is ready.",
 };
 

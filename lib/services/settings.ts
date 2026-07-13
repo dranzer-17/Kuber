@@ -6,6 +6,7 @@ let cachedClient: { value: ClientContext; expiresAt: number } | null = null;
 let cachedProductOfferings: { value: ProductOffering[]; expiresAt: number } | null = null;
 let cachedReplyPrompts: { value: ReplyPrompts; expiresAt: number } | null = null;
 let cachedCompanyContext: { value: string; expiresAt: number } | null = null;
+let cachedGenericTemplate: { value: GenericTemplate; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000;
 
 export type ClientContext = {
@@ -220,11 +221,50 @@ export async function getCompanyContext(db: SupabaseClient): Promise<string> {
   return value;
 }
 
+// ── Generic (name-swap) template for un-enriched leads ────────────────────────
+// Leads with no usable company profile (status "input_required" — the company has
+// no website, an unscrapeable site, or enrichment failed) can still join a campaign.
+// They get this ready-made template with only the recipient's name/company filled
+// in, instead of an AI-personalised draft. Overridable via the settings keys
+// `generic_email_subject` / `generic_email_body`; falls back to the defaults below.
+// Supported placeholders in both fields: {{first_name}}, {{name}}, {{company}}.
+
+export type GenericTemplate = { subject: string; body: string };
+
+const GENERIC_TEMPLATE_DEFAULTS: GenericTemplate = {
+  subject: "Reliable masterbatch & polymer compounds for your production",
+  body:
+    "I hope this message finds you well. I am reaching out from Kuber Polyplast, a manufacturer of high-quality masterbatch and polymer compounds.\n\n" +
+    "We supply colour, white, black and additive masterbatches used across packaging, moulding and extrusion. Manufacturers work with us for consistent quality batch after batch and dependable, on-time supply.\n\n" +
+    "If improving material quality or cost is on your radar, I would be glad to understand your requirements and share options that fit. Would you be open to a short conversation?",
+};
+
+export async function getGenericTemplate(db: SupabaseClient): Promise<GenericTemplate> {
+  const now = Date.now();
+  if (cachedGenericTemplate && cachedGenericTemplate.expiresAt > now) return cachedGenericTemplate.value;
+
+  const { data: rows } = await db
+    .from("settings")
+    .select("key, value")
+    .in("key", ["generic_email_subject", "generic_email_body"]);
+
+  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
+
+  const value: GenericTemplate = {
+    subject: map.generic_email_subject?.trim() || GENERIC_TEMPLATE_DEFAULTS.subject,
+    body: map.generic_email_body?.trim() || GENERIC_TEMPLATE_DEFAULTS.body,
+  };
+
+  cachedGenericTemplate = { value, expiresAt: now + CACHE_TTL_MS };
+  return value;
+}
+
 export function invalidateSettingsCache() {
   cachedPrompt = null;
   cachedClient = null;
   cachedProductOfferings = null;
   cachedReplyPrompts = null;
   cachedCompanyContext = null;
+  cachedGenericTemplate = null;
 }
 
