@@ -21,6 +21,10 @@ export const PatchSettingsSchema = z.object({
   product_offerings:       z.string().optional(), // JSON: [{name, description}]
   reply_classifier_prompt: z.string().optional(),
   reply_drafter_prompt:    z.string().optional(),
+  // Default (name-swap) draft for unenriched / Input Required leads.
+  // Supports {{first_name}}, {{name}}, {{company}}.
+  generic_email_subject:   z.string().max(300).optional(),
+  generic_email_body:      z.string().optional(),
 });
 
 export const SETTINGS_KEYS = [
@@ -41,4 +45,6 @@ export const SETTINGS_KEYS = [
   "product_offerings",
   "reply_classifier_prompt",
   "reply_drafter_prompt",
+  "generic_email_subject",
+  "generic_email_body",
 ] as const;

@@ -232,11 +232,11 @@ export async function getCompanyContext(db: SupabaseClient): Promise<string> {
 export type GenericTemplate = { subject: string; body: string };
 
 const GENERIC_TEMPLATE_DEFAULTS: GenericTemplate = {
-  subject: "Reliable masterbatch & polymer compounds for your production",
+  subject: "Reliable masterbatch & polymer compounds for {{company}}",
   body:
-    "I hope this message finds you well. I am reaching out from Kuber Polyplast, a manufacturer of high-quality masterbatch and polymer compounds.\n\n" +
-    "We supply colour, white, black and additive masterbatches used across packaging, moulding and extrusion. Manufacturers work with us for consistent quality batch after batch and dependable, on-time supply.\n\n" +
-    "If improving material quality or cost is on your radar, I would be glad to understand your requirements and share options that fit. Would you be open to a short conversation?",
+    "I hope this message finds you well. I am reaching out from Kuber Polyplast regarding {{company}}.\n\n" +
+    "We manufacture colour, white, black and additive masterbatches used across packaging, moulding and extrusion. Manufacturers work with us for consistent quality batch after batch and dependable, on-time supply.\n\n" +
+    "If improving material quality or cost is on your radar, I would be glad to understand {{company}}'s requirements and share options that fit. Would you be open to a short conversation?",
 };
 
 export async function getGenericTemplate(db: SupabaseClient): Promise<GenericTemplate> {

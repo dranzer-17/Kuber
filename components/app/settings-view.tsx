@@ -33,7 +33,7 @@ const PRODUCT_SUGGESTIONS = [
 ];
 
 type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team";
-type AiSection = "template" | "replies" | "footer";
+type AiSection = "template" | "default" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
 
@@ -49,6 +49,7 @@ const TEAM_NAV_ITEM: { id: Section; label: string } = { id: "team", label: "Team
 
 const AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "template", label: "Email Template", icon: PenLine },
+  { id: "default",  label: "Default draft",  icon: FileText },
   { id: "replies",  label: "Reply AI",       icon: Bot },
   { id: "footer",   label: "Email Footer",   icon: Type },
 ];
@@ -172,6 +173,8 @@ export function SettingsView() {
   const [clientProducts, setClientProducts] = useState<string[]>([]);
   const [targetMarkets,  setTargetMarkets ] = useState("");
   const [systemPrompt,   setSystemPrompt  ] = useState("");
+  const [genericSubject, setGenericSubject] = useState("");
+  const [genericBody,    setGenericBody   ] = useState("");
   const [logoPath,       setLogoPath      ] = useState<string | null>(null);
   const [logoUrl,        setLogoUrl       ] = useState<string | null>(null);
   const [logoUploading,  setLogoUploading ] = useState(false);
@@ -223,6 +226,8 @@ export function SettingsView() {
         setClientProducts((s.client_products ?? "").split(",").map((p: string) => p.trim()).filter(Boolean));
         setTargetMarkets(s.client_target_markets ?? "");
         setSystemPrompt(s.system_prompt ?? "");
+        setGenericSubject(s.generic_email_subject ?? "");
+        setGenericBody(s.generic_email_body ?? "");
         setSigContact(s.signature_contact ?? "");
         setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
         try { setProductOfferings(JSON.parse(s.product_offerings ?? "[]") as ProductOffering[]); } catch { setProductOfferings([]); }
@@ -294,6 +299,8 @@ export function SettingsView() {
         client_products:         clientProducts.join(", "),
         client_target_markets:   targetMarkets,
         system_prompt:           systemPrompt,
+        generic_email_subject:   genericSubject,
+        generic_email_body:      genericBody,
         signature_contact:       sigContact,
         product_offerings:       JSON.stringify(productOfferings),
         reply_drafter_prompt:    replyDrafterPrompt,
@@ -491,6 +498,41 @@ export function SettingsView() {
                         minHeight={400}
                         placeholder="Write the full email template here including subject patterns, intro options, offerings, closing..."
                         helper="Campaign-level context and matched product details are appended automatically."
+                      />
+                    </section>
+                  )}
+
+                  {aiSection === "default" && (
+                    <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                      <div className="flex items-center gap-2">
+                        <FileText className="size-4 text-muted-foreground" />
+                        <h3 className="text-sm font-semibold">Default draft</h3>
+                      </div>
+                      <p className="text-xs text-muted-foreground -mt-2">
+                        Exact subject and body sent to unenriched / Input Required leads (no company profile to personalise). Enriched leads still use AI Writing Instructions. Placeholders are filled per lead:{" "}
+                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{"{{first_name}}"}</code>
+                        {", "}
+                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{"{{name}}"}</code>
+                        {", "}
+                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{"{{company}}"}</code>
+                        . A greeting and signature are added automatically.
+                      </p>
+                      <div className="space-y-1.5">
+                        <Label>Subject</Label>
+                        <Input
+                          value={genericSubject}
+                          onChange={(e) => setGenericSubject(e.target.value)}
+                          placeholder="Reliable masterbatch for {{company}}"
+                          maxLength={300}
+                        />
+                      </div>
+                      <RichTextEditor
+                        label="Body"
+                        value={genericBody}
+                        onChange={setGenericBody}
+                        minHeight={280}
+                        placeholder="Write the exact email body. Use {{first_name}} and {{company}} where you want them filled in."
+                        helper="This text is sent as-is after variable substitution — the AI does not rewrite it."
                       />
                     </section>
                   )}
