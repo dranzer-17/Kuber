@@ -209,6 +209,10 @@ export async function bulkDeleteLeads(token: string, ids: string[]): Promise<{ d
   return apiFetch("/api/v1/leads/bulk-delete", { method: "POST", body: JSON.stringify({ ids }) }, token);
 }
 
+export async function bulkAssignLeads(token: string, ids: string[], assignedTo: string | null): Promise<{ assigned: number }> {
+  return apiFetch("/api/v1/leads/bulk-assign", { method: "POST", body: JSON.stringify({ ids, assigned_to: assignedTo }) }, token);
+}
+
 export async function deleteCampaign(token: string, id: string): Promise<{ deleted: string }> {
   return apiFetch(`/api/v1/campaigns/${id}`, { method: "DELETE" }, token);
 }

@@ -10,15 +10,11 @@ import {
 import { cn } from "@/lib/utils";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
 import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
-import { fetchLead, patchLead, rescrapeOrg, fetchUsers, assignLead, type Profile } from "@/lib/api-client";
+import { fetchLead, patchLead, rescrapeOrg } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
-import { useApp } from "@/lib/app-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -165,9 +161,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   const [editing,     setEditing    ] = useState(false);
   const [saving,      setSaving     ] = useState(false);
   const [saveError,   setSaveError  ] = useState("");
-  const [employees,   setEmployees  ] = useState<Profile[]>([]);
-  const [assigning,    setAssigning  ] = useState(false);
-  const { role } = useApp();
   const [form,        setForm       ] = useState<EditForm>({
     first_name: "", last_name: "", email: "", phone: "",
     title: "", headline: "", linkedin_url: "",
@@ -265,26 +258,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  useEffect(() => {
-    if (role !== "manager" || !lead) return;
-    getToken().then((tok) => fetchUsers(tok)).then((users) => {
-      setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
-    }).catch(() => {});
-  }, [role, lead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleAssign(employeeId: string) {
-    if (!display) return;
-    setAssigning(true);
-    try {
-      const tok = await getToken();
-      await assignLead(tok, display.id, employeeId || null);
-      const updated = { ...display, assignedTo: employeeId || null };
-      setFreshLead(updated);
-      onLeadUpdated?.(updated);
-    } catch { /* non-fatal */ }
-    finally { setAssigning(false); }
-  }
-
   async function handleRetry() {
     if (!display?.orgId) return;
     setRetrying(true);
@@ -365,26 +338,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                 </button>
               </div>
             </div>
-
-            {role === "manager" && (
-              <div className="flex items-center gap-2 px-5 py-3 border-b border-border shrink-0">
-                <Users className="size-3.5 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground shrink-0">Assigned to</span>
-                <Select
-                  value={display.assignedTo ?? "unassigned"}
-                  onValueChange={(v) => handleAssign(v === "unassigned" ? "" : v)}
-                  disabled={assigning}
-                >
-                  <SelectTrigger className="h-7 text-xs flex-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
-                    {employees.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-3">
