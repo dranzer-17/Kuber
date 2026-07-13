@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApolloForm, ExcelForm, ManualForm } from "@/components/app/lead-forms";
@@ -58,12 +59,18 @@ const EXCEL_STEPS: Step[] = [
 
 export default function AddLeadsPage() {
   const router = useRouter();
-  const { session, loadLeads } = useApp();
+  const { session, role, loadingSession, loadLeads } = useApp();
+
+  useEffect(() => {
+    if (!loadingSession && role !== "manager") router.replace("/leads");
+  }, [loadingSession, role, router]);
 
   async function handleImport() {
     if (session) await loadLeads(session.access_token);
     router.push("/leads");
   }
+
+  if (loadingSession || role !== "manager") return null;
 
   return (
     <div className="flex flex-col h-full">

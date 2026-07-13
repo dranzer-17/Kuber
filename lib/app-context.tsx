@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { isAdminUser } from "@/lib/auth/admin";
+import { isAppUser, getUserRole, type AppRole } from "@/lib/auth/roles";
 import { type Lead } from "@/lib/leads";
 import { type Campaign } from "@/components/app/create-campaign-modal";
 import { supabase } from "@/lib/supabase";
@@ -18,6 +18,7 @@ type AppContextValue = {
   // Auth
   session: Session | null;
   loadingSession: boolean;
+  role: AppRole | null;
 
   // Leads
   leads: Lead[];
@@ -78,8 +79,8 @@ async function resolveSession(): Promise<Session | null> {
 
   const user = {
     app_metadata: data.claims.app_metadata,
-  } as Parameters<typeof isAdminUser>[0];
-  if (!isAdminUser(user)) {
+  } as Parameters<typeof isAppUser>[0];
+  if (!isAppUser(user)) {
     await supabase.auth.signOut();
     return null;
   }
@@ -136,8 +137,8 @@ export function AppProvider({
         setLoadingSession(false);
         return;
       }
-      if (!s?.user || !isAdminUser(s.user)) {
-        if (s?.user && !isAdminUser(s.user)) await supabase.auth.signOut();
+      if (!s?.user || !isAppUser(s.user)) {
+        if (s?.user && !isAppUser(s.user)) await supabase.auth.signOut();
         setSession(null);
         setLoadingSession(false);
         return;
@@ -202,6 +203,7 @@ export function AppProvider({
   const value: AppContextValue = {
     session,
     loadingSession,
+    role: getUserRole(session?.user),
     leads,
     setLeads,
     leadsTotal,

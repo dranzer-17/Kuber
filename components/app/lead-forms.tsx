@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
 import { InfoTip } from "@/components/ui/info-tip";
-import { importExcelDirect, createLead, patchLead, patchOrg, type PreviewLead } from "@/lib/api-client";
+import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Profile, type PreviewLead } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 
@@ -1127,6 +1127,15 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
   const [saved,       setSaved      ] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [error,       setError      ] = useState("");
+  const [employees,   setEmployees  ] = useState<Profile[]>([]);
+  const [assignTo,    setAssignTo   ] = useState<string>("");
+
+  useEffect(() => {
+    if (editMode) return;
+    getToken().then((token) => fetchUsers(token)).then((users) => {
+      setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
+    }).catch(() => {});
+  }, [editMode]);
 
   function addLead()                                        { setLeads((p) => [...p, BLANK_LEAD()]); }
   function removeLead(i: number)                            { if (leads.length > 1) setLeads((p) => p.filter((_, j) => j !== i)); }
@@ -1180,6 +1189,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
             organization_country: org.country || undefined,
             title:                entry.jobTitle || undefined,
             country:              org.country || undefined,
+            assigned_to:          assignTo || undefined,
             // all leads in this batch share one import row
             ...(sharedImportId ? { import_id: sharedImportId } : { batch_name: resolvedBatchName, color: resolvedColor }),
           });
@@ -1281,6 +1291,21 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
           onColorChange={setColor}
           error={batchNameError}
         />
+      )}
+
+      {!editMode && employees.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>Assign to</Label>
+          <Select value={assignTo || "unassigned"} onValueChange={(v) => setAssignTo(v === "unassigned" ? "" : v)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unassigned">Leave in pool (unassigned)</SelectItem>
+              {employees.map((e) => (
+                <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}

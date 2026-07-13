@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 export const maxDuration = 30;
 
@@ -17,7 +18,8 @@ const MAX_BYTES = 10 * 1024 * 1024;
 
 /** POST = set/replace the per-lead attachment override */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
 
   const form = await req.formData();
@@ -27,6 +29,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (file.size > MAX_BYTES) return fail(400, "TOO_LARGE", "File exceeds 10MB");
 
   const db = createAdminClient();
+
+  const { data: cl } = await db.from("campaign_leads").select("campaign_id").eq("id", id).maybeSingle();
+  if (!cl) return fail(404, "NOT_FOUND", "Campaign lead not found");
+  try { await assertCampaignAccess(db, user, cl.campaign_id); } catch (r) { return r as Response; }
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `campaign-leads/${id}/${crypto.randomUUID()}-${safeName}`;
 
@@ -61,13 +67,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
 /** DELETE = clear the per-lead override → fall back to the campaign default */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
   const db = createAdminClient();
 
   // best-effort remove the stored object
   const { data: row } = await db.from("campaign_leads")
-    .select("attachment_path").eq("id", id).maybeSingle();
+    .select("attachment_path, campaign_id").eq("id", id).maybeSingle();
+  if (!row) return fail(404, "NOT_FOUND", "Campaign lead not found");
+  try { await assertCampaignAccess(db, user, row.campaign_id); } catch (r) { return r as Response; }
   if (row?.attachment_path) {
     await db.storage.from("campaign-attachments").remove([row.attachment_path]).catch(() => {});
   }

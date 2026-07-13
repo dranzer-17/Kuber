@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchCampaignSchema } from "@/lib/validators/campaigns";
 import { patchInstantlyCampaignConfig } from "@/lib/services/instantly";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 // PATCH /api/v1/campaigns/[id]/config
 // Edits campaign schedule/config on live campaigns and syncs to all Instantly
@@ -11,7 +12,7 @@ import { patchInstantlyCampaignConfig } from "@/lib/services/instantly";
 // restricted to draft/processing status — schedule settings (daily limit, send
 // window, days) are safe to change on active campaigns.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -20,6 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: existing } = await db.from("campaigns").select("id").eq("id", id).maybeSingle();
   if (!existing) return fail(404, "NOT_FOUND", "Campaign not found");

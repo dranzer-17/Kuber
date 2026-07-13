@@ -6,7 +6,8 @@ import { DraftsQuerySchema } from "@/lib/validators/drafts";
 
 
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
   const parsed = DraftsQuerySchema.safeParse(sp);
@@ -14,6 +15,15 @@ export async function GET(req: NextRequest) {
 
   const { campaign_id, status, page, limit } = parsed.data;
   const db = createAdminClient();
+
+  let ownedCampaignIds: string[] | null = null;
+  if (user.role === "employee") {
+    const { data: owned } = await db.from("campaigns").select("id").eq("created_by", user.id);
+    ownedCampaignIds = (owned ?? []).map((c) => c.id);
+    if (campaign_id && !ownedCampaignIds.includes(campaign_id)) {
+      return ok({ drafts: [], total: 0, page, limit });
+    }
+  }
 
   let q = db
     .from("email_drafts")
@@ -23,6 +33,7 @@ export async function GET(req: NextRequest) {
     );
 
   if (campaign_id) q = q.eq("campaign_id", campaign_id);
+  else if (ownedCampaignIds) q = q.in("campaign_id", ownedCampaignIds);
   if (status) q = q.eq("status", status);
   q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
 

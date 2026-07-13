@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import crypto from "crypto";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { ExcelImportSchema } from "@/lib/validators/leads";
@@ -203,7 +203,7 @@ function triggerScrape(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   let user: { id: string };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = ExcelImportSchema.safeParse(body);

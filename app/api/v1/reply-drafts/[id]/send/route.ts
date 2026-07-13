@@ -3,11 +3,14 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { sendThreadReply } from "@/lib/services/unibox";
+import { assertReplyDraftAccess } from "@/lib/auth/scope";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
   const db = createAdminClient();
+  try { await assertReplyDraftAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: rd } = await db.from("reply_drafts").select("*").eq("id", id).maybeSingle();
   if (!rd) return fail(404, "NOT_FOUND", "Reply draft not found");

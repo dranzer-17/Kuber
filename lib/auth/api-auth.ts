@@ -1,8 +1,12 @@
 import { NextRequest } from "next/server";
 import { verifyAccessToken } from "@/lib/auth/verify-jwt";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { AppRole } from "@/lib/auth/roles";
 
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const SERVICE_ROLE_USER_ID = "00000000-0000-0000-0000-000000000000";
+
+export type AuthedUser = { id: string; email?: string; role: AppRole };
 
 function unauthorized(message: string) {
   return Response.json(
@@ -11,8 +15,18 @@ function unauthorized(message: string) {
   );
 }
 
-/** Verifies the Bearer JWT from the Authorization header. Returns the user or throws a Response. */
-export async function requireAuth(request: NextRequest): Promise<{ id: string; email?: string }> {
+function forbidden(message: string) {
+  return Response.json(
+    { success: false, data: null, error: { code: "FORBIDDEN", message } },
+    { status: 403 },
+  );
+}
+
+/**
+ * Verifies the Bearer JWT and resolves the caller's role from `profiles` (not the JWT claim) so a
+ * role change takes effect immediately, without waiting on token refresh. Returns the user or throws a Response.
+ */
+export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
 
@@ -21,11 +35,33 @@ export async function requireAuth(request: NextRequest): Promise<{ id: string; e
   }
 
   if (SERVICE_ROLE_KEY && token === SERVICE_ROLE_KEY) {
-    return { id: SERVICE_ROLE_USER_ID, email: "admin@service" };
+    return { id: SERVICE_ROLE_USER_ID, email: "admin@service", role: "manager" };
   }
 
   const verified = await verifyAccessToken(token);
-  if (verified) return verified;
+  if (!verified) {
+    throw unauthorized("Invalid or expired token");
+  }
 
-  throw unauthorized("Invalid or expired token");
+  const db = createAdminClient();
+  const { data: profile } = await db
+    .from("profiles")
+    .select("role, is_active")
+    .eq("id", verified.id)
+    .maybeSingle();
+
+  if (!profile || !profile.is_active) {
+    throw unauthorized("Account is inactive or not provisioned");
+  }
+
+  return { id: verified.id, email: verified.email, role: profile.role as AppRole };
+}
+
+/** Like requireAuth, but 403s unless the caller is a manager. */
+export async function requireManager(request: NextRequest): Promise<AuthedUser> {
+  const user = await requireAuth(request);
+  if (user.role !== "manager") {
+    throw forbidden("Manager access required");
+  }
+  return user;
 }

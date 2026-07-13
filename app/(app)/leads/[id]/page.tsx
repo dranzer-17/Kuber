@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Building2, Globe2, Mail, Megaphone, Target, User } from "lucide-react";
-import { isAdminUser } from "@/lib/auth/admin";
+import { isAppUser } from "@/lib/auth/roles";
 import { supabase } from "@/lib/supabase";
 import { fetchLead } from "@/lib/api-client";
 import type { Lead } from "@/lib/leads";
@@ -47,7 +47,7 @@ export default function LeadDetailPage() {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!mounted) return;
-      if (!user || !isAdminUser(user)) { router.replace("/"); return; }
+      if (!user || !isAppUser(user)) { router.replace("/"); return; }
 
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { router.replace("/"); return; }

@@ -58,6 +58,7 @@ export interface DbLead {
   is_likely_to_engage: boolean | null;
   status: string;
   import_id: string | null;
+  assigned_to: string | null;
   imports: { id: string; label: string; color: string } | null;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
@@ -134,6 +135,7 @@ export function mapDbLead(l: DbLead): Lead {
     importId: l.import_id ?? null,
     batchLabel: l.imports?.label ?? null,
     batchColor: l.imports?.color ?? null,
+    assignedTo: l.assigned_to ?? null,
   };
 }
 
@@ -230,6 +232,7 @@ export async function createLead(token: string, body: {
   organization_industry?: string; organization_country?: string;
   title?: string; country?: string;
   batch_name?: string; color?: string; import_id?: string;
+  assigned_to?: string;
 }): Promise<Lead & { import_id?: string | null }> {
   const data = await apiFetch<DbLead & { import_id?: string | null }>("/api/v1/leads", { method: "POST", body: JSON.stringify(body) }, token);
   return { ...mapDbLead(data), import_id: data.import_id };
@@ -403,6 +406,53 @@ export async function fetchSettings(token: string): Promise<Record<string, strin
 
 export async function patchSettings(token: string, body: Record<string, string>): Promise<Record<string, string>> {
   return apiFetch("/api/v1/settings", { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
+// ─── Roles / users / assignment ───────────────────────────────────────────────
+
+export type Profile = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: "manager" | "employee";
+  territory: "india" | "foreign" | null;
+  is_active: boolean;
+  created_at: string;
+};
+
+export async function fetchUsers(token: string): Promise<Profile[]> {
+  return apiFetch("/api/v1/settings/users", {}, token);
+}
+
+export async function createUser(token: string, body: {
+  email: string; password: string; full_name: string; role: "manager" | "employee"; territory?: "india" | "foreign" | null;
+}): Promise<Profile> {
+  return apiFetch("/api/v1/settings/users", { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+export async function patchUser(token: string, id: string, body: Partial<{
+  full_name: string; role: "manager" | "employee"; territory: "india" | "foreign" | null; is_active: boolean; password: string;
+}>): Promise<Profile> {
+  return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
+export async function fetchAssignmentSettings(token: string): Promise<{ strategy: "round_robin" | "territory" | "manual"; updated_at: string | null }> {
+  return apiFetch("/api/v1/settings/assignment", {}, token);
+}
+
+export async function patchAssignmentSettings(token: string, strategy: "round_robin" | "territory" | "manual") {
+  return apiFetch("/api/v1/settings/assignment", { method: "PATCH", body: JSON.stringify({ strategy }) }, token);
+}
+
+export async function assignLead(token: string, leadId: string, assignedTo: string | null): Promise<Record<string, unknown>> {
+  return apiFetch(`/api/v1/leads/${leadId}/assign`, { method: "PATCH", body: JSON.stringify({ assigned_to: assignedTo }) }, token);
+}
+
+export async function fetchOversight(token: string): Promise<{
+  campaigns: Array<{ id: string; name: string; status: string; created_by: string; total_leads: number; sent_count: number; opened_count: number; replied_count: number; hot_count: number; created_at: string; owner: Profile | null }>;
+  employees: Array<Profile & { assigned_lead_count: number; campaign_count: number }>;
+}> {
+  return apiFetch("/api/v1/dashboard/oversight", {}, token);
 }
 
 export async function fetchLogo(token: string): Promise<{ logo_path: string | null; logo_url: string | null }> {

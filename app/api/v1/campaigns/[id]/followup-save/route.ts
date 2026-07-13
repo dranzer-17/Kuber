@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { FollowUpSaveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/instantly";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 // Save for a follow-up: persist + approve + sync to Instantly in one atomic
 // action, entirely separate from /drafts/[id] PATCH (whose "edit" action
@@ -14,7 +15,8 @@ import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/inst
 // updates the existing one in place otherwise — never bumps a new version,
 // since this is editing the same email, not asking the AI to rewrite it.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
@@ -22,6 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: cl } = await db
     .from("campaign_leads")

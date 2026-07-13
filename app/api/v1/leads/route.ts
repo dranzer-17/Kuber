@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import crypto from "crypto";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
@@ -73,15 +73,14 @@ async function upsertOrg(
 }
 
 export async function GET(req: NextRequest) {
-  let user: { id: string };
+  let user: { id: string; role: "manager" | "employee" };
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
-  void user;
 
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
   const parsed = LeadListQuerySchema.safeParse(sp);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
-  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, page, limit } = parsed.data;
+  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, page, limit } = parsed.data;
   const db = createAdminClient();
 
   let q = db
@@ -93,6 +92,14 @@ export async function GET(req: NextRequest) {
       { count: "exact" }
     )
     .eq("is_deleted", false);
+
+  if (user.role === "employee") {
+    q = q.eq("assigned_to", user.id);
+  } else if (assigned_to === "unassigned") {
+    q = q.is("assigned_to", null);
+  } else if (assigned_to) {
+    q = q.eq("assigned_to", assigned_to);
+  }
 
   if (country) q = q.eq("country", country);
   if (email_status) q = q.eq("email_status", email_status);
@@ -122,13 +129,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   let user: { id: string };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, ...leadFields } = parsed.data;
+  const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, assigned_to, ...leadFields } = parsed.data;
   const db = createAdminClient();
 
   // Check email uniqueness
@@ -166,6 +173,8 @@ export async function POST(req: NextRequest) {
       lead_source: "manual",
       created_by: user.id,
       import_id: importId,
+      assigned_to: assigned_to ?? null,
+      assigned_at: assigned_to ? new Date().toISOString() : null,
       created_at: new Date().toISOString(),
     })
     .select()

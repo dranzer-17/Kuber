@@ -17,6 +17,7 @@ export const CreateLeadSchema = z.object({
   batch_name: z.string().optional(),
   color: z.string().optional(),
   import_id: z.string().uuid().optional(),
+  assigned_to: z.string().uuid().nullable().optional(),
 });
 
 export const PatchLeadSchema = z.object({
@@ -42,6 +43,7 @@ export const LeadListQuerySchema = z.object({
   email_domain_catchall: z.enum(["true", "false"]).optional(),
   import_id: z.string().uuid().optional(),
   created_after: z.string().datetime().optional(),
+  assigned_to: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(2000).default(50),
 });

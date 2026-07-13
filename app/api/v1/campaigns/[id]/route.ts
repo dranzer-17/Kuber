@@ -3,14 +3,18 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchCampaignSchema } from "@/lib/validators/campaigns";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 const EDITABLE_STATUSES = new Set(["draft", "processing"]);
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();
+
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: campaign, error } = await db
     .from("campaigns")
@@ -30,10 +34,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(_req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(_req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();
+
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { error } = await db.from("campaigns").update({ is_deleted: true }).eq("id", id);
   if (error) return fail(500, "INTERNAL", error.message);
@@ -42,7 +49,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -51,6 +58,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const db = createAdminClient();
+
+  try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: existing } = await db.from("campaigns").select("status").eq("id", id).maybeSingle();
   if (!existing) return fail(404, "NOT_FOUND", "Campaign not found");

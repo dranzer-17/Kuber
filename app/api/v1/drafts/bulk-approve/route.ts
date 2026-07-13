@@ -4,9 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { BulkApproveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
+import { assertCampaignAccess } from "@/lib/auth/scope";
 
 export async function POST(req: NextRequest) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
@@ -30,6 +31,8 @@ export async function POST(req: NextRequest) {
       skipped++;
       continue;
     }
+
+    try { await assertCampaignAccess(db, user, draft.campaign_id); } catch { skipped++; continue; }
 
     await db.from("email_drafts").update({
       status: "approved",

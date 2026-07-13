@@ -1,15 +1,31 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import { getUserRole } from "@/lib/auth/roles";
 import { getCampaigns } from "@/lib/server/campaigns";
-import { getDashboardAnalytics } from "@/lib/server/dashboard";
+import { getDashboardAnalytics, type DashboardAnalytics } from "@/lib/server/dashboard";
 import { getImports } from "@/lib/server/imports";
 import { DashboardClient } from "./dashboard-client";
 
+const EMPTY_ANALYTICS: DashboardAnalytics = {
+  temperatureBreakdown: { hot: 0, cold: 0, ooo: 0, unsubscribed: 0, unclassified: 0 },
+  pendingReplies: [],
+  totalLeads: 0,
+  enrichedLeads: 0,
+  pipelineGrowth: [],
+  stageDonutData: [],
+};
+
 export default async function DashboardPage() {
   const db = createAdminClient();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const role = getUserRole(user);
+  const isManager = role === "manager";
+
   const [campaigns, analytics, imports] = await Promise.all([
-    getCampaigns(db),
-    getDashboardAnalytics(db),
-    getImports(db),
+    getCampaigns(db, isManager ? undefined : user?.id),
+    isManager ? getDashboardAnalytics(db) : getEmployeeAnalytics(db, user?.id),
+    isManager ? getImports(db) : Promise.resolve([]),
   ]);
 
   return (
@@ -19,4 +35,13 @@ export default async function DashboardPage() {
       imports={imports}
     />
   );
+}
+
+async function getEmployeeAnalytics(db: ReturnType<typeof createAdminClient>, userId?: string): Promise<DashboardAnalytics> {
+  if (!userId) return EMPTY_ANALYTICS;
+  const [{ count: totalLeads }, { count: enrichedLeads }] = await Promise.all([
+    db.from("leads").select("id", { count: "exact", head: true }).eq("is_deleted", false).eq("assigned_to", userId),
+    db.from("leads").select("id", { count: "exact", head: true }).eq("is_deleted", false).eq("assigned_to", userId).eq("status", "enriched"),
+  ]);
+  return { ...EMPTY_ANALYTICS, totalLeads: totalLeads ?? 0, enrichedLeads: enrichedLeads ?? 0 };
 }

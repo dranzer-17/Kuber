@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { complete } from "@/lib/services/llm";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { deriveDomainFromEmail } from "@/lib/utils/domain";
+import { autoAssignEnrichedLeads } from "@/lib/services/assignment";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const maxDuration = 55;
@@ -369,6 +370,9 @@ Rules:
       .eq("organization_id", org.id)
       .eq("is_deleted", false)
       .not("status", "in", '("open","closed")');
+
+    // Only enriched leads are eligible for employee assignment.
+    await autoAssignEnrichedLeads(db, org.id);
 
     await insertLog(db, {
       org_id: org.id,

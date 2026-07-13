@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { isAdminUser } from "@/lib/auth/admin";
+import { isAppUser } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 
 export type LoginState = { error?: string };
@@ -22,9 +22,9 @@ export async function loginAction(
 
   if (error) return { error: error.message };
 
-  if (!isAdminUser(data.user)) {
+  if (!isAppUser(data.user)) {
     await supabase.auth.signOut();
-    return { error: "This account does not have admin access." };
+    return { error: "This account does not have access." };
   }
 
   redirect("/dashboard");

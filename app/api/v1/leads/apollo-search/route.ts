@@ -1,5 +1,5 @@
 import { NextRequest, after } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fail, ok } from "@/lib/api-response";
 import { ApolloSearchSchema } from "@/lib/validators/leads";
@@ -11,7 +11,7 @@ export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   let user: { id: string };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = ApolloSearchSchema.safeParse(body);

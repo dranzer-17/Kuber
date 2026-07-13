@@ -1,5 +1,5 @@
 import { NextRequest, after } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { EnrichSchema } from "@/lib/validators/leads";
@@ -9,7 +9,7 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = EnrichSchema.safeParse(body);
