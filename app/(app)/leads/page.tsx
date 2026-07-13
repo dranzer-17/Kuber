@@ -25,7 +25,7 @@ import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
 import { KanbanBoard } from "@/components/app/kanban-board";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
@@ -191,7 +191,7 @@ function ColumnsDropdown({ visible, onChange }: {
 
   return (
     <div ref={ref} className="relative">
-      <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setOpen((o) => !o)}>
+      <Button variant="outline" size="sm" className="gap-1.5 bg-card" onClick={() => setOpen((o) => !o)}>
         <Columns3 className="size-3.5" />
         Columns
       </Button>
@@ -790,18 +790,16 @@ export default function LeadsPage() {
       {/* ── Search + Columns toolbar ── */}
       {leadsEntityMode === "individual" && leadsViewMode === "list" && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-border shrink-0">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search leads…"
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search leads…"
+            size="sm"
+            wrapperClassName="flex-1 max-w-xs"
+          />
           <div className="ml-auto flex items-center gap-3">
             <Select value={leadsSort} onValueChange={(value) => setLeadsSort(value as LeadsSort)}>
-              <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border bg-background/80 px-3 text-xs shadow-sm">
+              <SelectTrigger className="h-8 w-36 gap-2 rounded-md border-border bg-card px-3 text-xs shadow-sm">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent align="end" className="min-w-36">
@@ -817,7 +815,7 @@ export default function LeadsPage() {
               className={cn(
                 "relative flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-medium transition-colors",
                 isFiltersEmpty(filters)
-                  ? "border-border bg-background text-muted-foreground hover:text-foreground hover:border-muted-foreground"
+                  ? "border-border bg-card text-muted-foreground hover:text-foreground hover:border-muted-foreground"
                   : "border-primary bg-primary/10 text-primary"
               )}
             >

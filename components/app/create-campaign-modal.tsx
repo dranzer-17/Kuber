@@ -40,6 +40,7 @@ export type Campaign = {
   hot?: number;
   cold?: number;
   followupDays?: number[];
+  createdBy?: string;
 };
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {

@@ -98,6 +98,7 @@ export interface DbCampaign {
   // no longer written on creation — step delays now live in campaign_steps rows.
   followup_day_2: number | null;
   followup_day_3: number | null;
+  created_by: string;
 }
 
 export function mapDbLead(l: DbLead): Lead {
@@ -161,6 +162,7 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     senderName: c.sender_name ?? undefined,
     hot: c.hot_count ?? 0,
     cold: c.cold_count ?? 0,
+    createdBy: c.created_by,
   };
 }
 

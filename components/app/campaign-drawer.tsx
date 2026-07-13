@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Megaphone, Users, Send, MessageSquare, Clock, Gauge,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
-  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Search, Layers, Paperclip, X, Sparkles, Pencil, Reply,
+  List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Layers, Paperclip, X, Sparkles, Pencil, Reply,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { emailPreview } from "@/lib/email-display";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import {
@@ -1562,15 +1563,13 @@ export function CampaignDetail({
           {/* Header row */}
           <div className="px-6 py-3 border-b border-border shrink-0 flex items-center gap-3 flex-wrap">
             {/* Search */}
-            <div className="relative flex-1 min-w-36 max-w-xs">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-              <Input
-                value={leadsSearch}
-                onChange={(e) => setLeadsSearch(e.target.value)}
-                placeholder="Search leads…"
-                className="pl-8 h-8 text-xs bg-card"
-              />
-            </div>
+            <SearchInput
+              value={leadsSearch}
+              onChange={setLeadsSearch}
+              placeholder="Search leads…"
+              size="sm"
+              wrapperClassName="flex-1 min-w-36 max-w-xs"
+            />
 
             {/* Sort pills */}
             <div className="flex items-center rounded-lg border border-border p-0.5">

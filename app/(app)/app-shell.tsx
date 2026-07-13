@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings, Inbox,
-  RefreshCw, Trash2, AlertTriangle, Menu, Eye, UserCog,
+  RefreshCw, Trash2, AlertTriangle, Menu, UserCog,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { ThemeProvider } from "@/lib/theme-context";
@@ -76,7 +76,6 @@ const NAV_ITEMS = [
   { href: "/leads",     label: "Leads",      icon: Users,           exact: false, managerOnly: false },
   { href: "/campaigns", label: "Campaigns",  icon: Megaphone,       exact: false, managerOnly: false },
   { href: "/unibox",    label: "Unibox",     icon: Inbox,           exact: false, managerOnly: false },
-  { href: "/oversight", label: "Oversight",  icon: Eye,             exact: false, managerOnly: true  },
   { href: "/settings/team", label: "Team",   icon: UserCog,         exact: false, managerOnly: true  },
   { href: "/settings",  label: "Settings",   icon: Settings,        exact: false, managerOnly: false },
 ] as const;

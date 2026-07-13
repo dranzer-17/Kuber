@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { isManagerUser } from "@/lib/auth/roles";
 
-const MANAGER_ONLY_PATHS = ["/dashboard/settings/users", "/dashboard/settings/assignment", "/dashboard/oversight"];
+const MANAGER_ONLY_PATHS = ["/settings/team"];
 
 export async function middleware(request: NextRequest) {
   const { response, user } = await updateSession(request);

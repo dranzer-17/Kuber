@@ -14,6 +14,7 @@ import {
 import {
   fetchUsers, createUser, patchUser,
   fetchAssignmentSettings, patchAssignmentSettings,
+  fetchOversight,
   type Profile,
 } from "@/lib/api-client";
 
@@ -28,6 +29,7 @@ export function TeamView() {
   const { session, role, loadingSession } = useApp();
 
   const [users, setUsers] = useState<Profile[]>([]);
+  const [counts, setCounts] = useState<Record<string, { assigned_lead_count: number; campaign_count: number }>>({});
   const [strategy, setStrategy] = useState<"round_robin" | "territory" | "manual">("manual");
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -46,8 +48,12 @@ export function TeamView() {
   useEffect(() => {
     if (!session || role !== "manager") return;
     setLoading(true);
-    Promise.all([fetchUsers(session.access_token), fetchAssignmentSettings(session.access_token)])
-      .then(([u, a]) => { setUsers(u); setStrategy(a.strategy); })
+    Promise.all([fetchUsers(session.access_token), fetchAssignmentSettings(session.access_token), fetchOversight(session.access_token)])
+      .then(([u, a, o]) => {
+        setUsers(u);
+        setStrategy(a.strategy);
+        setCounts(Object.fromEntries(o.employees.map((e) => [e.id, { assigned_lead_count: e.assigned_lead_count, campaign_count: e.campaign_count }])));
+      })
       .catch((e) => toast.error((e as Error).message))
       .finally(() => setLoading(false));
   }, [session, role]);
@@ -189,6 +195,12 @@ export function TeamView() {
                   <p className="text-sm font-medium truncate">{u.full_name || u.email}</p>
                   <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                 </div>
+                {u.role === "employee" && (
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0 tabular-nums">
+                    <span>{counts[u.id]?.assigned_lead_count ?? 0} leads</span>
+                    <span>{counts[u.id]?.campaign_count ?? 0} campaigns</span>
+                  </div>
+                )}
                 <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
                   <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
                   <SelectContent>
