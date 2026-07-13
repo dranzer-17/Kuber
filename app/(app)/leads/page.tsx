@@ -1,6 +1,6 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, type ImportBatch, type Profile } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, type ImportBatch, type Profile, type BulkAssignStrategy } from "@/lib/api-client";
 import { getBatchColor } from "@/lib/constants";
 
 import { useRef, useEffect, useState } from "react";
@@ -9,7 +9,6 @@ import { cn } from "@/lib/utils";
 import {
   type Lead,
   type LeadStatus,
-  type LeadScore,
   type LeadSource,
   type LeadsSort,
   isCampaignEligible,
@@ -21,7 +20,7 @@ import {
   type EnrichmentStage,
 } from "@/lib/leads";
 import { useApp } from "@/lib/app-context";
-import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
+import { Avatar, StatusBadge } from "@/components/leads/lead-ui";
 import { KanbanBoard } from "@/components/app/kanban-board";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
@@ -50,7 +49,7 @@ import {
 } from "@/components/ui/pagination";
 import {
   Users, Megaphone, Plus, List, Kanban, RefreshCw, Columns3, Check,
-  Search, Building2, SlidersHorizontal, X, Trash2, AlertTriangle, UserPlus,
+  Search, Building2, SlidersHorizontal, X, Trash2, AlertTriangle, UserPlus, User,
 } from "lucide-react";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
@@ -58,9 +57,15 @@ import {
 type LeadsViewMode = "list" | "kanban";
 type LeadsEntityMode = "individual" | "orgs";
 
+const ASSIGN_STRATEGIES: { value: BulkAssignStrategy; label: string; description: string }[] = [
+  { value: "manual", label: "Manual", description: "Assign every selected lead to one employee you pick." },
+  { value: "round_robin", label: "Round robin", description: "Split the selected leads evenly across all active employees." },
+  { value: "territory", label: "Territory-based", description: "Route each selected lead by territory (India vs. foreign) based on its country." },
+];
+
 type FilterState = {
   statuses: Set<LeadStatus>;
-  scores: Set<LeadScore>;
+  assignees: Set<string>;
   sources: Set<LeadSource>;
   batchLabels: Set<string>;
   createdFrom: Date | undefined;
@@ -69,7 +74,7 @@ type FilterState = {
 
 const EMPTY_FILTERS: FilterState = {
   statuses: new Set(),
-  scores: new Set(),
+  assignees: new Set(),
   sources: new Set(),
   batchLabels: new Set(),
   createdFrom: undefined,
@@ -79,7 +84,7 @@ const EMPTY_FILTERS: FilterState = {
 function isFiltersEmpty(f: FilterState) {
   return (
     f.statuses.size === 0 &&
-    f.scores.size === 0 &&
+    f.assignees.size === 0 &&
     f.sources.size === 0 &&
     f.batchLabels.size === 0 &&
     !f.createdFrom &&
@@ -90,11 +95,24 @@ function isFiltersEmpty(f: FilterState) {
 function activeFilterCount(f: FilterState) {
   return (
     (f.statuses.size > 0 ? 1 : 0) +
-    (f.scores.size > 0 ? 1 : 0) +
+    (f.assignees.size > 0 ? 1 : 0) +
     (f.sources.size > 0 ? 1 : 0) +
     (f.batchLabels.size > 0 ? 1 : 0) +
     (f.createdFrom || f.createdTo ? 1 : 0)
   );
+}
+
+const UNASSIGNED_FILTER_VALUE = "unassigned";
+
+function assigneeDisplayName(
+  assignedTo: string | null,
+  session: { user: { id: string } } | null,
+  employees: Profile[],
+): string {
+  if (!assignedTo) return "Unassigned";
+  if (session?.user.id === assignedTo) return "You";
+  const match = employees.find((e) => e.id === assignedTo);
+  return match ? (match.full_name || match.email) : "—";
 }
 
 type OrgRow = {
@@ -113,8 +131,8 @@ const COLUMN_DEFS = [
   { key: "email",        label: "Email",        defaultVisible: true  },
   { key: "job_title",   label: "Job Title",    defaultVisible: true  },
   { key: "status",      label: "Status",       defaultVisible: true  },
-  { key: "score",       label: "Score",        defaultVisible: true  },
-  { key: "source",      label: "Source",       defaultVisible: true  },
+  { key: "assigned",    label: "Assigned",     defaultVisible: true  },
+  { key: "source",      label: "Source",       defaultVisible: false },
   { key: "added",       label: "Added",        defaultVisible: true  },
   { key: "organization",label: "Organization", defaultVisible: true  },
   { key: "phone",       label: "Phone",        defaultVisible: false },
@@ -237,11 +255,7 @@ function ColumnsDropdown({ visible, onChange }: {
 
 // ── Filters modal helpers ─────────────────────────────────────────────────────
 
-const ALL_SCORES: LeadScore[]  = ["Hot", "Cold", "—"];
 const ALL_SOURCES: LeadSource[] = ["Apollo", "Excel", "Manual"];
-const SCORE_DOT: Record<LeadScore, string> = {
-  Hot: "bg-orange-400", Cold: "bg-blue-400", "—": "bg-muted-foreground/40",
-};
 
 type DropdownOption<T extends string> = {
   value: T;
@@ -440,16 +454,19 @@ function FiltersModal({
   onChange,
   onClose,
   imports,
+  employees,
 }: {
   filters: FilterState;
   onChange: (f: FilterState) => void;
   onClose: () => void;
   imports?: ImportBatch[];
+  employees?: Profile[];
 }) {
   const safeImports = imports ?? [];
+  const safeEmployees = employees ?? [];
   const [draft, setDraft] = useState<FilterState>({
     statuses:    new Set(filters.statuses),
-    scores:      new Set(filters.scores),
+    assignees:   new Set(filters.assignees),
     sources:     new Set(filters.sources),
     batchLabels: new Set(filters.batchLabels),
     createdFrom: filters.createdFrom,
@@ -459,9 +476,10 @@ function FiltersModal({
   const statusOptions: DropdownOption<LeadStatus>[] = PIPELINE_STAGES.map((s) => ({
     value: s, label: STATUS_LABELS[s], dot: STATUS_DOT[s],
   }));
-  const scoreOptions: DropdownOption<LeadScore>[] = ALL_SCORES.map((s) => ({
-    value: s, label: s === "Hot" ? "Hot Lead" : s === "Cold" ? "Cold Lead" : "Unscored", dot: SCORE_DOT[s],
-  }));
+  const assigneeOptions: DropdownOption<string>[] = [
+    { value: UNASSIGNED_FILTER_VALUE, label: "Unassigned" },
+    ...safeEmployees.map((e) => ({ value: e.id, label: e.full_name || e.email })),
+  ];
   const sourceOptions: DropdownOption<LeadSource>[] = ALL_SOURCES.map((s) => ({
     value: s, label: s,
   }));
@@ -483,12 +501,14 @@ function FiltersModal({
             selected={draft.statuses}
             onChange={(s) => setDraft((d) => ({ ...d, statuses: s }))}
           />
-          <MultiSelectDropdown
-            label="Score"
-            options={scoreOptions}
-            selected={draft.scores}
-            onChange={(s) => setDraft((d) => ({ ...d, scores: s }))}
-          />
+          {safeEmployees.length > 0 && (
+            <MultiSelectDropdown
+              label="Assigned"
+              options={assigneeOptions}
+              selected={draft.assignees}
+              onChange={(s) => setDraft((d) => ({ ...d, assignees: s }))}
+            />
+          )}
           <MultiSelectDropdown
             label="Source"
             options={sourceOptions}
@@ -517,7 +537,7 @@ function FiltersModal({
         <div className="flex items-center justify-between px-5 py-4 border-t border-border shrink-0">
           <button
             type="button"
-            onClick={() => setDraft({ statuses: new Set(), scores: new Set(), sources: new Set(), batchLabels: new Set(), createdFrom: undefined, createdTo: undefined })}
+            onClick={() => setDraft({ statuses: new Set(), assignees: new Set(), sources: new Set(), batchLabels: new Set(), createdFrom: undefined, createdTo: undefined })}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             Clear all
@@ -565,17 +585,17 @@ export default function LeadsPage() {
     (searchParams.get("sort") as LeadsSort) || "newest"
   );
   const [filters,         setFilters        ] = useState<FilterState>(() => {
-    const statusesParam = searchParams.get("statuses");
-    const scoresParam   = searchParams.get("scores");
-    const sourcesParam  = searchParams.get("sources");
-    const batchesParam  = searchParams.get("batches");
-    const fromParam     = searchParams.get("from");
-    const toParam       = searchParams.get("to");
+    const statusesParam  = searchParams.get("statuses");
+    const assigneesParam = searchParams.get("assignees");
+    const sourcesParam   = searchParams.get("sources");
+    const batchesParam   = searchParams.get("batches");
+    const fromParam      = searchParams.get("from");
+    const toParam        = searchParams.get("to");
     return {
-      statuses:    statusesParam ? new Set(statusesParam.split(",") as LeadStatus[]) : new Set(),
-      scores:      scoresParam   ? new Set(scoresParam.split(",")   as LeadScore[])  : new Set(),
-      sources:     sourcesParam  ? new Set(sourcesParam.split(",")  as LeadSource[]) : new Set(),
-      batchLabels: batchesParam  ? new Set(batchesParam.split(","))                  : new Set(),
+      statuses:    statusesParam  ? new Set(statusesParam.split(",") as LeadStatus[]) : new Set(),
+      assignees:   assigneesParam ? new Set(assigneesParam.split(","))               : new Set(),
+      sources:     sourcesParam   ? new Set(sourcesParam.split(",")  as LeadSource[]) : new Set(),
+      batchLabels: batchesParam   ? new Set(batchesParam.split(","))                  : new Set(),
       createdFrom: fromParam ? new Date(fromParam) : undefined,
       createdTo:   toParam   ? new Date(toParam)   : undefined,
     };
@@ -588,14 +608,17 @@ export default function LeadsPage() {
   const [bulkDeleting,     setBulkDeleting    ] = useState(false);
   const [showBulkAssign,   setShowBulkAssign  ] = useState(false);
   const [bulkAssigning,    setBulkAssigning   ] = useState(false);
+  const [assignStrategy,   setAssignStrategy  ] = useState<BulkAssignStrategy>("manual");
   const [assignTarget,     setAssignTarget    ] = useState<string>("unassigned");
   const [employees,        setEmployees       ] = useState<Profile[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
 
   useEffect(() => {
     if (role !== "manager" || !session) return;
+    setEmployeesLoading(true);
     fetchUsers(session.access_token).then((users) => {
       setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setEmployeesLoading(false));
   }, [role, session]);
 
   // Sync filter/view state into URL so refresh preserves it
@@ -606,7 +629,7 @@ export default function LeadsPage() {
     if (leadsViewMode !== "list")     params.set("view",     leadsViewMode);
     if (leadsEntityMode !== "individual") params.set("entity", leadsEntityMode);
     if (filters.statuses.size > 0)     params.set("statuses", [...filters.statuses].join(","));
-    if (filters.scores.size   > 0)     params.set("scores",   [...filters.scores].join(","));
+    if (filters.assignees.size > 0)    params.set("assignees", [...filters.assignees].join(","));
     if (filters.sources.size  > 0)     params.set("sources",  [...filters.sources].join(","));
     if (filters.batchLabels.size > 0)  params.set("batches",  [...filters.batchLabels].join(","));
     if (filters.createdFrom)          params.set("from", filters.createdFrom.toISOString().slice(0, 10));
@@ -636,7 +659,12 @@ export default function LeadsPage() {
   const filteredLeads = sortLeads(
     leads.filter((l) => {
       if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
-      if (filters.scores.size   > 0 && !filters.scores.has(l.score))   return false;
+      if (filters.assignees.size > 0) {
+        const matchesAssignee = [...filters.assignees].some((v) =>
+          v === UNASSIGNED_FILTER_VALUE ? !l.assignedTo : l.assignedTo === v
+        );
+        if (!matchesAssignee) return false;
+      }
       if (filters.sources.size  > 0 && !filters.sources.has(l.source)) return false;
       if (filters.batchLabels.size > 0 && !filters.batchLabels.has(l.batchLabel ?? "")) return false;
       if (filters.createdFrom) {
@@ -807,7 +835,7 @@ export default function LeadsPage() {
             size="sm"
             wrapperClassName="flex-1 max-w-xs"
           />
-          {someChecked && (
+          {someChecked && role === "manager" && (
             <Button
               size="sm" variant="destructive" className="gap-1.5 text-white!"
               onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
@@ -982,7 +1010,7 @@ export default function LeadsPage() {
                       </span>
                     </TableHead>
                   )}
-                  {visibleCols.score     && <TableHead className="text-xs font-semibold text-muted-foreground">Score</TableHead>}
+                  {visibleCols.assigned  && <TableHead className="text-xs font-semibold text-muted-foreground">Assigned</TableHead>}
                   {visibleCols.source    && <TableHead className="text-xs font-semibold text-muted-foreground">Source</TableHead>}
                   {visibleCols.domain    && <TableHead className="text-xs font-semibold text-muted-foreground">Domain</TableHead>}
                   {visibleCols.country   && <TableHead className="text-xs font-semibold text-muted-foreground">Country</TableHead>}
@@ -1038,7 +1066,20 @@ export default function LeadsPage() {
                         {visibleCols.phone     && <TableCell><span className="text-xs text-muted-foreground">{lead.phone || "—"}</span></TableCell>}
                         {visibleCols.job_title && <TableCell><span className="text-sm">{lead.jobTitle}</span></TableCell>}
                         {visibleCols.status    && <TableCell><StatusBadge status={lead.status} /></TableCell>}
-                        {visibleCols.score     && <TableCell><ScoreBadge score={lead.score} /></TableCell>}
+                        {visibleCols.assigned  && (
+                          <TableCell>
+                            {lead.assignedTo ? (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
+                                <User className="size-3 text-muted-foreground shrink-0" />
+                                {assigneeDisplayName(lead.assignedTo, session, employees)}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-500/15 text-yellow-400 border border-yellow-500/25">
+                                Unassigned
+                              </span>
+                            )}
+                          </TableCell>
+                        )}
                         {visibleCols.source    && <TableCell><span className="text-xs text-muted-foreground">{lead.source}</span></TableCell>}
                         {visibleCols.domain    && <TableCell><span className="text-xs text-muted-foreground">{lead.domain || "—"}</span></TableCell>}
                         {visibleCols.country   && <TableCell><span className="text-xs text-muted-foreground">{lead.country || "—"}</span></TableCell>}
@@ -1130,6 +1171,7 @@ export default function LeadsPage() {
           onChange={setFilters}
           onClose={() => setShowFilters(false)}
           imports={importBatches}
+          employees={employees}
         />
       )}
 
@@ -1194,18 +1236,47 @@ export default function LeadsPage() {
               </div>
               <div>
                 <p className="font-semibold text-sm">Assign {checkedIds.size} lead{checkedIds.size !== 1 ? "s" : ""}</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">Choose an employee, or leave unassigned to return them to the pool.</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">Choose how these leads should be routed to employees.</p>
               </div>
             </div>
-            <Select value={assignTarget} onValueChange={setAssignTarget}>
-              <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
-                {employees.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+            <div className="grid gap-2">
+              {ASSIGN_STRATEGIES.map((s) => (
+                <label
+                  key={s.value}
+                  className="flex items-start gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-secondary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+                >
+                  <input
+                    type="radio"
+                    name="assign-strategy"
+                    className="mt-1"
+                    checked={assignStrategy === s.value}
+                    onChange={() => setAssignStrategy(s.value)}
+                  />
+                  <div>
+                    <p className="text-sm font-medium">{s.label}</p>
+                    <p className="text-xs text-muted-foreground">{s.description}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            {assignStrategy === "manual" && (
+              employeesLoading ? (
+                <div className="h-10 rounded-md border border-border bg-secondary/40 animate-pulse" />
+              ) : (
+                <Select value={assignTarget} onValueChange={setAssignTarget}>
+                  <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                  <SelectContent className="z-300">
+                    <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
+                    {employees.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )
+            )}
+
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -1217,12 +1288,17 @@ export default function LeadsPage() {
               </button>
               <button
                 type="button"
-                disabled={bulkAssigning || !session}
+                disabled={bulkAssigning || !session || (assignStrategy === "manual" && employeesLoading)}
                 onClick={async () => {
                   if (!session) return;
                   setBulkAssigning(true);
                   try {
-                    await bulkAssignLeads(session.access_token, [...checkedIds], assignTarget === "unassigned" ? null : assignTarget);
+                    await bulkAssignLeads(
+                      session.access_token,
+                      [...checkedIds],
+                      assignStrategy,
+                      assignStrategy === "manual" ? (assignTarget === "unassigned" ? null : assignTarget) : undefined,
+                    );
                     setCheckedIds(new Set());
                     setShowBulkAssign(false);
                     void loadLeads(session.access_token);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Building2, Globe2, Mail, Megaphone, Users, X,
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
@@ -167,6 +167,11 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
     city: "", state: "", country: "",
   });
 
+  // Tracks the lead id the drawer is currently showing so in-flight fetches
+  // can't update state / call onLeadUpdated after the user has closed it.
+  const activeLeadIdRef = useRef<string | null>(null);
+  activeLeadIdRef.current = lead?.id ?? null;
+
   const display = freshLead ?? lead;
 
   async function getToken() {
@@ -180,10 +185,13 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       const tok = await getToken();
       if (!tok) return;
       const updated = await fetchLead(tok, l.id);
+      if (activeLeadIdRef.current !== l.id) return;
       setFreshLead(updated);
       onLeadUpdated?.(updated);
     } catch { /* keep stale */ }
-    finally { setLoadingLead(false); }
+    finally {
+      if (activeLeadIdRef.current === l.id) setLoadingLead(false);
+    }
   }, [onLeadUpdated]);
 
   const fetchEnrichStatus = useCallback(async (orgId: string) => {
@@ -194,6 +202,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
         headers: { Authorization: `Bearer ${tok}` },
       });
       const json = await res.json() as { success: boolean; data?: EnrichStatus };
+      if (activeLeadIdRef.current == null) return;
       if (json.success && json.data) setEnrichData(json.data);
     } catch { /* non-fatal */ }
   }, []);
@@ -253,10 +262,11 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   }, [lead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (!lead) return;
     function handler(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [lead, onClose]);
 
   async function handleRetry() {
     if (!display?.orgId) return;
@@ -292,7 +302,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       <div className={cn(
         "fixed top-0 right-0 z-50 h-full w-[520px] max-w-[95vw] bg-card border-l border-border shadow-2xl",
         "flex flex-col transition-transform duration-300 ease-in-out",
-        open ? "translate-x-0" : "translate-x-full",
+        open ? "translate-x-0" : "translate-x-full pointer-events-none",
       )}>
         {display && (
           <>

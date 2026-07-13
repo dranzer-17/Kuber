@@ -318,7 +318,9 @@ function AppShell({ children }: { children: React.ReactNode }) {
         onClose={() => setSelectedLead(null)}
         onLeadUpdated={(updated) => {
           setLeads((prev) => prev.map((l) => l.id === updated.id ? updated : l));
-          setSelectedLead(updated);
+          // Only refresh the open drawer — never reopen after the user closed it
+          // (in-flight fetchFresh would otherwise race and set selectedLead again).
+          setSelectedLead((prev) => (prev?.id === updated.id ? updated : prev));
         }}
         onOrgClick={(id) => setSelectedOrgId(id)}
       />
