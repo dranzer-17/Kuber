@@ -13,16 +13,9 @@ import {
 } from "@/components/ui/select";
 import {
   fetchUsers, createUser, patchUser,
-  fetchAssignmentSettings, patchAssignmentSettings,
   fetchOversight,
   type Profile,
 } from "@/lib/api-client";
-
-const STRATEGIES = [
-  { value: "manual", label: "Manual", description: "Manager assigns each lead by hand — at creation or later." },
-  { value: "round_robin", label: "Round robin", description: "New enriched leads rotate evenly across all active employees." },
-  { value: "territory", label: "Territory-based", description: "Leads route to employees by territory (India vs. foreign) based on lead country." },
-] as const;
 
 export function TeamView() {
   const router = useRouter();
@@ -30,7 +23,6 @@ export function TeamView() {
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [counts, setCounts] = useState<Record<string, { assigned_lead_count: number; campaign_count: number }>>({});
-  const [strategy, setStrategy] = useState<"round_robin" | "territory" | "manual">("manual");
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -48,10 +40,9 @@ export function TeamView() {
   useEffect(() => {
     if (!session || role !== "manager") return;
     setLoading(true);
-    Promise.all([fetchUsers(session.access_token), fetchAssignmentSettings(session.access_token), fetchOversight(session.access_token)])
-      .then(([u, a, o]) => {
+    Promise.all([fetchUsers(session.access_token), fetchOversight(session.access_token)])
+      .then(([u, o]) => {
         setUsers(u);
-        setStrategy(a.strategy);
         setCounts(Object.fromEntries(o.employees.map((e) => [e.id, { assigned_lead_count: e.assigned_lead_count, campaign_count: e.campaign_count }])));
       })
       .catch((e) => toast.error((e as Error).message))
@@ -88,48 +79,13 @@ export function TeamView() {
     }
   }
 
-  async function handleStrategyChange(next: "round_robin" | "territory" | "manual") {
-    if (!session) return;
-    setStrategy(next);
-    try {
-      await patchAssignmentSettings(session.access_token, next);
-      toast.success("Assignment strategy updated");
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  }
-
   if (loadingSession || role !== "manager") return null;
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Shield className="size-5" /> Team & Assignment</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage Manager/Employee accounts and how leads route to employees.</p>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-        <h2 className="text-sm font-semibold">Assignment strategy</h2>
-        <div className="grid gap-2">
-          {STRATEGIES.map((s) => (
-            <label
-              key={s.value}
-              className="flex items-start gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-secondary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
-            >
-              <input
-                type="radio"
-                name="strategy"
-                className="mt-1"
-                checked={strategy === s.value}
-                onChange={() => handleStrategyChange(s.value)}
-              />
-              <div>
-                <p className="text-sm font-medium">{s.label}</p>
-                <p className="text-xs text-muted-foreground">{s.description}</p>
-              </div>
-            </label>
-          ))}
-        </div>
+        <h1 className="text-xl font-bold flex items-center gap-2"><Shield className="size-5" /> Team</h1>
+        <p className="text-sm text-muted-foreground mt-1">Manage Manager/Employee accounts.</p>
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5 space-y-4">

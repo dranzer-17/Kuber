@@ -3,11 +3,13 @@ import { z } from "zod";
 import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { bulkAssignByStrategy } from "@/lib/services/assignment";
 
-const BulkAssignSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1),
-  assigned_to: z.string().uuid().nullable(),
-});
+const BulkAssignSchema = z.discriminatedUnion("strategy", [
+  z.object({ strategy: z.literal("manual"), ids: z.array(z.string().uuid()).min(1), assigned_to: z.string().uuid().nullable() }),
+  z.object({ strategy: z.literal("round_robin"), ids: z.array(z.string().uuid()).min(1) }),
+  z.object({ strategy: z.literal("territory"), ids: z.array(z.string().uuid()).min(1) }),
+]);
 
 export async function POST(req: NextRequest) {
   try { await requireManager(req); } catch (r) { return r as Response; }
@@ -18,7 +20,7 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
 
-  if (parsed.data.assigned_to) {
+  if (parsed.data.strategy === "manual" && parsed.data.assigned_to) {
     const { data: employee } = await db
       .from("profiles")
       .select("id, is_active")
@@ -27,16 +29,15 @@ export async function POST(req: NextRequest) {
     if (!employee || !employee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
   }
 
-  const { error, count } = await db
-    .from("leads")
-    .update({
-      assigned_to: parsed.data.assigned_to,
-      assigned_at: parsed.data.assigned_to ? new Date().toISOString() : null,
-      updated_at: new Date().toISOString(),
-    })
-    .in("id", parsed.data.ids);
-
-  if (error) return fail(500, "INTERNAL", error.message);
-
-  return ok({ assigned: count ?? parsed.data.ids.length });
+  try {
+    const result = await bulkAssignByStrategy(
+      db,
+      parsed.data.ids,
+      parsed.data.strategy,
+      parsed.data.strategy === "manual" ? parsed.data.assigned_to : null,
+    );
+    return ok(result);
+  } catch (e) {
+    return fail(500, "INTERNAL", (e as Error).message);
+  }
 }

@@ -15,7 +15,3 @@ export const PatchUserSchema = z.object({
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),
 });
-
-export const PatchAssignmentSettingsSchema = z.object({
-  strategy: z.enum(["round_robin", "territory", "manual"]),
-});

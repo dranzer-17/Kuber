@@ -209,8 +209,16 @@ export async function bulkDeleteLeads(token: string, ids: string[]): Promise<{ d
   return apiFetch("/api/v1/leads/bulk-delete", { method: "POST", body: JSON.stringify({ ids }) }, token);
 }
 
-export async function bulkAssignLeads(token: string, ids: string[], assignedTo: string | null): Promise<{ assigned: number }> {
-  return apiFetch("/api/v1/leads/bulk-assign", { method: "POST", body: JSON.stringify({ ids, assigned_to: assignedTo }) }, token);
+export type BulkAssignStrategy = "manual" | "round_robin" | "territory";
+
+export async function bulkAssignLeads(
+  token: string,
+  ids: string[],
+  strategy: BulkAssignStrategy,
+  assignedTo?: string | null,
+): Promise<{ assigned: number; skipped: number }> {
+  const body = strategy === "manual" ? { strategy, ids, assigned_to: assignedTo ?? null } : { strategy, ids };
+  return apiFetch("/api/v1/leads/bulk-assign", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
 export async function deleteCampaign(token: string, id: string): Promise<{ deleted: string }> {
@@ -440,18 +448,6 @@ export async function patchUser(token: string, id: string, body: Partial<{
   full_name: string; role: "manager" | "employee"; territory: "india" | "foreign" | null; is_active: boolean; password: string;
 }>): Promise<Profile> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
-}
-
-export async function fetchAssignmentSettings(token: string): Promise<{ strategy: "round_robin" | "territory" | "manual"; updated_at: string | null }> {
-  return apiFetch("/api/v1/settings/assignment", {}, token);
-}
-
-export async function patchAssignmentSettings(token: string, strategy: "round_robin" | "territory" | "manual") {
-  return apiFetch("/api/v1/settings/assignment", { method: "PATCH", body: JSON.stringify({ strategy }) }, token);
-}
-
-export async function assignLead(token: string, leadId: string, assignedTo: string | null): Promise<Record<string, unknown>> {
-  return apiFetch(`/api/v1/leads/${leadId}/assign`, { method: "PATCH", body: JSON.stringify({ assigned_to: assignedTo }) }, token);
 }
 
 export async function fetchOversight(token: string): Promise<{
