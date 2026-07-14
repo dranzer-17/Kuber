@@ -96,7 +96,7 @@ function BatchNameField({
               type="button"
               onClick={() => setSwatchOpen((o) => !o)}
               className={cn(
-                "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-transparent text-sm transition-colors hover:bg-secondary",
+                "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-card text-sm transition-colors hover:bg-secondary",
                 swatchOpen && "ring-2 ring-ring border-transparent",
               )}
             >
@@ -473,7 +473,7 @@ function IndustryKeywordsDropdown({
                     if (e.key === "Escape") setOpen(false);
                   }}
                   placeholder="e.g. masterbatch manufacturer…"
-                  className="flex-1 bg-transparent text-xs border border-input rounded-md px-3 py-1.5 outline-none focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                  className="flex-1 bg-card text-xs border border-input rounded-md px-3 py-1.5 outline-none focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
                 />
                 <Button
                   type="button"
@@ -1002,25 +1002,22 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
             <p className="text-sm font-medium truncate">{fileName}</p>
             <p className="text-xs text-muted-foreground">{rows.length} rows · {headers.length} columns detected</p>
           </div>
-          <Button variant="outline" size="sm" className="shrink-0" onClick={() => setShowRawPreview(true)}>View</Button>
-          <Button variant="outline" size="sm" className="shrink-0" onClick={reset}>Change</Button>
+          <Button variant="outline" size="sm" className="shrink-0 bg-card" onClick={() => setShowRawPreview(true)}>View</Button>
+          <Button variant="outline" size="sm" className="shrink-0 bg-card" onClick={reset}>Change</Button>
         </div>
 
-        <div className="rounded-xl border border-border overflow-hidden">
-          <div className="grid grid-cols-2 px-4 py-2.5 bg-secondary/40 border-b border-border">
-            <span className="text-xs font-semibold text-muted-foreground">Platform field</span>
-            <span className="text-xs font-semibold text-muted-foreground">Your column</span>
-          </div>
-          {PLATFORM_FIELDS.map((pf) => {
+        <div className="space-y-3">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Column mapping</p>
+          {PLATFORM_FIELDS.map((pf, i) => {
             const mapped = mapping[pf.key];
             return (
-              <div key={pf.key} className="grid grid-cols-2 px-4 py-3 border-b border-border last:border-0 items-center gap-3">
+              <div key={pf.key} className={cn("grid grid-cols-2 items-center gap-3", i > 0 && "border-t border-border pt-3")}>
                 <div>
                   <span className="text-sm">{pf.label}{pf.required && <span className="text-destructive ml-1 text-xs">*</span>}</span>
                   {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
                 </div>
                 <Select value={mapped || "__none"} onValueChange={(v) => setMapping((m) => { const next = { ...m }; if (v === "__none") delete next[pf.key]; else next[pf.key] = v; return next; })}>
-                  <SelectTrigger className={cn("h-8 text-xs", mapped ? "border-primary/40 bg-primary/5" : "bg-card")}>
+                  <SelectTrigger className="h-8 text-xs bg-card">
                     <SelectValue placeholder="Not mapped" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1059,7 +1056,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={reset}>Back</Button>
+            <Button variant="outline" size="sm" className="bg-card" onClick={reset}>Back</Button>
             <Button
               disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}
               onClick={() => {
@@ -1139,7 +1136,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
           <StatTile key={label} label={label} value={value ?? 0} tone={tone} />
         ))}
       </div>
-      <Button variant="outline" onClick={reset}>Upload another file</Button>
+      <Button variant="outline" className="bg-card" onClick={reset}>Upload another file</Button>
     </div>
   );
 }
@@ -1265,36 +1262,34 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       </p>
 
       {/* Org */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Organization</p>
-        <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-          <div className="space-y-1.5">
-            <Label>Organization name <span className="text-destructive">*</span></Label>
-            <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Industry</Label>
-            <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Company website / domain <span className="text-destructive">*</span></Label>
-            <Input value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
-            <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Country</Label>
-            <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
-          </div>
+        <div className="space-y-1.5">
+          <Label>Organization name <span className="text-destructive">*</span></Label>
+          <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Industry</Label>
+          <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Company website / domain <span className="text-destructive">*</span></Label>
+          <Input value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
+          <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Country</Label>
+          <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
         </div>
       </div>
 
       {/* People */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">People</p>
         {leads.map((lead, index) => (
-          <div key={index} className="rounded-xl border border-border bg-card p-4 space-y-3 relative">
+          <div key={index} className={cn("space-y-3 relative", index > 0 && "border-t border-border pt-4")}>
             {leads.length > 1 && (
-              <button type="button" onClick={() => removeLead(index)} className="absolute top-3 right-3 text-muted-foreground hover:text-foreground transition-colors" aria-label="Remove lead">
+              <button type="button" onClick={() => removeLead(index)} className="absolute top-0 right-0 text-muted-foreground hover:text-foreground transition-colors" aria-label="Remove lead">
                 <X className="size-4" />
               </button>
             )}
@@ -1318,7 +1313,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
             </div>
           </div>
         ))}
-        <Button type="button" variant="outline" className="gap-1.5 w-full" onClick={addLead}>
+        <Button type="button" variant="outline" className="gap-1.5 w-full bg-card" onClick={addLead}>
           <Plus className="size-3.5" /> Add lead
         </Button>
       </div>
