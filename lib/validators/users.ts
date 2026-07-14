@@ -28,4 +28,7 @@ export const PatchUserSchema = z.object({
   territory: TerritorySchema.nullable().optional(),
   is_active: z.boolean().optional(),
   password: z.string().min(8).optional(),
+  // Required when deactivating someone who still holds leads/campaigns —
+  // the manager must explicitly pick who inherits that work.
+  reassign_to: z.string().uuid().optional(),
 });

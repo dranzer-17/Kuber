@@ -12,7 +12,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
   const parsed = PatchUserSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
-  const { password, role, territory, full_name, is_active } = parsed.data;
+  const { password, role, territory, full_name, is_active, reassign_to } = parsed.data;
 
   const db = createAdminClient();
 
@@ -53,6 +53,68 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  // Deactivating someone who still holds leads/campaigns requires the manager
+  // to explicitly pick who inherits that work — no silent orphaning, and no
+  // auto-guessed reassignment either.
+  if (is_active === false) {
+    const [{ count: heldCampaigns }, { count: heldLeads }] = await Promise.all([
+      db.from("campaigns").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
+      db.from("leads").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
+    ]);
+
+    if ((heldCampaigns ?? 0) > 0 || (heldLeads ?? 0) > 0) {
+      if (!reassign_to) {
+        return fail(
+          400,
+          "REASSIGN_REQUIRED",
+          "This user still holds leads/campaigns. Pick someone to reassign them to before deactivating.",
+          { held_campaigns: heldCampaigns ?? 0, held_leads: heldLeads ?? 0 },
+        );
+      }
+      if (reassign_to === id) {
+        return fail(400, "VALIDATION_ERROR", "Cannot reassign to the account being deactivated.");
+      }
+
+      const { data: newOwner } = await db
+        .from("profiles")
+        .select("id, role, is_active")
+        .eq("id", reassign_to)
+        .maybeSingle();
+      if (!newOwner || !newOwner.is_active || newOwner.role !== "employee") {
+        return fail(400, "INVALID_ASSIGNEE", "Reassignment target must be an active employee.");
+      }
+
+      const now = new Date().toISOString();
+
+      const { data: heldCampaignRows } = await db
+        .from("campaigns")
+        .select("id")
+        .eq("assigned_to", id)
+        .eq("is_deleted", false);
+      if (heldCampaignRows && heldCampaignRows.length > 0) {
+        await db
+          .from("campaigns")
+          .update({ assigned_to: reassign_to, assigned_at: now, updated_by: caller.id })
+          .eq("assigned_to", id)
+          .eq("is_deleted", false);
+        await db.from("campaign_assignments").insert(
+          heldCampaignRows.map((c) => ({
+            campaign_id: c.id as string,
+            assigned_to: reassign_to,
+            assigned_by: caller.id,
+            previous_assignee: id,
+          })),
+        );
+      }
+
+      await db
+        .from("leads")
+        .update({ assigned_to: reassign_to, assigned_at: now })
+        .eq("assigned_to", id)
+        .eq("is_deleted", false);
+    }
+  }
+
   if (password || role || is_active !== undefined) {
     // Deactivation must also block Supabase Auth itself — banning stops both new
     // sign-ins and refresh-token renewal, so a deactivated user can't log back in
@@ -79,16 +141,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
-
-  // Deactivation must never silently strand work: report what the user still
-  // holds so the Team UI can prompt the manager to reassign it (planning.md 2.2).
-  if (is_active === false) {
-    const [{ count: heldCampaigns }, { count: heldLeads }] = await Promise.all([
-      db.from("campaigns").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
-      db.from("leads").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
-    ]);
-    return ok({ ...data, held_campaigns: heldCampaigns ?? 0, held_leads: heldLeads ?? 0 });
-  }
 
   return ok(data);
 }

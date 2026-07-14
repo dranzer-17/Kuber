@@ -61,6 +61,10 @@ export function TeamView() {
   const [territory, setTerritory] = useState<Territory | "">("");
   const [showPassword, setShowPassword] = useState(false);
 
+  const [reassignTarget, setReassignTarget] = useState<Profile | null>(null);
+  const [reassignTo, setReassignTo] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+
   useEffect(() => {
     if (!loadingSession && role !== "manager") router.replace("/dashboard");
   }, [loadingSession, role, router]);
@@ -104,20 +108,49 @@ export function TeamView() {
     }
   }
 
-  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean }>) {
+  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean; reassign_to: string }>) {
     if (!session) return;
     try {
-      const updated = await patchUser(session.access_token, id, patch) as Profile & { held_campaigns?: number; held_leads?: number };
+      const updated = await patchUser(session.access_token, id, patch);
       setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
-      // Deactivation must never silently strand work (planning.md Phase 2.2).
-      if (patch.is_active === false && ((updated.held_campaigns ?? 0) > 0 || (updated.held_leads ?? 0) > 0)) {
-        toast.warning(
-          `${updated.full_name || updated.email} still holds ${updated.held_campaigns ?? 0} campaign(s) and ${updated.held_leads ?? 0} lead(s) — reassign them from the Campaigns and Leads pages.`,
-          { duration: 10000 },
-        );
-      }
+      return true;
     } catch (e) {
-      toast.error((e as Error).message);
+      const err = e as Error & { code?: string };
+      // Backend requires an explicit reassignment target before deactivating
+      // someone who still holds leads/campaigns — pop the picker instead of
+      // just erroring out (client-side counts can also be stale).
+      if (err.code === "REASSIGN_REQUIRED" && patch.is_active === false) {
+        const target = users.find((u) => u.id === id);
+        if (target) setReassignTarget(target);
+        return false;
+      }
+      toast.error(err.message);
+      return false;
+    }
+  }
+
+  function handleDeactivateClick(u: Profile) {
+    const leadCount = counts[u.id]?.assigned_lead_count ?? 0;
+    const campaignCount = counts[u.id]?.campaign_count ?? 0;
+    if (leadCount > 0 || campaignCount > 0) {
+      setReassignTarget(u);
+      return;
+    }
+    void handlePatch(u.id, { is_active: false });
+  }
+
+  async function handleConfirmReassign() {
+    if (!reassignTarget || !reassignTo) return;
+    setReassigning(true);
+    try {
+      const ok = await handlePatch(reassignTarget.id, { is_active: false, reassign_to: reassignTo });
+      if (ok) {
+        toast.success(`Reassigned ${reassignTarget.full_name || reassignTarget.email}'s leads and campaigns, and deactivated the account.`);
+        setReassignTarget(null);
+        setReassignTo("");
+      }
+    } finally {
+      setReassigning(false);
     }
   }
 
@@ -346,7 +379,7 @@ export function TeamView() {
                               ? "border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
                               : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400",
                           )}
-                          onClick={() => handlePatch(u.id, { is_active: !u.is_active })}
+                          onClick={() => (u.is_active ? handleDeactivateClick(u) : void handlePatch(u.id, { is_active: true }))}
                         >
                           {u.is_active ? "Deactivate" : "Reactivate"}
                         </Button>
@@ -360,6 +393,78 @@ export function TeamView() {
             </TableBody>
           </Table>
         )}
+      </div>
+
+      {reassignTarget && (
+        <ReassignBeforeDeactivateModal
+          target={reassignTarget}
+          counts={counts[reassignTarget.id]}
+          employees={users.filter((u) => u.role === "employee" && u.is_active && u.id !== reassignTarget.id)}
+          value={reassignTo}
+          onChange={setReassignTo}
+          saving={reassigning}
+          onConfirm={handleConfirmReassign}
+          onCancel={() => { setReassignTarget(null); setReassignTo(""); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReassignBeforeDeactivateModal({
+  target,
+  counts,
+  employees,
+  value,
+  onChange,
+  saving,
+  onConfirm,
+  onCancel,
+}: {
+  target: Profile;
+  counts?: { assigned_lead_count: number; campaign_count: number };
+  employees: Profile[];
+  value: string;
+  onChange: (v: string) => void;
+  saving: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const displayName = target.full_name || target.email;
+  const leadCount = counts?.assigned_lead_count ?? 0;
+  const campaignCount = counts?.campaign_count ?? 0;
+
+  return (
+    <div className="fixed inset-0 z-200 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 space-y-4">
+        <div>
+          <p className="text-sm font-bold">Reassign before deactivating</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {displayName} still holds {leadCount} lead{leadCount !== 1 ? "s" : ""} and {campaignCount} campaign{campaignCount !== 1 ? "s" : ""}.
+            Pick who takes over before this account is deactivated.
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Reassign all leads and campaigns to</Label>
+          <Select value={value} onValueChange={onChange}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
+            <SelectContent>
+              {employees.map((e) => (
+                <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {employees.length === 0 && (
+            <p className="text-xs text-destructive">No other active employee is available to reassign to.</p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
+          <Button type="button" onClick={onConfirm} disabled={saving || !value}>
+            {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />} Reassign & deactivate
+          </Button>
+        </div>
       </div>
     </div>
   );

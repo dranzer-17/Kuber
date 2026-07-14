@@ -32,7 +32,10 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string)
       await supabase.auth.signOut();
       if (typeof window !== "undefined") window.location.href = "/";
     }
-    throw new Error(json.error?.message ?? `API error ${res.status}`);
+    const err = new Error(json.error?.message ?? `API error ${res.status}`) as Error & { code?: string; details?: unknown };
+    err.code = json.error?.code;
+    err.details = json.error?.details;
+    throw err;
   }
   return json.data as T;
 }
@@ -524,7 +527,7 @@ export async function createUser(token: string, body: {
 }
 
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; password: string;
+  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; password: string; reassign_to: string;
 }>): Promise<Profile> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }
