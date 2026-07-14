@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo } from "@/lib/api-client";
+import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo, fetchUsers } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/branding";
@@ -213,6 +213,8 @@ export function SettingsView() {
   const [saving,  setSaving  ] = useState(false);
   const [error,   setError   ] = useState("");
 
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
   const activeAiNavItem        = aiNavItems.find((i) => i.id === aiSection);
   const activeKnowledgeNavItem = KNOWLEDGE_NAV_ITEMS.find((i) => i.id === knowledgeSection);
 
@@ -239,6 +241,9 @@ export function SettingsView() {
         const logoPromise = isManager
           ? fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }))
           : Promise.resolve({ logo_path: null, logo_url: null });
+        const usersPromise = isManager
+          ? fetchUsers(token).catch(() => [])
+          : Promise.resolve([]);
 
         const my = await myPromise;
         setMyDraftPrompt(my.draft_prompt ?? "");
@@ -264,6 +269,9 @@ export function SettingsView() {
         const l = await logoPromise;
         setLogoPath(l.logo_path);
         setLogoUrl(l.logo_url);
+
+        const users = await usersPromise;
+        setIsSuperAdmin(users.find((u) => u.id === session?.user?.id)?.is_super_admin ?? false);
       } catch (e) {
         setError((e as Error).message);
         setLoading(false);
@@ -527,7 +535,7 @@ export function SettingsView() {
                       <p className="text-xs text-muted-foreground mt-0.5">Your access level in this workspace.</p>
                     </div>
                     <span className="text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-                      {role === "manager" ? "Manager" : role === "employee" ? "Employee" : "—"}
+                      {isSuperAdmin ? "Super Admin" : role === "manager" ? "Manager" : role === "employee" ? "Employee" : "—"}
                     </span>
                   </div>
                 </>

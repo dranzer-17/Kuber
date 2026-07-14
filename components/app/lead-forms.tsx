@@ -175,7 +175,7 @@ function AssignToField({
 // ─── AssignStrategyPicker ─────────────────────────────────────────────────────
 // Batch imports (Apollo, Excel) can distribute leads as they land: to one
 // employee, spread round-robin (least-loaded first), or by territory
-// (India / Europe / rest of world) — planning.md Phase 4 / Q5.
+// (India / rest of world).
 
 export type ImportAssignMode = "pool" | "manual" | "round_robin" | "territory";
 
@@ -183,7 +183,7 @@ const ASSIGN_MODE_OPTIONS: { value: ImportAssignMode; label: string; hint: strin
   { value: "pool",        label: "Leave in pool",      hint: "Unassigned — distribute later from the Leads page." },
   { value: "manual",      label: "One employee",       hint: "The whole batch goes to one person." },
   { value: "round_robin", label: "Round-robin",        hint: "Spread across all active employees, least-loaded first." },
-  { value: "territory",   label: "By territory",       hint: "India → India reps, Europe → Europe reps, rest → Foreign reps. Leads without a country stay in the pool." },
+  { value: "territory",   label: "By territory",       hint: "India → India reps, everything else → Foreign reps. Leads without a country stay in the pool." },
 ];
 
 /** Request fields for the chosen mode — matches the import APIs. */

@@ -23,7 +23,17 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string)
     },
   });
   const json = await res.json();
-  if (!json.success) throw new Error(json.error?.message ?? `API error ${res.status}`);
+  if (!json.success) {
+    // A previously-valid session can go stale mid-use (e.g. the account was
+    // just deactivated) — force the user out instead of leaving them staring
+    // at a broken page full of failed requests.
+    if (res.status === 401) {
+      const { supabase } = await import("@/lib/supabase");
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") window.location.href = "/";
+    }
+    throw new Error(json.error?.message ?? `API error ${res.status}`);
+  }
   return json.data as T;
 }
 
@@ -490,7 +500,7 @@ export async function patchMySettings(
 
 // ─── Roles / users / assignment ───────────────────────────────────────────────
 
-export type Territory = "india" | "europe" | "foreign";
+export type Territory = "india" | "foreign";
 
 export type Profile = {
   id: string;

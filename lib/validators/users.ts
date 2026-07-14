@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const TerritorySchema = z.enum(["india", "europe", "foreign"]);
+const TerritorySchema = z.enum(["india", "foreign"]);
 
 // Territory is REQUIRED for employees at creation (planning.md Phase 4 / Q8) —
 // otherwise territory-based routing silently skips them. Managers have none.
@@ -17,7 +17,7 @@ export const CreateUserSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["territory"],
-        message: "Territory is required for employees (india / europe / foreign)",
+        message: "Territory is required for employees (india / foreign)",
       });
     }
   });

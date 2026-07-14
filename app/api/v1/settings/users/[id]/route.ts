@@ -35,6 +35,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
+  // A manager (Super Admin or not) can never deactivate their own account —
+  // there'd be no one left to undo it once they're locked out.
+  if (existing.role === "manager" && existing.id === caller.id && is_active === false) {
+    return fail(400, "VALIDATION_ERROR", "You cannot deactivate your own account.");
+  }
+
   // Managers manage employees only. Anything about another manager — role,
   // password, activation, profile — is reserved for the Super Admin, so a
   // regular manager can never demote or lock out a peer (planning.md D5/Q3).
@@ -47,10 +53,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  if (password || role) {
+  if (password || role || is_active !== undefined) {
+    // Deactivation must also block Supabase Auth itself — banning stops both new
+    // sign-ins and refresh-token renewal, so a deactivated user can't log back in
+    // and loses access once their current access token expires.
     const { error: authError } = await db.auth.admin.updateUserById(id, {
       ...(password ? { password } : {}),
       ...(role ? { app_metadata: { role } } : {}),
+      ...(is_active !== undefined ? { ban_duration: is_active ? "none" : "876000h" } : {}),
     });
     if (authError) return fail(400, "USER_UPDATE_FAILED", authError.message);
   }
