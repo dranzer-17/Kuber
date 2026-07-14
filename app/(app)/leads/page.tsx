@@ -745,7 +745,7 @@ export default function LeadsPage() {
 
           {role === "manager" && (
             <Button
-              size="sm" variant="outline" className="gap-1.5"
+              size="sm" variant="outline" className="gap-1.5 bg-card"
               disabled={checkedIds.size === 0}
               onClick={() => { if (checkedIds.size > 0) { setAssignOverwriteConfirmed(false); setShowBulkAssign(true); } }}
             >
