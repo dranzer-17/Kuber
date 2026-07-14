@@ -6,6 +6,7 @@ import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
+import { getCampaignAccessibleLeadIds } from "@/lib/auth/scope";
 
 async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -73,7 +74,7 @@ async function upsertOrg(
 }
 
 export async function GET(req: NextRequest) {
-  let user: { id: string; role: "manager" | "employee" };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
@@ -94,7 +95,17 @@ export async function GET(req: NextRequest) {
     .eq("is_deleted", false);
 
   if (user.role === "employee") {
-    q = q.eq("assigned_to", user.id);
+    // Visibility: leads assigned to them directly, OR leads in a campaign they
+    // have access to (created by or assigned to them) — matches Unibox's
+    // broader model instead of the previous strictly-assigned-only view
+    // (review §3.1 / §4.1). Without this an employee could reply to a
+    // thread in Unibox but never see the underlying Lead record.
+    const campaignLeadIds = await getCampaignAccessibleLeadIds(db, user);
+    if (campaignLeadIds.length > 0) {
+      q = q.or(`assigned_to.eq.${user.id},id.in.(${campaignLeadIds.join(",")})`);
+    } else {
+      q = q.eq("assigned_to", user.id);
+    }
   } else if (assigned_to === "unassigned") {
     q = q.is("assigned_to", null);
   } else if (assigned_to) {

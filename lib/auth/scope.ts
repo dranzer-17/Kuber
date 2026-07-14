@@ -120,11 +120,37 @@ export async function assertThreadAccessById(db: Db, user: AuthedUser, threadId:
   throw fail(404, "NOT_FOUND", "Thread not found");
 }
 
-/** Throws a 404 Response unless the lead exists and (for employees) is assigned to them. */
+/**
+ * Lead ids an employee may see because they have access to a campaign the
+ * lead belongs to (created by or assigned to them) — the same broadened
+ * visibility Unibox threads already grant. Without this, an employee could
+ * work a reply thread for a lead (via campaign access) but couldn't open the
+ * underlying Lead record at all — a real, user-facing inconsistency
+ * (planning review §3.1 / §4.1).
+ */
+export async function getCampaignAccessibleLeadIds(db: Db, user: AuthedUser): Promise<string[]> {
+  if (user.role !== "employee") return [];
+  const campaignIds = await getAccessibleCampaignIds(db, user);
+  if (campaignIds.length === 0) return [];
+  const { data } = await db.from("campaign_leads").select("lead_id").in("campaign_id", campaignIds);
+  return [...new Set((data ?? []).map((r) => r.lead_id as string))];
+}
+
+/**
+ * Throws a 404 Response unless the lead is visible to the caller: managers
+ * always; employees when the lead is directly assigned to them OR they have
+ * access to a campaign it belongs to. This is a VIEW check only — editing a
+ * lead (PATCH) stays restricted to direct assignment, a separate, stricter
+ * permission (see leads/[id]/route.ts).
+ */
 export async function assertLeadAccess(db: Db, user: AuthedUser, leadId: string): Promise<void> {
   const { data } = await db.from("leads").select("assigned_to").eq("id", leadId).maybeSingle();
   if (!data) throw fail(404, "NOT_FOUND", "Lead not found");
-  if (user.role === "employee" && data.assigned_to !== user.id) throw fail(404, "NOT_FOUND", "Lead not found");
+  if (user.role !== "employee") return;
+  if (data.assigned_to === user.id) return;
+  const accessibleIds = await getCampaignAccessibleLeadIds(db, user);
+  if (accessibleIds.includes(leadId)) return;
+  throw fail(404, "NOT_FOUND", "Lead not found");
 }
 
 /** Throws a 404 Response unless the email_drafts row exists and (for employees) its campaign is accessible. */

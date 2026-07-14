@@ -22,6 +22,15 @@ const PRE_SEND_STATUSES = ["new", "enriching", "enriched", "draft", "draft_ready
  *   • affected campaigns get their total_leads recounted.
  * Idempotent: re-running after a partial Instantly failure retries cleanly
  * (Instantly 404s are treated as already-removed).
+ *
+ * Note the intentional asymmetry (review §3.6): pre-send data is hard-deleted
+ * because nothing else references it, but post-send `reply_events` /
+ * `unibox_emails` / `reply_drafts` rows are left in place — they're real send
+ * history, not working data, and every access path already scopes through
+ * `campaign_leads`/`leads.is_deleted`, so a deleted lead's threads simply stop
+ * being reachable rather than needing their own cleanup. If a future surface
+ * ever reads those tables directly without going through that scoping, it
+ * must check `is_deleted` itself.
  */
 export async function removeLeadFromOutreach(db: Db, leadId: string): Promise<LeadRemovalResult> {
   const result: LeadRemovalResult = {

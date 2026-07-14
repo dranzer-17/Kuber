@@ -25,7 +25,7 @@ async function getActiveEmployees(db: Db, territory?: Territory): Promise<string
   return (data ?? []).map((row) => row.id as string);
 }
 
-/** Current live-lead count per employee — the fairness signal for picks. */
+/** Current live-lead count per employee — the fairness signal for round-robin picks. */
 async function getLeadLoads(db: Db, employeeIds: string[]): Promise<Map<string, number>> {
   const loads = new Map<string, number>(employeeIds.map((id) => [id, 0]));
   if (employeeIds.length === 0) return loads;
@@ -35,6 +35,30 @@ async function getLeadLoads(db: Db, employeeIds: string[]): Promise<Map<string, 
     .in("assigned_to", employeeIds)
     .eq("is_deleted", false);
   for (const row of data ?? []) {
+    const id = row.assigned_to as string;
+    loads.set(id, (loads.get(id) ?? 0) + 1);
+  }
+  return loads;
+}
+
+/**
+ * Current live-lead count per employee, scoped to ONE region (review §3.7).
+ * A global count would let an employee's unrelated cross-territory
+ * assignments (e.g. manually-assigned leads from another region) skew how
+ * many NEW leads of THIS region they get next — scoping to the region being
+ * routed keeps territory fairness meaningful ("how many India leads does
+ * this India rep already have", not "how many leads total").
+ */
+async function getTerritoryScopedLoads(db: Db, employeeIds: string[], territory: Territory): Promise<Map<string, number>> {
+  const loads = new Map<string, number>(employeeIds.map((id) => [id, 0]));
+  if (employeeIds.length === 0) return loads;
+  const { data } = await db
+    .from("leads")
+    .select("assigned_to, country")
+    .in("assigned_to", employeeIds)
+    .eq("is_deleted", false);
+  for (const row of data ?? []) {
+    if (normalizeTerritory(row.country as string | null) !== territory) continue;
     const id = row.assigned_to as string;
     loads.set(id, (loads.get(id) ?? 0) + 1);
   }
@@ -84,8 +108,12 @@ class LoadBalancedPicker {
  * Assigns a specific set of leads under an explicitly-chosen strategy (the
  * bulk "Assign" action on the Leads page, or the picker on Apollo/Excel
  * imports). For "manual", every lead goes to `assignedTo` (or the pool when
- * null). For "round_robin"/"territory", leads are distributed least-loaded
- * first within their candidate set.
+ * null). For "round_robin", leads are distributed least-loaded first across
+ * ALL active employees (a genuinely company-wide, not territory-scoped,
+ * fairness signal). For "territory", each region gets its OWN least-loaded
+ * picker seeded with region-scoped loads (review §3.7) — so 30 India leads
+ * split fairly between India reps based on how many India leads they already
+ * hold, not their unrelated total lead count.
  */
 export async function bulkAssignByStrategy(
   db: Db,
@@ -105,35 +133,45 @@ export async function bulkAssignByStrategy(
   }
 
   const { data: leads } = await db.from("leads").select("id, country").in("id", leadIds);
-  const picker = await LoadBalancedPicker.create(db);
-
-  const allCandidates = await getActiveEmployees(db);
-  const candidatesByRegion = new Map<Territory, string[]>();
 
   let assigned = 0;
   let skipped = 0;
-  for (const lead of leads ?? []) {
-    let candidates: string[];
-    if (strategy === "territory") {
+
+  if (strategy === "territory") {
+    const candidatesByRegion = new Map<Territory, string[]>();
+    const pickersByRegion = new Map<Territory, LoadBalancedPicker>();
+
+    for (const lead of leads ?? []) {
       const region = normalizeTerritory(lead.country as string | null);
       if (!region) { skipped++; continue; }
+
       if (!candidatesByRegion.has(region)) {
         candidatesByRegion.set(region, await candidatesForRegion(db, region));
       }
-      candidates = candidatesByRegion.get(region)!;
-    } else {
-      candidates = allCandidates;
-    }
+      const candidates = candidatesByRegion.get(region)!;
 
-    const assigneeId = picker.pick(candidates);
-    if (!assigneeId) { skipped++; continue; }
-    await db
-      .from("leads")
-      .update({ assigned_to: assigneeId, assigned_at: now })
-      .eq("id", lead.id);
-    assigned++;
+      if (!pickersByRegion.has(region)) {
+        pickersByRegion.set(region, new LoadBalancedPicker(await getTerritoryScopedLoads(db, candidates, region)));
+      }
+      const picker = pickersByRegion.get(region)!;
+
+      const assigneeId = picker.pick(candidates);
+      if (!assigneeId) { skipped++; continue; }
+      await db.from("leads").update({ assigned_to: assigneeId, assigned_at: now }).eq("id", lead.id);
+      assigned++;
+    }
+    return { assigned, skipped };
   }
 
+  // round_robin: one global least-loaded picker across all active employees.
+  const picker = await LoadBalancedPicker.create(db);
+  const allCandidates = await getActiveEmployees(db);
+  for (const lead of leads ?? []) {
+    const assigneeId = picker.pick(allCandidates);
+    if (!assigneeId) { skipped++; continue; }
+    await db.from("leads").update({ assigned_to: assigneeId, assigned_at: now }).eq("id", lead.id);
+    assigned++;
+  }
   return { assigned, skipped };
 }
 
@@ -147,16 +185,19 @@ export async function resolveAssignee(db: Db, leadCountry: string | null | undef
 
   if (!settings || settings.strategy === "manual") return null;
 
-  let candidates: string[];
   if (settings.strategy === "territory") {
     const region = normalizeTerritory(leadCountry);
     if (!region) return null;
-    candidates = await candidatesForRegion(db, region);
-  } else {
-    candidates = await getActiveEmployees(db);
+    const candidates = await candidatesForRegion(db, region);
+    if (candidates.length === 0) return null;
+    // Region-scoped load (review §3.7) so leads trickling in one at a time
+    // still alternate fairly between same-region reps.
+    const loads = await getTerritoryScopedLoads(db, candidates, region);
+    return new LoadBalancedPicker(loads).pick(candidates);
   }
-  if (candidates.length === 0) return null;
 
+  const candidates = await getActiveEmployees(db);
+  if (candidates.length === 0) return null;
   const loads = await getLeadLoads(db, candidates);
   return new LoadBalancedPicker(loads).pick(candidates);
 }

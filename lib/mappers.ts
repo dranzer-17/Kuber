@@ -38,6 +38,11 @@ export interface DbLead {
   imports?: { id: string; label: string; color: string } | null;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
+  // Whether this lead's org enrichment is shared with OTHER people's leads —
+  // set only by the single-lead GET route (review §3.4). Org-level enrichment
+  // fans out to every lead under that org regardless of owner; this lets the
+  // viewer know their lead's data can change from someone else's trigger.
+  org_shared?: { other_lead_count: number; other_owner_count: number } | null;
   organizations: {
     id: string;
     name: string;
@@ -113,6 +118,9 @@ export function mapDbLead(l: DbLead): Lead {
     batchLabel: l.imports?.label ?? null,
     batchColor: l.imports?.color ?? null,
     assignedTo: l.assigned_to ?? null,
+    orgShared: l.org_shared
+      ? { otherLeadCount: l.org_shared.other_lead_count, otherOwnerCount: l.org_shared.other_owner_count }
+      : null,
   };
 }
 
