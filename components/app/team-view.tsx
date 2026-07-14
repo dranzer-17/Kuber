@@ -3,32 +3,46 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserPlus, RefreshCw, Shuffle } from "lucide-react";
+import { UserPlus, RefreshCw, Eye, EyeOff } from "lucide-react";
 import { useApp } from "@/lib/app-context";
+import { cn } from "@/lib/utils";
+import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
   fetchUsers, createUser, patchUser,
-  fetchOversight, fetchAssignmentSettings, patchAssignmentSettings,
+  fetchOversight,
   type Profile, type Territory,
 } from "@/lib/api-client";
 
-const TERRITORY_OPTIONS: { value: Territory; label: string }[] = [
-  { value: "india",   label: "India" },
-  { value: "europe",  label: "Europe" },
-  { value: "foreign", label: "Foreign (rest of world)" },
+const TERRITORY_OPTIONS: { value: Territory; label: string; short: string }[] = [
+  { value: "india",   label: "India",                   short: "India" },
+  { value: "foreign", label: "Foreign (rest of world)", short: "Foreign" },
 ];
 
-const AUTO_ASSIGN_OPTIONS: { value: "manual" | "round_robin" | "territory"; label: string; description: string }[] = [
-  { value: "manual",      label: "Off (manual)",  description: "Newly enriched leads wait in the manager pool until someone assigns them." },
-  { value: "round_robin", label: "Round-robin",   description: "Spread across all active employees, least-loaded first." },
-  { value: "territory",   label: "By territory",  description: "India → India reps, Europe → Europe reps, everything else → Foreign reps." },
-];
+function territoryShort(value: string | null | undefined): string {
+  if (!value) return "None";
+  if (value === "europe") return "Foreign";
+  return TERRITORY_OPTIONS.find((t) => t.value === value)?.short ?? value;
+}
+
+function territorySelectValue(value: string | null | undefined): string {
+  if (!value) return "none";
+  if (value === "europe") return "foreign";
+  return value;
+}
+
+function roleLabel(u: Profile): string {
+  if (u.is_super_admin) return "Super Admin";
+  return u.role === "manager" ? "Manager" : "Employee";
+}
 
 export function TeamView() {
   const router = useRouter();
@@ -45,9 +59,11 @@ export function TeamView() {
   const [fullName, setFullName] = useState("");
   const [newRole, setNewRole] = useState<"manager" | "employee">("employee");
   const [territory, setTerritory] = useState<Territory | "">("");
+  const [showPassword, setShowPassword] = useState(false);
 
-  const [autoStrategy, setAutoStrategy] = useState<"manual" | "round_robin" | "territory">("manual");
-  const [savingStrategy, setSavingStrategy] = useState(false);
+  const [reassignTarget, setReassignTarget] = useState<Profile | null>(null);
+  const [reassignTo, setReassignTo] = useState("");
+  const [reassigning, setReassigning] = useState(false);
 
   useEffect(() => {
     if (!loadingSession && role !== "manager") router.replace("/dashboard");
@@ -59,12 +75,10 @@ export function TeamView() {
     Promise.all([
       fetchUsers(session.access_token),
       fetchOversight(session.access_token),
-      fetchAssignmentSettings(session.access_token).catch(() => ({ strategy: "manual" as const })),
     ])
-      .then(([u, o, a]) => {
+      .then(([u, o]) => {
         setUsers(u);
         setCounts(Object.fromEntries(o.employees.map((e) => [e.id, { assigned_lead_count: e.assigned_lead_count, campaign_count: e.campaign_count }])));
-        setAutoStrategy(a.strategy as "manual" | "round_robin" | "territory");
       })
       .catch((e) => toast.error((e as Error).message))
       .finally(() => setLoading(false));
@@ -85,7 +99,7 @@ export function TeamView() {
       });
       setUsers((prev) => [...prev, created]);
       setShowAdd(false);
-      setEmail(""); setPassword(""); setFullName(""); setNewRole("employee"); setTerritory("");
+      setEmail(""); setPassword(""); setFullName(""); setNewRole("employee"); setTerritory(""); setShowPassword(false);
       toast.success("User created");
     } catch (e) {
       toast.error((e as Error).message);
@@ -94,61 +108,93 @@ export function TeamView() {
     }
   }
 
-  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean }>) {
+  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean; reassign_to: string }>) {
     if (!session) return;
     try {
-      const updated = await patchUser(session.access_token, id, patch) as Profile & { held_campaigns?: number; held_leads?: number };
+      const updated = await patchUser(session.access_token, id, patch);
       setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
-      // Deactivation must never silently strand work (planning.md Phase 2.2).
-      if (patch.is_active === false && ((updated.held_campaigns ?? 0) > 0 || (updated.held_leads ?? 0) > 0)) {
-        toast.warning(
-          `${updated.full_name || updated.email} still holds ${updated.held_campaigns ?? 0} campaign(s) and ${updated.held_leads ?? 0} lead(s) — reassign them from the Campaigns and Leads pages.`,
-          { duration: 10000 },
-        );
-      }
+      return true;
     } catch (e) {
-      toast.error((e as Error).message);
+      const err = e as Error & { code?: string };
+      // Backend requires an explicit reassignment target before deactivating
+      // someone who still holds leads/campaigns — pop the picker instead of
+      // just erroring out (client-side counts can also be stale).
+      if (err.code === "REASSIGN_REQUIRED" && patch.is_active === false) {
+        const target = users.find((u) => u.id === id);
+        if (target) setReassignTarget(target);
+        return false;
+      }
+      toast.error(err.message);
+      return false;
     }
   }
 
-  async function handleStrategyChange(next: "manual" | "round_robin" | "territory") {
-    if (!session || savingStrategy) return;
-    const prev = autoStrategy;
-    setAutoStrategy(next);
-    setSavingStrategy(true);
+  function handleDeactivateClick(u: Profile) {
+    const leadCount = counts[u.id]?.assigned_lead_count ?? 0;
+    const campaignCount = counts[u.id]?.campaign_count ?? 0;
+    if (leadCount > 0 || campaignCount > 0) {
+      setReassignTarget(u);
+      return;
+    }
+    void handlePatch(u.id, { is_active: false });
+  }
+
+  async function handleConfirmReassign() {
+    if (!reassignTarget || !reassignTo) return;
+    setReassigning(true);
     try {
-      await patchAssignmentSettings(session.access_token, next);
-      toast.success("Auto-assignment updated");
-    } catch (e) {
-      setAutoStrategy(prev);
-      toast.error((e as Error).message);
+      const ok = await handlePatch(reassignTarget.id, { is_active: false, reassign_to: reassignTo });
+      if (ok) {
+        toast.success(`Reassigned ${reassignTarget.full_name || reassignTarget.email}'s leads and campaigns, and deactivated the account.`);
+        setReassignTarget(null);
+        setReassignTo("");
+      }
     } finally {
-      setSavingStrategy(false);
+      setReassigning(false);
     }
   }
 
   const me = users.find((u) => u.id === session?.user.id);
   const isSuperAdmin = me?.is_super_admin ?? false;
-  const activeEmployees = users.filter((u) => u.role === "employee" && u.is_active);
-  const territoriesCovered = new Set(activeEmployees.map((u) => u.territory).filter(Boolean));
-  const missingTerritories = autoStrategy === "territory"
-    ? TERRITORY_OPTIONS.filter((t) => !territoriesCovered.has(t.value)).map((t) => t.label)
+  const activeCount = users.filter((u) => u.is_active).length;
+
+  // Territory-based routing (auto-assignment and manual territory bulk-assign
+  // alike) silently skips leads with no covering active employee — surface
+  // the gap here instead of letting leads pile up in the pool unnoticed.
+  const uncoveredTerritories = !loading
+    ? TERRITORY_OPTIONS.filter((t) => !users.some((u) => u.role === "employee" && u.is_active && territorySelectValue(u.territory) === t.value))
     : [];
 
   if (loadingSession || role !== "manager") return null;
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-8">
-      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Users</h2>
+    <div className="max-w-5xl mx-auto p-6 space-y-6">
+      {uncoveredTerritories.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+          <span className="font-semibold">No active employee covers {uncoveredTerritories.map((t) => t.label).join(", ")}.</span>{" "}
+          Leads from {uncoveredTerritories.length > 1 ? "these regions" : "this region"} will pile up unassigned in the manager pool until someone is added or reactivated there.
+        </div>
+      )}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold tracking-tight">Users</h2>
+            {!loading && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {activeCount} active · {users.length} total
+              </p>
+            )}
+          </div>
           <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
             <UserPlus className="size-3.5 mr-1.5" /> Add user
           </Button>
         </div>
 
         {showAdd && (
-          <form onSubmit={handleCreate} className="grid grid-cols-2 gap-3 rounded-lg border border-border p-4">
+          <form
+            onSubmit={handleCreate}
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3 px-5 py-4 border-b border-border bg-secondary/20"
+          >
             <div className="space-y-1.5">
               <Label>Full name</Label>
               <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
@@ -159,7 +205,25 @@ export function TeamView() {
             </div>
             <div className="space-y-1.5">
               <Label>Password</Label>
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  className="pr-9"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground hover:text-foreground"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </button>
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>Role</Label>
@@ -172,7 +236,7 @@ export function TeamView() {
               </Select>
             </div>
             {newRole === "employee" && (
-              <div className="space-y-1.5 col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label>Territory <span className="text-destructive">*</span></Label>
                 <Select value={territory} onValueChange={(v) => setTerritory(v as Territory)}>
                   <SelectTrigger><SelectValue placeholder="Pick a territory (required)" /></SelectTrigger>
@@ -185,7 +249,7 @@ export function TeamView() {
                 <p className="text-xs text-muted-foreground">Decides which leads route to them under territory-based assignment.</p>
               </div>
             )}
-            <div className="col-span-2 flex justify-end gap-2 pt-2">
+            <div className="sm:col-span-2 flex justify-end gap-2 pt-1">
               <Button type="button" variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
               <Button type="submit" disabled={saving}>
                 {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />} Create
@@ -195,122 +259,225 @@ export function TeamView() {
         )}
 
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground px-5 py-10 text-center">Loading users…</p>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-muted-foreground px-5 py-10 text-center">No users yet. Add one to get started.</p>
         ) : (
-          <div className="divide-y divide-border">
-            {users.map((u) => (
-              <div key={u.id} className="flex items-center gap-3 py-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate flex items-center gap-1.5">
-                    {u.full_name || u.email}
-                    {u.is_super_admin && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/25">
-                        Super Admin
-                      </span>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="pl-5 text-xs font-semibold text-muted-foreground">User</TableHead>
+                <TableHead className="text-xs font-semibold text-muted-foreground w-30">Workload</TableHead>
+                <TableHead className="text-xs font-semibold text-muted-foreground w-34">Role</TableHead>
+                <TableHead className="text-xs font-semibold text-muted-foreground w-34">Territory</TableHead>
+                <TableHead className="text-xs font-semibold text-muted-foreground w-26">Status</TableHead>
+                <TableHead className="pr-5 text-xs font-semibold text-muted-foreground text-right w-30">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => {
+                const canEditRole = !u.is_super_admin && isSuperAdmin;
+                const canToggleActive = !u.is_super_admin && (isSuperAdmin || u.role === "employee");
+                const leadCount = counts[u.id]?.assigned_lead_count ?? 0;
+                const campaignCount = counts[u.id]?.campaign_count ?? 0;
+                const displayName = u.full_name || u.email;
+
+                return (
+                  <TableRow
+                    key={u.id}
+                    className={cn(
+                      "border-border hover:bg-secondary/40",
+                      !u.is_active && "opacity-60",
                     )}
-                    {u.role === "employee" && u.is_active && !u.territory && (
-                      <span
-                        className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25"
-                        title="Excluded from territory routing until a territory is set"
-                      >
-                        No territory
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                </div>
-                {u.role === "employee" && (
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0 tabular-nums">
-                    <span>{counts[u.id]?.assigned_lead_count ?? 0} leads</span>
-                    <span>{counts[u.id]?.campaign_count ?? 0} campaigns</span>
-                  </div>
-                )}
-                {(() => {
-                  // Super Admin's role is locked for everyone; role changes of any
-                  // kind are Super-Admin-only (a regular manager can no longer
-                  // demote a peer — planning.md D5/Q3).
-                  const canEditRole = !u.is_super_admin && isSuperAdmin;
-                  if (!canEditRole) {
-                    return (
-                      <div className="w-32 h-9 px-3 flex items-center rounded-md border border-border bg-secondary/40 text-sm text-muted-foreground">
-                        {u.is_super_admin ? "Super Admin" : u.role === "manager" ? "Manager" : "Employee"}
+                  >
+                    <TableCell className="pl-5 py-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar name={displayName} size="sm" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <p className="text-sm font-semibold truncate">{displayName}</p>
+                            {u.is_super_admin && (
+                              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-primary/15 text-primary border border-primary/25">
+                                Super Admin
+                              </span>
+                            )}
+                            {u.role === "employee" && u.is_active && !u.territory && (
+                              <span
+                                className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25"
+                                title="Excluded from territory routing until a territory is set"
+                              >
+                                No territory
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                        </div>
                       </div>
-                    );
-                  }
-                  return (
-                    <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
-                      <SelectTrigger className="w-32 bg-card"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="employee">Employee</SelectItem>
-                        <SelectItem value="manager">Manager</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  );
-                })()}
-                {u.role === "employee" && (
-                  <Select
-                    value={u.territory ?? "none"}
-                    onValueChange={(v) => handlePatch(u.id, { territory: v === "none" ? null : (v as Territory) })}
-                  >
-                    <SelectTrigger className="w-40"><SelectValue placeholder="Territory" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No territory</SelectItem>
-                      {TERRITORY_OPTIONS.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {!u.is_super_admin && (isSuperAdmin || u.role === "employee") && (
-                  <Button
-                    size="sm"
-                    variant={u.is_active ? "ghost" : "outline"}
-                    onClick={() => handlePatch(u.id, { is_active: !u.is_active })}
-                  >
-                    {u.is_active ? "Deactivate" : "Reactivate"}
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
+                    </TableCell>
+
+                    <TableCell className="py-3">
+                      {u.role === "employee" ? (
+                        <div className="flex flex-col gap-0.5 text-xs tabular-nums">
+                          <span className="text-foreground">{leadCount} <span className="text-muted-foreground">leads</span></span>
+                          <span className="text-foreground">{campaignCount} <span className="text-muted-foreground">campaigns</span></span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="py-3">
+                      {canEditRole ? (
+                        <Select value={u.role} onValueChange={(v) => handlePatch(u.id, { role: v as "manager" | "employee" })}>
+                          <SelectTrigger className="h-9 w-30 bg-card"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="employee">Employee</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="inline-flex h-9 items-center px-2.5 rounded-md border border-border bg-secondary/40 text-xs text-muted-foreground">
+                          {roleLabel(u)}
+                        </span>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="py-3">
+                      {u.role === "employee" ? (
+                        <Select
+                          value={territorySelectValue(u.territory)}
+                          onValueChange={(v) => handlePatch(u.id, { territory: v === "none" ? null : (v as Territory) })}
+                        >
+                          <SelectTrigger className="h-9 w-30 bg-card" title={u.territory ? TERRITORY_OPTIONS.find((t) => t.value === territorySelectValue(u.territory))?.label ?? "Foreign (rest of world)" : "No territory"}>
+                            <SelectValue>{territoryShort(u.territory)}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No territory</SelectItem>
+                            {TERRITORY_OPTIONS.map((t) => (
+                              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="py-3">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 text-xs font-medium",
+                          u.is_active ? "text-emerald-400" : "text-muted-foreground",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "size-1.5 rounded-full",
+                            u.is_active ? "bg-emerald-400" : "bg-muted-foreground/50",
+                          )}
+                          aria-hidden
+                        />
+                        {u.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </TableCell>
+
+                    <TableCell className="pr-5 py-3 text-right">
+                      {canToggleActive ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className={cn(
+                            "h-8 text-xs",
+                            u.is_active
+                              ? "border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400",
+                          )}
+                          onClick={() => (u.is_active ? handleDeactivateClick(u) : void handlePatch(u.id, { is_active: true }))}
+                        >
+                          {u.is_active ? "Deactivate" : "Reactivate"}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </div>
 
-      {/* Auto-assignment of newly enriched leads (planning.md Phase 4.4) */}
-      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <Shuffle className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Auto-assignment of new leads</h2>
-        </div>
-        <p className="text-xs text-muted-foreground -mt-2">
-          How freshly enriched, unassigned leads are routed to employees. Bulk-assign on the Leads page and import-time assignment always work regardless of this setting.
-        </p>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {AUTO_ASSIGN_OPTIONS.map((opt) => {
-            const active = autoStrategy === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                disabled={savingStrategy}
-                onClick={() => void handleStrategyChange(opt.value)}
-                className={cn(
-                  "rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-                  active ? "border-primary bg-primary/10" : "border-border hover:border-muted-foreground",
-                )}
-              >
-                <p className="text-sm font-medium">{opt.label}</p>
-                <p className="text-xs text-muted-foreground mt-1">{opt.description}</p>
-              </button>
-            );
-          })}
-        </div>
-        {missingTerritories.length > 0 && (
-          <p className="text-xs text-amber-400">
-            No active employee covers: {missingTerritories.join(", ")}. Leads from those regions will stay in the manager pool
-            {missingTerritories.includes("Europe") ? " (Europe falls back to Foreign reps if any exist)" : ""}.
+      {reassignTarget && (
+        <ReassignBeforeDeactivateModal
+          target={reassignTarget}
+          counts={counts[reassignTarget.id]}
+          employees={users.filter((u) => u.role === "employee" && u.is_active && u.id !== reassignTarget.id)}
+          value={reassignTo}
+          onChange={setReassignTo}
+          saving={reassigning}
+          onConfirm={handleConfirmReassign}
+          onCancel={() => { setReassignTarget(null); setReassignTo(""); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReassignBeforeDeactivateModal({
+  target,
+  counts,
+  employees,
+  value,
+  onChange,
+  saving,
+  onConfirm,
+  onCancel,
+}: {
+  target: Profile;
+  counts?: { assigned_lead_count: number; campaign_count: number };
+  employees: Profile[];
+  value: string;
+  onChange: (v: string) => void;
+  saving: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const displayName = target.full_name || target.email;
+  const leadCount = counts?.assigned_lead_count ?? 0;
+  const campaignCount = counts?.campaign_count ?? 0;
+
+  return (
+    <div className="fixed inset-0 z-200 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 space-y-4">
+        <div>
+          <p className="text-sm font-bold">Reassign before deactivating</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            {displayName} still holds {leadCount} lead{leadCount !== 1 ? "s" : ""} and {campaignCount} campaign{campaignCount !== 1 ? "s" : ""}.
+            Pick who takes over before this account is deactivated.
           </p>
-        )}
+        </div>
+        <div className="space-y-1.5">
+          <Label>Reassign all leads and campaigns to</Label>
+          <Select value={value} onValueChange={onChange}>
+            <SelectTrigger className="w-full"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
+            <SelectContent className="z-300">
+              {employees.map((e) => (
+                <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {employees.length === 0 && (
+            <p className="text-xs text-destructive">No other active employee is available to reassign to.</p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
+          <Button type="button" onClick={onConfirm} disabled={saving || !value}>
+            {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />} Reassign & deactivate
+          </Button>
+        </div>
       </div>
     </div>
   );

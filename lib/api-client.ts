@@ -23,7 +23,20 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string)
     },
   });
   const json = await res.json();
-  if (!json.success) throw new Error(json.error?.message ?? `API error ${res.status}`);
+  if (!json.success) {
+    // A previously-valid session can go stale mid-use (e.g. the account was
+    // just deactivated) — force the user out instead of leaving them staring
+    // at a broken page full of failed requests.
+    if (res.status === 401) {
+      const { supabase } = await import("@/lib/supabase");
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") window.location.href = "/";
+    }
+    const err = new Error(json.error?.message ?? `API error ${res.status}`) as Error & { code?: string; details?: unknown };
+    err.code = json.error?.code;
+    err.details = json.error?.details;
+    throw err;
+  }
   return json.data as T;
 }
 
@@ -503,7 +516,7 @@ export async function patchMySettings(
 
 // ─── Roles / users / assignment ───────────────────────────────────────────────
 
-export type Territory = "india" | "europe" | "foreign";
+export type Territory = "india" | "foreign";
 
 export type Profile = {
   id: string;
@@ -527,7 +540,7 @@ export async function createUser(token: string, body: {
 }
 
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; password: string;
+  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; password: string; reassign_to: string;
 }>): Promise<Profile> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }

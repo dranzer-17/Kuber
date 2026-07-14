@@ -1,20 +1,18 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { EUROPE_COUNTRIES } from "@/lib/constants";
 
 type Db = ReturnType<typeof createAdminClient>;
-export type Territory = "india" | "europe" | "foreign";
+export type Territory = "india" | "foreign";
 export type AssignmentStrategy = "manual" | "round_robin" | "territory";
 
 /**
- * Map a lead's country to a routing region (planning.md Phase 4 / Q8):
- * india / europe / foreign (rest of world). Null only when country is empty —
+ * Map a lead's country to a routing region:
+ * india / foreign (rest of world). Null only when country is empty —
  * such leads are skipped by territory routing and stay in the manager pool.
  */
 export function normalizeTerritory(country: string | null | undefined): Territory | null {
   const c = country?.trim().toLowerCase();
   if (!c) return null;
   if (c === "india") return "india";
-  if (EUROPE_COUNTRIES.has(c)) return "europe";
   return "foreign";
 }
 
@@ -68,19 +66,12 @@ async function getTerritoryScopedLoads(db: Db, employeeIds: string[], territory:
 }
 
 /**
- * Candidates for a region, exact-specialist-first (planning.md Phase 4.2):
+ * Candidates for a region:
  *   india   → india reps only (no sensible fallback — pool if none)
- *   europe  → europe reps; if none active, the foreign (rest-of-world) reps
- *   foreign → foreign reps only
- * Exact-match-first is what keeps the 20/20/60 example fair: the Europe rep
- * gets ALL Europe leads while they exist; the rest-of-world rep is never
- * double-loaded with Europe on top of their own region.
+ *   foreign → foreign (rest-of-world) reps only
  */
 async function candidatesForRegion(db: Db, region: Territory): Promise<string[]> {
-  const exact = await getActiveEmployees(db, region);
-  if (exact.length > 0) return exact;
-  if (region === "europe") return getActiveEmployees(db, "foreign");
-  return [];
+  return getActiveEmployees(db, region);
 }
 
 /**

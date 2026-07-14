@@ -18,12 +18,19 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let caller: Awaited<ReturnType<typeof requireManager>>;
+  try { caller = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateUserSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
   const { email, password, full_name, role, territory } = parsed.data;
+
+  // Only the Super Admin creates other manager accounts — regular managers
+  // may only bring on employees (mirrors the PATCH-side restriction below).
+  if (role === "manager" && !caller.isSuperAdmin) {
+    return fail(403, "FORBIDDEN", "Only the Super Admin can create manager accounts.");
+  }
 
   const db = createAdminClient();
 
