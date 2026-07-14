@@ -15,9 +15,6 @@ Campaign assignment has an append-only `campaign_assignments` table recording wh
 
 ## 2. Campaigns
 
-### 2.1 Any employee can create a campaign, not just managers (Med — likely intentional, but check)
-`POST /api/v1/campaigns` only requires `requireAuth`, not `requireManager`. If campaign creation is meant to be a manager privilege (as the UI navigation for "Team"/"Assignment" implies elsewhere), this is a gap; if employees are meant to run their own campaigns, this is fine — but it should be a deliberate decision, not an accident of a missing check.
-
 ### 2.2 Managers see every campaign from every other manager (Med — collaboration vs. isolation)
 `GET /api/v1/campaigns` applies an `assigned_to`/`created_by` filter **only for employees**. Any manager — regardless of whether they're the super-admin — sees and can edit/delete **all campaigns created by all other managers**, with zero ownership boundary between managers. This directly answers the motivating question: **yes, if Manager A creates a campaign, Manager B can see it, edit its steps, reassign it, or delete it.** If managers are meant to operate independent books of business, this is a real gap; if the product intends full manager-to-manager transparency, it's working as designed but should be documented as such (not left implicit).
 
