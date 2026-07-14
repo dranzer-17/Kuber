@@ -8,9 +8,6 @@ Severity: **High** = data/ownership corruption, security-relevant, or silent dat
 
 ## 1. Roles & Users
 
-### 1.6 Bulk-assign silently overwrites existing assignments (High)
-`POST /api/v1/leads/bulk-assign` (manual, round_robin, or territory) does an unconditional `UPDATE ... assigned_to` on every selected lead ID — including leads **already assigned to someone else**. There is no "only touch unassigned leads" mode and no confirmation step distinguishing "these N leads are already owned by X" from "these N leads are in the pool." A manager selecting a mixed batch (some pool, some already-owned) silently reassigns all of them.
-
 ### 1.7 No audit trail for lead reassignment (Med)
 Campaign assignment has an append-only `campaign_assignments` table recording who/when/previous-assignee. Lead assignment has no equivalent — `assigned_at` is simply overwritten. If a lead's ownership is disputed later ("I was working this lead, why did it move?"), there's no history to check.
 
