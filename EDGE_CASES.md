@@ -8,9 +8,6 @@ Severity: **High** = data/ownership corruption, security-relevant, or silent dat
 
 ## 1. Roles & Users
 
-### 1.5 Territory assignment can silently strand leads (Med)
-If `assignment_strategy = territory` and no active employee covers a region (e.g. all India reps deactivated), new enriched leads for that region are **not** assigned to anyone and **not** flagged — they simply stay in the manager pool with no error, no notification, and no visible "coverage gap" warning outside of the amber text on the Team page (which itself was removed from the UI per a recent change — see note below). The same silent-skip happens for `round_robin` if there are zero active employees.
-
 ### 1.6 Bulk-assign silently overwrites existing assignments (High)
 `POST /api/v1/leads/bulk-assign` (manual, round_robin, or territory) does an unconditional `UPDATE ... assigned_to` on every selected lead ID — including leads **already assigned to someone else**. There is no "only touch unassigned leads" mode and no confirmation step distinguishing "these N leads are already owned by X" from "these N leads are in the pool." A manager selecting a mixed batch (some pool, some already-owned) silently reassigns all of them.
 

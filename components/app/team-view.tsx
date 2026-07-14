@@ -158,10 +158,23 @@ export function TeamView() {
   const isSuperAdmin = me?.is_super_admin ?? false;
   const activeCount = users.filter((u) => u.is_active).length;
 
+  // Territory-based routing (auto-assignment and manual territory bulk-assign
+  // alike) silently skips leads with no covering active employee — surface
+  // the gap here instead of letting leads pile up in the pool unnoticed.
+  const uncoveredTerritories = !loading
+    ? TERRITORY_OPTIONS.filter((t) => !users.some((u) => u.role === "employee" && u.is_active && territorySelectValue(u.territory) === t.value))
+    : [];
+
   if (loadingSession || role !== "manager") return null;
 
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
+      {uncoveredTerritories.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+          <span className="font-semibold">No active employee covers {uncoveredTerritories.map((t) => t.label).join(", ")}.</span>{" "}
+          Leads from {uncoveredTerritories.length > 1 ? "these regions" : "this region"} will pile up unassigned in the manager pool until someone is added or reactivated there.
+        </div>
+      )}
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border">
           <div className="min-w-0">
