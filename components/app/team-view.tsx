@@ -449,7 +449,7 @@ function ReassignBeforeDeactivateModal({
           <Label>Reassign all leads and campaigns to</Label>
           <Select value={value} onValueChange={onChange}>
             <SelectTrigger className="w-full"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
-            <SelectContent>
+            <SelectContent className="z-300">
               {employees.map((e) => (
                 <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
               ))}
