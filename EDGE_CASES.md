@@ -15,9 +15,6 @@ Campaign assignment has an append-only `campaign_assignments` table recording wh
 
 ## 2. Campaigns
 
-### 2.2 Managers see every campaign from every other manager (Med — collaboration vs. isolation)
-`GET /api/v1/campaigns` applies an `assigned_to`/`created_by` filter **only for employees**. Any manager — regardless of whether they're the super-admin — sees and can edit/delete **all campaigns created by all other managers**, with zero ownership boundary between managers. This directly answers the motivating question: **yes, if Manager A creates a campaign, Manager B can see it, edit its steps, reassign it, or delete it.** If managers are meant to operate independent books of business, this is a real gap; if the product intends full manager-to-manager transparency, it's working as designed but should be documented as such (not left implicit).
-
 ### 2.3 Campaigns can mix leads from multiple employees with no ownership check (High)
 When a manager adds leads to a campaign (`POST /api/v1/campaigns/[id]/leads`), there is **no filter requiring the leads' `assigned_to` to match the campaign's `created_by`/`assigned_to`.** A manager can freely build one campaign out of leads belonging to Employee A, Employee B, and unassigned pool leads simultaneously. This is exactly the scenario named in the prompt — **it is currently allowed with no warning, and nothing tracks "this campaign contains leads from N different owners."**
 
@@ -41,9 +38,6 @@ Whether an employee can approve/reject/edit an initial-outreach draft is gated b
 
 ### 2.10 Campaign steps/report editable by mere assignee, propagates to live sending (Med)
 Anyone who is the campaign's `assigned_to` (not just the original `created_by`) can edit sequence steps (subject/body/delay), and that edit propagates live to the Instantly sub-campaign already sending. A manager reassigning a campaign as a "who owns follow-up" administrative move also silently hands over the ability to change what's actively being sent.
-
-### 2.11 Deactivated campaign creator doesn't affect campaign visibility for others (Low/Med)
-If Manager X creates a campaign and is later deactivated, the campaign is unaffected for every other manager (no ownership filter for managers at all, per §2.2) — it just becomes invisible to Manager X personally. There's no "orphaned campaign, needs a new owner" flag.
 
 ---
 
@@ -100,5 +94,5 @@ These are compound scenarios combining the above, worth explicitly deciding the 
 5. **The same lead is simultaneously a member of two active campaigns run by two different employees.** Both can draft/send outreach to the same contact independently — no cross-campaign collision detection *(§2.6)*.
 6. **A lead is deleted while its reply thread is open in Unibox for another user.** The thread keeps working (no FK/is_deleted enforcement on unibox routes noted) — worth confirming whether that's desired or should be blocked.
 7. **The last active manager deactivates themselves or gets deactivated by another manager moments earlier.** Regular managers have no floor (resolved as intentional — only the last Super Admin is protected); self-deactivation is still open, see §1.3.
-8. **A regular (non-super-admin) manager wants to restrict what other managers can see/do.** Partially resolved — Super Admin now exclusively controls manager accounts (create/edit/deactivate/demote), but campaign visibility across managers is still fully open, see §2.2.
+8. **A regular (non-super-admin) manager wants to restrict what other managers can see/do.** Resolved — Super Admin exclusively controls manager accounts (create/edit/deactivate/demote); full campaign visibility across managers is confirmed intentional (managers are collaborators, not siloed).
 9. **30 India leads are bulk-selected with two active India-territory employees.** Splits leads-first / least-loaded-first between the two *only* if the manager runs the bulk action with strategy `territory` or `round_robin`; picking `manual` with one named assignee dumps all 30 on that one person instead *(§3.7)*.
