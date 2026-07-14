@@ -299,7 +299,7 @@ function MultiSelectDropdown<T extends string>({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full min-h-9 flex items-center flex-wrap gap-1.5 px-3 py-1.5 rounded-md border border-input bg-transparent text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full min-h-9 flex items-center flex-wrap gap-1.5 px-3 py-1.5 rounded-md border border-input bg-card text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {selected.size === 0 ? (
           <span className="text-muted-foreground text-xs">Select {label.toLowerCase()}…</span>
@@ -398,7 +398,7 @@ function DateRangePicker({
               <Button
                 variant="outline"
                 className={cn(
-                  "w-full justify-start text-left font-normal h-9 px-3 text-xs bg-transparent",
+                  "w-full justify-start text-left font-normal h-9 px-3 text-xs bg-card",
                   !from && "text-muted-foreground"
                 )}
               >
@@ -423,7 +423,7 @@ function DateRangePicker({
               <Button
                 variant="outline"
                 className={cn(
-                  "w-full justify-start text-left font-normal h-9 px-3 text-xs bg-transparent",
+                  "w-full justify-start text-left font-normal h-9 px-3 text-xs bg-card",
                   !to && "text-muted-foreground"
                 )}
               >
@@ -484,7 +484,7 @@ function FiltersModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card shadow-xl flex flex-col max-h-[85vh]">
+      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-xl flex flex-col max-h-[85vh]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <p className="text-sm font-semibold">Filters</p>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -607,6 +607,7 @@ export default function LeadsPage() {
   const [bulkAssigning,    setBulkAssigning   ] = useState(false);
   const [assignStrategy,   setAssignStrategy  ] = useState<BulkAssignStrategy>("manual");
   const [assignTarget,     setAssignTarget    ] = useState<string>("unassigned");
+  const [assignOverwriteConfirmed, setAssignOverwriteConfirmed] = useState(false);
   const [employees,        setEmployees       ] = useState<Profile[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
 
@@ -744,9 +745,9 @@ export default function LeadsPage() {
 
           {role === "manager" && (
             <Button
-              size="sm" variant="outline" className="gap-1.5"
+              size="sm" variant="outline" className="gap-1.5 bg-card"
               disabled={checkedIds.size === 0}
-              onClick={() => { if (checkedIds.size > 0) setShowBulkAssign(true); }}
+              onClick={() => { if (checkedIds.size > 0) { setAssignOverwriteConfirmed(false); setShowBulkAssign(true); } }}
             >
               <UserPlus className="size-3.5" /> Assign{checkedIds.size > 0 ? ` (${checkedIds.size})` : ""}
             </Button>
@@ -1162,7 +1163,10 @@ export default function LeadsPage() {
       />
 
       {/* Bulk assign modal */}
-      {showBulkAssign && (
+      {showBulkAssign && (() => {
+        const alreadyAssignedCount = leads.filter((l) => checkedIds.has(l.id) && l.assignedTo).length;
+        const needsOverwriteConfirm = alreadyAssignedCount > 0 && !assignOverwriteConfirmed;
+        return (
         <div className="fixed inset-0 z-200 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!bulkAssigning) setShowBulkAssign(false); }} />
           <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
@@ -1213,6 +1217,12 @@ export default function LeadsPage() {
               )
             )}
 
+            {alreadyAssignedCount > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                {alreadyAssignedCount} of these {alreadyAssignedCount !== 1 ? "leads are" : "lead is"} already assigned to someone else — proceeding will reassign {alreadyAssignedCount !== 1 ? "them" : "it"}.
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -1226,6 +1236,10 @@ export default function LeadsPage() {
                 type="button"
                 disabled={bulkAssigning || !session || (assignStrategy === "manual" && employeesLoading)}
                 onClick={async () => {
+                  if (needsOverwriteConfirm) {
+                    setAssignOverwriteConfirmed(true);
+                    return;
+                  }
                   if (!session) return;
                   setBulkAssigning(true);
                   try {
@@ -1247,12 +1261,13 @@ export default function LeadsPage() {
                 className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center gap-2"
               >
                 {bulkAssigning ? <RefreshCw className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />}
-                Assign
+                {needsOverwriteConfirm ? "Reassign anyway" : "Assign"}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
