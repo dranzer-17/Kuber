@@ -38,6 +38,10 @@ export type Lead = {
   batchLabel: string | null;
   batchColor: string | null;
   assignedTo: string | null;
+  // Set only when fetched via the single-lead GET route (review §3.4) — lets
+  // the viewer know their lead's company profile is shared with other
+  // people's leads, since org-level enrichment fans out regardless of owner.
+  orgShared: { otherLeadCount: number; otherOwnerCount: number } | null;
 };
 
 export const PIPELINE_STAGES: LeadStatus[] = [

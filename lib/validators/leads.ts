@@ -33,6 +33,10 @@ export const PatchLeadSchema = z.object({
   country: z.string().optional(),
   email_status: z.string().optional(),
   status: z.enum(["new", "enriching", "enriched", "input_required", "open", "closed"]).optional(),
+  // Single-lead reassignment (manager-only, enforced in the route) — the
+  // previous only way to move one lead was bulk-assign or a campaign-assign
+  // side effect (review §3.2). null = return to the pool.
+  assigned_to: z.string().uuid().nullable().optional(),
 });
 
 export const LeadListQuerySchema = z.object({

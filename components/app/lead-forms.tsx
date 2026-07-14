@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import { AlertCircle, Check, CheckCircle2, FileText, Plus, Search, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
 import { InfoTip } from "@/components/ui/info-tip";
-import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Profile, type PreviewLead } from "@/lib/api-client";
+import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 import { TagInput } from "@/components/app/tag-input";
@@ -244,6 +245,25 @@ function AssignStrategyPicker({
       {active && <p className="text-xs text-muted-foreground">{active.hint}</p>}
     </div>
   );
+}
+
+// Surfaces WHO already owns a skipped duplicate — previously the importer was
+// just told "N skipped" with no idea the lead already belongs to someone else
+// (review §3.3). Shown as a toast right after import completes.
+function notifyDuplicateOwners(duplicates: DuplicateOwner[] | undefined, employees: Profile[]) {
+  if (!duplicates || duplicates.length === 0) return;
+  const ownerName = (id: string | null) => {
+    if (!id) return "the pool (unassigned)";
+    return employees.find((e) => e.id === id)?.full_name
+      || employees.find((e) => e.id === id)?.email
+      || "another user";
+  };
+  const sample = duplicates.slice(0, 3).map((d) => {
+    const who = d.email ?? d.name ?? "a lead";
+    return `${who} (owned by ${ownerName(d.assigned_to)})`;
+  }).join(", ");
+  const more = duplicates.length > 3 ? ` and ${duplicates.length - 3} more` : "";
+  toast.warning(`${duplicates.length} lead${duplicates.length === 1 ? "" : "s"} already exist${duplicates.length === 1 ? "s" : ""} — skipped: ${sample}${more}.`, { duration: 8000 });
 }
 
 // ─── IndustryKeywordsDropdown ─────────────────────────────────────────────────
@@ -722,6 +742,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
       if (!response.ok) throw new Error(json?.message ?? `Request failed: ${response.status}`);
       // Phase 1 complete — leads are in the DB, redirect now.
       // Email enrichment runs in the background on the server.
+      notifyDuplicateOwners(json?.data?.duplicate_owners, employees);
       onImport(json?.data?.inserted ?? 0);
     } catch (e) {
       setError((e as Error).message);
@@ -906,6 +927,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
       setShowConfirm(false);
       setResult(res);
       setStage("result");
+      notifyDuplicateOwners(res.duplicate_owners, employees);
       onImport(res.inserted);
     } catch (e) {
       setShowConfirm(false);

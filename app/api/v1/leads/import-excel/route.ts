@@ -93,19 +93,34 @@ async function processRows(
 
   // ── 1. Dedupe against existing LIVE emails (batched) ─────────────────────
   // Soft-deleted leads don't block re-import (planning.md Phase 5 / Q7).
-  const existingEmails = new Set<string>();
+  // Track WHO already owns each duplicate — previously a second importer was
+  // just told "skipped" with no idea the lead belongs to someone else
+  // (review §3.3), capped to a reasonable sample for the response.
+  const existingOwners = new Map<string, string | null>();
   for (let i = 0; i < validRows.length; i += CHUNK) {
     const chunk = validRows.slice(i, i + CHUNK).map((r) => r.email);
-    const { data: existing } = await db.from("leads").select("email").in("email", chunk).eq("is_deleted", false);
-    (existing ?? []).forEach((r) => existingEmails.add(r.email));
+    const { data: existing } = await db.from("leads").select("email, assigned_to").in("email", chunk).eq("is_deleted", false);
+    (existing ?? []).forEach((r) => existingOwners.set(r.email, r.assigned_to as string | null));
   }
 
+  const DUPLICATE_SAMPLE_CAP = 50;
+  const duplicateOwners: Array<{ email: string; assigned_to: string | null }> = [];
   const toInsert = validRows.filter((r) => {
-    if (existingEmails.has(r.email)) { skippedDuplicateInDb++; return false; }
+    if (existingOwners.has(r.email)) {
+      skippedDuplicateInDb++;
+      if (duplicateOwners.length < DUPLICATE_SAMPLE_CAP) {
+        duplicateOwners.push({ email: r.email, assigned_to: existingOwners.get(r.email) ?? null });
+      }
+      return false;
+    }
     return true;
   });
   if (toInsert.length === 0) {
-    return { inserted: 0, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail, skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb };
+    return {
+      inserted: 0, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail,
+      skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb,
+      duplicate_owners: duplicateOwners,
+    };
   }
 
   // ── 2. Resolve orgs in bulk ───────────────────────────────────────────────
@@ -211,7 +226,11 @@ async function processRows(
     assignmentSkipped = res.skipped;
   }
 
-  return { inserted: insertedCount, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail, skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb, assignment_skipped: assignmentSkipped };
+  return {
+    inserted: insertedCount, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail,
+    skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb,
+    assignment_skipped: assignmentSkipped, duplicate_owners: duplicateOwners,
+  };
 }
 
 function triggerScrape(req: NextRequest) {

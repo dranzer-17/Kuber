@@ -1,21 +1,25 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import {
   Building2, Globe2, Mail, Megaphone, Users, X,
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
   RotateCcw, Zap, Bot, Settings, Pencil, Phone, Link,
-  MapPin, Save, ChevronRight,
+  MapPin, Save, ChevronRight, UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
 import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
-import { fetchLead, patchLead, rescrapeOrg } from "@/lib/api-client";
+import { fetchLead, fetchUsers, patchLead, rescrapeOrg, type Profile } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -168,6 +172,8 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
     title: "", headline: "", linkedin_url: "",
     city: "", state: "", country: "",
   });
+  const [employees,   setEmployees  ] = useState<Profile[]>([]);
+  const [reassigning, setReassigning] = useState(false);
 
   // Tracks the lead id the drawer is currently showing so in-flight fetches
   // can't update state / call onLeadUpdated after the user has closed it.
@@ -249,6 +255,31 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       setSaveError((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // Single-lead reassignment (manager-only) — previously the only way to move
+  // one lead was bulk-assign or a campaign-assign side effect (review §3.2).
+  useEffect(() => {
+    if (role !== "manager") return;
+    getToken().then((tok) => fetchUsers(tok)).then((users) => {
+      setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
+    }).catch(() => {});
+  }, [role]);
+
+  async function handleReassign(nextAssignee: string | null) {
+    if (!display || reassigning) return;
+    setReassigning(true);
+    try {
+      const tok = await getToken();
+      const updated = await patchLead(tok, display.id, { assigned_to: nextAssignee });
+      setFreshLead(updated);
+      onLeadUpdated?.(updated);
+      toast.success(nextAssignee ? "Lead reassigned" : "Lead returned to the pool");
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to reassign lead");
+    } finally {
+      setReassigning(false);
     }
   }
 
@@ -479,6 +510,25 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                 </div>
               </Section>
 
+              {/* Owner (manager-only reassignment — review §3.2) */}
+              {role === "manager" && (
+                <Section icon={UserCog} label="Owner">
+                  <Select
+                    value={display.assignedTo ?? "unassigned"}
+                    onValueChange={(v) => void handleReassign(v === "unassigned" ? null : v)}
+                    disabled={reassigning}
+                  >
+                    <SelectTrigger className="bg-card"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
+                      {employees.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Section>
+              )}
+
               {/* Meta */}
               <div className="grid grid-cols-2 gap-3">
                 <Section icon={Globe2} label="Source">
@@ -542,6 +592,17 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                 </div>
 
                 <div className="p-4 space-y-4">
+                  {/* Org-level enrichment fans out to every lead under that org
+                      regardless of owner (review §3.4) — flag it here so a
+                      change from someone else's trigger isn't a surprise. */}
+                  {!!display.orgShared && display.orgShared.otherOwnerCount > 0 && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                      <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+                      <span>
+                        This company profile is shared with {display.orgShared.otherLeadCount} other lead{display.orgShared.otherLeadCount === 1 ? "" : "s"} across {display.orgShared.otherOwnerCount} other owner{display.orgShared.otherOwnerCount === 1 ? "" : "s"} — enrichment updates here apply to all of them, however triggered.
+                      </span>
+                    </div>
+                  )}
                   {currentStage === "done" && (
                     <>
                       {(enrichData?.company_description ?? display.companyDescription) && (

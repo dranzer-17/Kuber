@@ -62,6 +62,8 @@ export interface DbLead {
   imports: { id: string; label: string; color: string } | null;
   campaign_name?: string | null;
   campaign_list?: { id: string; name: string; crm_status: string }[];
+  // Set only by the single-lead GET route (review §3.4) — see lib/mappers.ts.
+  org_shared?: { other_lead_count: number; other_owner_count: number } | null;
   organizations: {
     id: string;
     name: string;
@@ -137,6 +139,9 @@ export function mapDbLead(l: DbLead): Lead {
     batchLabel: l.imports?.label ?? null,
     batchColor: l.imports?.color ?? null,
     assignedTo: l.assigned_to ?? null,
+    orgShared: l.org_shared
+      ? { otherLeadCount: l.org_shared.other_lead_count, otherOwnerCount: l.org_shared.other_owner_count }
+      : null,
   };
 }
 
@@ -196,6 +201,8 @@ export async function patchLead(token: string, id: string, body: {
   first_name?: string; last_name?: string; email?: string; phone?: string;
   title?: string; headline?: string; linkedin_url?: string;
   city?: string; state?: string; country?: string; email_status?: string;
+  // Manager-only single-lead reassignment; null returns the lead to the pool.
+  assigned_to?: string | null;
 }): Promise<Lead> {
   const data = await apiFetch<DbLead>(`/api/v1/leads/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
   return mapDbLead(data);
@@ -280,6 +287,12 @@ export type ImportAssignment = {
   assignment_strategy?: "round_robin" | "territory";
 };
 
+// A duplicate skipped on import, with who already owns it — so the importer
+// isn't just told "skipped" with no idea the lead belongs to someone else
+// (review §3.3). `assigned_to` is a profile id; resolve to a name client-side
+// against an already-loaded employee list.
+export type DuplicateOwner = { email?: string; name?: string; company?: string; assigned_to: string | null };
+
 export async function importExcelDirect(
   token: string,
   rows: Record<string, string>[],
@@ -290,7 +303,7 @@ export async function importExcelDirect(
 ): Promise<{
   inserted: number; skipped_blank_email: number; skipped_invalid_email: number;
   skipped_duplicate_in_file: number; skipped_duplicate_in_db: number;
-  assignment_skipped?: number;
+  assignment_skipped?: number; duplicate_owners?: DuplicateOwner[];
 }> {
   return apiFetch("/api/v1/leads/import-excel", {
     method: "POST",
@@ -314,7 +327,7 @@ export async function apolloSearch(token: string, body: {
   keywords: string[]; locations: string[]; max_pages: number;
   titles?: string[]; seniorities?: string[]; batch_name: string; color?: string;
   assigned_to?: string; assignment_strategy?: "round_robin" | "territory";
-}): Promise<{ inserted: number; skipped: number; orgs_created: number; assignment_skipped?: number }> {
+}): Promise<{ inserted: number; skipped: number; orgs_created: number; assignment_skipped?: number; duplicate_owners?: DuplicateOwner[] }> {
   return apiFetch("/api/v1/leads/apollo-search", { method: "POST", body: JSON.stringify(body) }, token);
 }
 

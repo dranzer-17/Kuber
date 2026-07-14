@@ -69,6 +69,11 @@ export async function POST(req: NextRequest) {
   const warnings: string[] = [];
   const newLeadTargets: EnrichTarget[] = [];
   const newOrgIds: string[] = [];
+  // WHO already owns each duplicate — previously a second importer just saw
+  // "skipped" with no clue the lead already belongs to someone else (review
+  // §3.3), capped to a reasonable sample for the response.
+  const DUPLICATE_SAMPLE_CAP = 50;
+  const duplicateOwners: Array<{ name: string; company: string; assigned_to: string | null }> = [];
 
   for (const keyword of keywords) {
     for (let page = 1; page <= max_pages; page++) {
@@ -103,10 +108,19 @@ export async function POST(req: NextRequest) {
       // Batch dedup
       const apolloIds = people.map((p) => p.id);
       const { data: existing } = await db
-        .from("leads").select("apollo_id").in("apollo_id", apolloIds);
-      const existingSet = new Set((existing ?? []).map((r) => r.apollo_id));
-      const newPeople = people.filter((p) => !existingSet.has(p.id));
+        .from("leads").select("apollo_id, assigned_to").in("apollo_id", apolloIds);
+      const existingOwners = new Map((existing ?? []).map((r) => [r.apollo_id, r.assigned_to as string | null]));
+      const newPeople = people.filter((p) => !existingOwners.has(p.id));
       skippedDuplicate += people.length - newPeople.length;
+      for (const p of people) {
+        if (existingOwners.has(p.id) && duplicateOwners.length < DUPLICATE_SAMPLE_CAP) {
+          duplicateOwners.push({
+            name: p.first_name || "Unknown",
+            company: p.organization?.name ?? "Unknown",
+            assigned_to: existingOwners.get(p.id) ?? null,
+          });
+        }
+      }
 
       if (newPeople.length === 0) continue;
 
@@ -233,6 +247,7 @@ export async function POST(req: NextRequest) {
     orgs_reused: orgsReused,
     enrich_queued: newLeadTargets.length,
     assignment_skipped: assignmentSkipped,
+    duplicate_owners: duplicateOwners,
     ...(warnings.length > 0 ? { warnings } : {}),
   });
 }

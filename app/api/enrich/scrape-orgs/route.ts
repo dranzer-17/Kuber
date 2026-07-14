@@ -36,6 +36,35 @@ async function insertLog(db: Db, entry: {
   });
 }
 
+/**
+ * Org-level enrichment writes ONE company_description to `organizations` and
+ * every lead under that org inherits it — by design, avoiding re-scraping the
+ * same company per lead. But when those leads belong to DIFFERENT employees,
+ * the ones who didn't trigger the enrichment get their lead's data changed
+ * with no notification (review §3.4 — High). There's no live notification
+ * system yet, so this at minimum leaves an auditable trail managers can see;
+ * the lead drawer also surfaces "shared with N other leads" (lead-drawer.tsx)
+ * so the current viewer isn't blindsided either.
+ */
+async function logSharedEnrichmentFanOut(db: Db, orgId: string) {
+  const { data: leads } = await db
+    .from("leads")
+    .select("id, assigned_to")
+    .eq("organization_id", orgId)
+    .eq("is_deleted", false)
+    .not("assigned_to", "is", null);
+  const owners = [...new Set((leads ?? []).map((l) => l.assigned_to as string))];
+  if (owners.length > 1) {
+    await db.from("audit_log").insert({
+      action: "org_enrichment_shared",
+      entity_type: "organization",
+      entity_id: orgId,
+      diff: { affected_owners: owners, affected_lead_count: (leads ?? []).length },
+      created_at: new Date().toISOString(),
+    });
+  }
+}
+
 async function markFailed(db: Db, orgId: string, status: string, errorMessage: string) {
   const { data: org } = await db
     .from("organizations")
@@ -375,6 +404,9 @@ Rules:
     // Only enriched leads are eligible for employee assignment.
     await autoAssignEnrichedLeads(db, org.id);
 
+    // Audit trail when this org's leads span multiple owners (review §3.4).
+    await logSharedEnrichmentFanOut(db, org.id);
+
     await insertLog(db, {
       org_id: org.id,
       source: "system",
@@ -443,15 +475,20 @@ export async function POST(req: NextRequest) {
   let succeeded = 0;
   let failed = 0;
 
-  // ── Step 1: Fetch one batch of 10 queued orgs ──────────────────────────────
-  const { data: orgs } = await db
-    .from("organizations")
-    .select("id, domain, name")
-    .eq("enrichment_stage", "queued")
-    .order("created_at", { ascending: true })
-    .limit(10);
+  // ── Step 1+2: Atomically claim a batch of queued orgs (review §3.5) ───────
+  // A prior select-then-update let two concurrent invocations both pick up
+  // the same org before either marked it 'scraping', causing duplicate
+  // Firecrawl/LLM spend. claim_queued_orgs uses FOR UPDATE SKIP LOCKED so
+  // concurrent callers always get disjoint batches.
+  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: 10 });
+  if (claimError) {
+    return Response.json({ error: claimError.message }, { status: 500 });
+  }
 
-  if (!orgs || orgs.length === 0) {
+  const orgs = ((claimedOrgs ?? []) as Array<{ id: string; domain: string | null; name: string }>)
+    .map((o) => ({ id: o.id, domain: o.domain, name: o.name }));
+
+  if (orgs.length === 0) {
     await insertLog(db, {
       source: "system",
       event: "BATCH_COMPLETE",
@@ -460,20 +497,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ processed: 0, succeeded: 0, failed: 0, status: "no_more_queued" });
   }
 
-  // ── Step 2: Log batch start + mark as scraping ─────────────────────────────
   await insertLog(db, {
     source: "system",
     event: "SCRAPE_BATCH_STARTED",
     payload: { batch_size: orgs.length, org_ids: orgs.map((o) => o.id) },
   });
-
-  const orgIds = orgs.map((o) => o.id);
-  await db.from("organizations").update({
-    enrichment_stage: "scraping",
-    enrichment_status: "SCRAPE_BATCH_STARTED",
-    enrichment_started_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).in("id", orgIds);
 
   // ── Step 3: Process each org sequentially ─────────────────────────────────
   const failedOrgIds: string[] = [];
