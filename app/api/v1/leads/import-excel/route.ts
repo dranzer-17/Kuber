@@ -48,6 +48,7 @@ async function processRows(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
   importId?: string | null,
   assignedTo?: string | null,
+  assignmentStrategy?: "round_robin" | "territory",
 ) {
   const emailCol = mapping["email"];
   const firstNameCol = mapping["first_name"];
@@ -90,11 +91,12 @@ async function processRows(
 
   const CHUNK = 500;
 
-  // ── 1. Dedupe against existing emails (batched) ───────────────────────────
+  // ── 1. Dedupe against existing LIVE emails (batched) ─────────────────────
+  // Soft-deleted leads don't block re-import (planning.md Phase 5 / Q7).
   const existingEmails = new Set<string>();
   for (let i = 0; i < validRows.length; i += CHUNK) {
     const chunk = validRows.slice(i, i + CHUNK).map((r) => r.email);
-    const { data: existing } = await db.from("leads").select("email").in("email", chunk);
+    const { data: existing } = await db.from("leads").select("email").in("email", chunk).eq("is_deleted", false);
     (existing ?? []).forEach((r) => existingEmails.add(r.email));
   }
 
@@ -150,7 +152,16 @@ async function processRows(
     .filter((n) => !nameToOrgId.has(n))
     .map((n) => {
       const row = rowsWithDomain.find((r) => !r.safeDomain && r.org_name.toLowerCase() === n)!;
-      return { name: row.org_name, created_at: new Date().toISOString() };
+      // No website ⇒ nothing will ever scrape this org — conclude the pipeline
+      // now so its leads show Input Required (generic template) instead of
+      // sitting in "New" forever (planning.md Phase 3.2).
+      return {
+        name: row.org_name,
+        enrichment_stage: "failed",
+        enrichment_status: "No website found",
+        enrichment_done_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
     });
 
   if (missingDomainOrgs.length > 0) {
@@ -183,13 +194,24 @@ async function processRows(
     };
   }).filter(Boolean) as object[];
 
+  const insertedIds: string[] = [];
   for (let i = 0; i < leadRows.length; i += CHUNK) {
     const { data, error } = await db.from("leads").insert(leadRows.slice(i, i + CHUNK)).select("id");
-    if (!error) insertedCount += (data ?? []).length;
-    else if (error.code === "23505") skippedDuplicateInDb += leadRows.slice(i, i + CHUNK).length;
+    if (!error) {
+      insertedCount += (data ?? []).length;
+      insertedIds.push(...(data ?? []).map((r) => r.id as string));
+    } else if (error.code === "23505") skippedDuplicateInDb += leadRows.slice(i, i + CHUNK).length;
   }
 
-  return { inserted: insertedCount, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail, skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb };
+  // Strategy-based distribution at import time (planning.md Phase 4 / Q5).
+  let assignmentSkipped = 0;
+  if (assignmentStrategy && insertedIds.length > 0) {
+    const { bulkAssignByStrategy } = await import("@/lib/services/assignment");
+    const res = await bulkAssignByStrategy(db, insertedIds, assignmentStrategy, null);
+    assignmentSkipped = res.skipped;
+  }
+
+  return { inserted: insertedCount, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail, skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb, assignment_skipped: assignmentSkipped };
 }
 
 function triggerScrape(req: NextRequest) {
@@ -221,13 +243,13 @@ export async function POST(req: NextRequest) {
 
   // Direct mode — rows provided in the request body, no storage needed
   if (parsed.data.mode === "direct") {
-    const { rows, mapping, batch_name, color, assigned_to } = parsed.data;
+    const { rows, mapping, batch_name, color, assigned_to, assignment_strategy } = parsed.data;
     if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
     const { data: importRow } = await db.from("imports")
       .insert({ label: batch_name, source: "excel", created_by: user.id, lead_count: 0, color: color ?? "violet" })
       .select("id").single();
     const importId = importRow?.id ?? null;
-    const result = await processRows(rows, mapping, user.id, db, importId, assigned_to);
+    const result = await processRows(rows, mapping, user.id, db, importId, assigned_to, assignment_strategy);
     if (importId && result.inserted > 0) {
       await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId);
     }
@@ -254,13 +276,14 @@ export async function POST(req: NextRequest) {
   }
 
   // mode === "import"
-  const { mapping, batch_name: importBatchName, color: importColor, assigned_to: importAssignedTo } = parsed.data as { mapping: Record<string, string>; batch_name: string; color: string; assigned_to?: string | null };
+  const { mapping, batch_name: importBatchName, color: importColor, assigned_to: importAssignedTo, assignment_strategy: importStrategy } =
+    parsed.data as { mapping: Record<string, string>; batch_name: string; color: string; assigned_to?: string | null; assignment_strategy?: "round_robin" | "territory" };
   if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
   const { data: importRow2 } = await db.from("imports")
     .insert({ label: importBatchName, source: "excel", created_by: user.id, lead_count: 0, color: importColor ?? "violet" })
     .select("id").single();
   const importId2 = importRow2?.id ?? null;
-  const result = await processRows(parsed_excel.rows, mapping, user.id, db, importId2, importAssignedTo);
+  const result = await processRows(parsed_excel.rows, mapping, user.id, db, importId2, importAssignedTo, importStrategy);
   if (importId2 && result.inserted > 0) {
     await db.from("imports").update({ lead_count: result.inserted }).eq("id", importId2);
   }

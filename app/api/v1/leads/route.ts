@@ -142,11 +142,24 @@ export async function POST(req: NextRequest) {
   const assigned_to = user.role === "employee" ? user.id : (requestedAssignedTo ?? null);
   const db = createAdminClient();
 
-  // Check email uniqueness
+  // A manager-supplied assignee must be a real, active user — same check the
+  // Apollo/Excel import paths perform.
+  if (user.role === "manager" && assigned_to) {
+    const { data: assignee } = await db
+      .from("profiles")
+      .select("id, is_active")
+      .eq("id", assigned_to)
+      .maybeSingle();
+    if (!assignee || !assignee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
+  }
+
+  // Check email uniqueness among live leads only — a soft-deleted lead must not
+  // block re-adding the same person later.
   const { data: existing } = await db
     .from("leads")
     .select("id")
     .eq("email", email.toLowerCase())
+    .eq("is_deleted", false)
     .maybeSingle();
   if (existing) return fail(409, "DUPLICATE", "A lead with this email already exists", { id: existing.id });
 

@@ -5,9 +5,9 @@ import { cn } from "@/lib/utils";
 import type { Lead, LeadStatus } from "@/lib/leads";
 import { kanbanColumnFor, inputRequiredReason } from "@/lib/leads";
 
-const KANBAN_COLS: { id: LeadStatus; label: string; dot: string; header: string }[] = [
-  { id: "New",            label: "New",            dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
-  { id: "Input Required", label: "Input Required", dot: "bg-yellow-400", header: "border-yellow-500/30" },
+const KANBAN_COLS: { id: LeadStatus; label: string; hint?: string; dot: string; header: string }[] = [
+  { id: "New",            label: "New",            hint: "Enrichment in progress", dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
+  { id: "Input Required", label: "Input Required", hint: "Enrichment concluded — needs attention", dot: "bg-yellow-400", header: "border-yellow-500/30" },
   { id: "Enriched",       label: "Enriched",       dot: "bg-blue-400",   header: "border-blue-500/30"   },
   { id: "Open",           label: "Win",            dot: "bg-green-400",  header: "border-green-500/30"  },
   { id: "Closed",         label: "Closed",         dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
@@ -30,7 +30,7 @@ export function KanbanBoard({
             className="shrink-0 flex flex-col gap-2"
             style={{ width: "calc((100% - 32px) / 5)", minWidth: "160px" }}
           >
-            <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
+            <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)} title={col.hint}>
               <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
               <span className="text-xs font-semibold truncate">{col.label}</span>
               <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0">
@@ -47,17 +47,17 @@ export function KanbanBoard({
                     onClick={() => onCardClick(lead)}
                     className={cn(
                       "rounded-lg border bg-card p-2.5 text-left cursor-pointer hover:border-muted-foreground/50 transition-colors shadow-sm relative",
-                      reason === "failed" ? "border-orange-500/40" : reason === "missing_data" ? "border-yellow-500/30" : "border-border",
+                      reason === "failed" ? "border-yellow-500/40" : reason === "missing_data" ? "border-red-500/30" : "border-border",
                     )}
                     title={reason === "failed" && lead.lastError ? lead.lastError : undefined}
                   >
                     {reason === "missing_data" && (
-                      <span title="Add email or domain to enable enrichment" className="absolute top-2 right-2 text-yellow-400">
+                      <span title="No email found — add one before this lead can be contacted" className="absolute top-2 right-2 text-red-400">
                         <Info className="size-3" />
                       </span>
                     )}
                     {reason === "failed" && (
-                      <span title="Enrichment failed — open to retry" className="absolute top-2 right-2 text-orange-400">
+                      <span title="No usable website — campaigns will use the generic template. Open to retry enrichment." className="absolute top-2 right-2 text-yellow-400">
                         <RotateCcw className="size-3" />
                       </span>
                     )}
@@ -68,9 +68,9 @@ export function KanbanBoard({
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[10px] text-muted-foreground/60 truncate">
                         {reason === "failed"
-                          ? "Enrichment failed — retry"
+                          ? "No website — generic template"
                           : reason === "missing_data"
-                          ? "Needs email or domain"
+                          ? "Needs email"
                           : lead.jobTitle}
                       </span>
                       {lead.score !== "—" && (

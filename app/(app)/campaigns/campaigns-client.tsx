@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
-import { deleteCampaign, fetchUsers, type Profile } from "@/lib/api-client";
+import {
+  assignCampaign, deleteCampaign, fetchUsers, pauseCampaign, resumeCampaign, type Profile,
+} from "@/lib/api-client";
 import type { Campaign } from "@/components/app/create-campaign-modal";
-import { Trash2, User } from "lucide-react";
+import { Pause, Play, Trash2, User, UserPlus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SearchInput } from "@/components/ui/search-input";
@@ -43,6 +46,13 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   const [users, setUsers] = useState<Profile[]>([]);
   const [deletingCampaign, setDeletingCampaign] = useState<Campaign | null>(null);
   const [deleteCampaignLoading, setDeleteCampaignLoading] = useState(false);
+  const [pausingCampaign, setPausingCampaign] = useState<Campaign | null>(null);
+  const [pauseLoading, setPauseLoading] = useState(false);
+  const [resumingId, setResumingId] = useState<string | null>(null);
+  const [assigningCampaign, setAssigningCampaign] = useState<Campaign | null>(null);
+  const [assignTarget, setAssignTarget] = useState<string>("pool");
+  const [reassignLeads, setReassignLeads] = useState(true);
+  const [assignLoading, setAssignLoading] = useState(false);
 
   useEffect(() => {
     if (role !== "manager" || !session) return;
@@ -50,11 +60,18 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   }, [role, session]);
 
   const userMap = new Map(users.map((u) => [u.id, u]));
+  const activeEmployees = users.filter((u) => u.role === "employee" && u.is_active);
+
+  function displayName(userId: string | null | undefined): string | null {
+    if (!userId) return null;
+    const u = userMap.get(userId);
+    return u ? (u.full_name || u.email) : null;
+  }
 
   const filtered = list.filter((c) => {
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "All" || c.status === statusFilter;
-    const matchesOwner = ownerFilter === "all" || c.createdBy === ownerFilter;
+    const matchesOwner = ownerFilter === "all" || c.createdBy === ownerFilter || c.assignedTo === ownerFilter;
     return matchesSearch && matchesStatus && matchesOwner;
   });
 
@@ -64,6 +81,31 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
     Live:   list.filter((c) => c.status === "Live").length,
     Paused: list.filter((c) => c.status === "Paused").length,
   };
+
+  function openAssignModal(c: Campaign) {
+    setAssigningCampaign(c);
+    setAssignTarget(c.assignedTo ?? "pool");
+    setReassignLeads(true);
+  }
+
+  async function handleResume(c: Campaign) {
+    if (!session || resumingId) return;
+    setResumingId(c.id);
+    try {
+      const res = await resumeCampaign(session.access_token, c.id);
+      if (res.errors.length > 0) {
+        toast.warning(`Resumed ${res.resumed} region(s); ${res.errors.length} failed. Try again for the rest.`);
+      } else {
+        toast.success("Campaign resumed — Instantly is sending again");
+      }
+      setCampaigns((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: "Live" } : x)));
+      router.refresh();
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to resume campaign");
+    } finally {
+      setResumingId(null);
+    }
+  }
 
   return (
     <div className="max-w-5xl mx-auto p-8 space-y-6">
@@ -127,6 +169,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
           {filtered.map((c) => {
             const style = CAMPAIGN_STATUS_STYLES[c.status] ?? CAMPAIGN_STATUS_STYLES.Draft;
             const replyRate = c.sent > 0 ? Math.round((c.replied / c.sent) * 100) : 0;
+            const assigneeName = role === "manager" ? displayName(c.assignedTo) : null;
             return (
               <div
                 key={c.id}
@@ -148,7 +191,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                         {c.status}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <span className={cn(
                         "text-[11px] px-1.5 py-0.5 rounded border",
                         c.humanInLoop
@@ -161,12 +204,18 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                       {role === "manager" && c.createdBy && userMap.has(c.createdBy) && (
                         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                           <User className="size-3" />
-                          {userMap.get(c.createdBy)?.full_name || userMap.get(c.createdBy)?.email}
+                          {displayName(c.createdBy)}
+                        </span>
+                      )}
+                      {assigneeName && (
+                        <span className="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border text-primary bg-primary/10 border-primary/20">
+                          <UserPlus className="size-3" />
+                          {assigneeName}
                         </span>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-px shrink-0 pr-8">
+                  <div className="flex items-center gap-px shrink-0 pr-24">
                     {[
                       { label: "Leads", value: c.leads, color: "text-foreground" },
                       { label: "Sent", value: c.sent, color: "text-foreground" },
@@ -180,14 +229,47 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                     ))}
                   </div>
                 </button>
-                <button
-                  type="button"
-                  title="Delete campaign"
-                  onClick={() => setDeletingCampaign(c)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg opacity-0 group-hover/card:opacity-100 text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                >
-                  <Trash2 className="size-4" />
-                </button>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/card:opacity-100 transition-all">
+                  {role === "manager" && (
+                    <button
+                      type="button"
+                      title="Assign campaign to an employee"
+                      onClick={() => openAssignModal(c)}
+                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
+                    >
+                      <UserPlus className="size-4" />
+                    </button>
+                  )}
+                  {c.status === "Live" && (
+                    <button
+                      type="button"
+                      title="Pause campaign (stops all sending, incl. follow-ups)"
+                      onClick={() => setPausingCampaign(c)}
+                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                    >
+                      <Pause className="size-4" />
+                    </button>
+                  )}
+                  {c.status === "Paused" && (
+                    <button
+                      type="button"
+                      title="Resume campaign"
+                      disabled={resumingId === c.id}
+                      onClick={() => void handleResume(c)}
+                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+                    >
+                      <Play className="size-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    title="Delete campaign"
+                    onClick={() => setDeletingCampaign(c)}
+                    className="p-2 rounded-lg text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -217,6 +299,115 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
           }
         }}
       />
+
+      <ConfirmDialog
+        open={!!pausingCampaign}
+        title={`Pause "${pausingCampaign?.name}"?`}
+        description="Instantly stops sending this campaign, including scheduled follow-ups, until you resume it. Conversations already started are unaffected."
+        loading={pauseLoading}
+        onClose={() => { if (!pauseLoading) setPausingCampaign(null); }}
+        onConfirm={async () => {
+          if (!pausingCampaign || !session || pauseLoading) return;
+          const id = pausingCampaign.id;
+          setPauseLoading(true);
+          try {
+            const res = await pauseCampaign(session.access_token, id);
+            if (res.errors.length > 0) {
+              toast.warning(`Paused ${res.paused} region(s); ${res.errors.length} failed. Try again for the rest.`);
+            } else {
+              toast.success("Campaign paused — Instantly has stopped sending");
+            }
+            setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, status: "Paused" } : c)));
+            setPausingCampaign(null);
+            router.refresh();
+          } catch (e) {
+            toast.error((e as Error).message || "Failed to pause campaign");
+          } finally {
+            setPauseLoading(false);
+          }
+        }}
+      />
+
+      {/* Assign campaign modal (managers only) */}
+      {assigningCampaign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!assignLoading) setAssigningCampaign(null); }} />
+          <div className="relative w-full max-w-md rounded-xl border border-border bg-card p-6 space-y-5 shadow-xl">
+            <div>
+              <p className="font-semibold text-sm">Assign &quot;{assigningCampaign.name}&quot;</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                The assignee sees this campaign, its drafts, and every reply in their inbox. One assignee at a time — assigning someone new replaces the current one.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Assign to</p>
+              <Select value={assignTarget} onValueChange={setAssignTarget}>
+                <SelectTrigger className="h-9 w-full bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pool">Nobody (manager pool)</SelectItem>
+                  {activeEmployees.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {assigningCampaign.assignedTo && (
+                <p className="text-[11px] text-muted-foreground">
+                  Currently assigned to {displayName(assigningCampaign.assignedTo) ?? "an inactive user"}.
+                </p>
+              )}
+            </div>
+
+            <label className={cn(
+              "flex items-start gap-2.5 rounded-lg border border-border p-3 text-xs cursor-pointer transition-colors hover:bg-secondary/30",
+              assignTarget === "pool" && "opacity-50 pointer-events-none",
+            )}>
+              <input
+                type="checkbox"
+                checked={reassignLeads}
+                onChange={(e) => setReassignLeads(e.target.checked)}
+                className="mt-0.5 accent-[var(--primary)]"
+              />
+              <span>
+                <span className="font-medium text-foreground">Also assign this campaign&apos;s leads to them</span>
+                <br />
+                <span className="text-muted-foreground">Keeps the Leads table and the inbox consistent. Untick if this campaign&apos;s leads are split between people.</span>
+              </span>
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={assignLoading} onClick={() => setAssigningCampaign(null)}>Cancel</Button>
+              <Button
+                disabled={assignLoading || !session}
+                onClick={async () => {
+                  if (!assigningCampaign || !session || assignLoading) return;
+                  const id = assigningCampaign.id;
+                  const target = assignTarget === "pool" ? null : assignTarget;
+                  setAssignLoading(true);
+                  try {
+                    const res = await assignCampaign(session.access_token, id, target, target ? reassignLeads : false);
+                    const name = target ? (displayName(target) ?? "employee") : null;
+                    toast.success(
+                      target
+                        ? `Assigned to ${name}${res.leads_reassigned > 0 ? ` (+${res.leads_reassigned} leads)` : ""}`
+                        : "Returned to the manager pool",
+                    );
+                    setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, assignedTo: target } : c)));
+                    setAssigningCampaign(null);
+                    router.refresh();
+                  } catch (e) {
+                    toast.error((e as Error).message || "Failed to assign campaign");
+                  } finally {
+                    setAssignLoading(false);
+                  }
+                }}
+              >
+                {assignLoading ? "Assigning…" : "Assign"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

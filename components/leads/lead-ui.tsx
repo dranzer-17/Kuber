@@ -6,6 +6,7 @@ import {
   STATUS_ORDER,
   STATUS_LABELS,
   inputRequiredReason,
+  inputRequiredLabel,
   type Lead,
   type LeadScore,
   type LeadStatus,
@@ -21,15 +22,21 @@ const STATUS_STYLES: Record<LeadStatus, string> = {
 };
 
 export function StatusBadge({ status, lead }: { status: LeadStatus; lead?: Lead }) {
-  // For Input Required, pick sub-color from the reason (if a lead is provided)
+  // Input Required is two different situations — label them apart:
+  // "Needs email" (unusable, red-ish) vs "No website · generic" (usable, yellow).
   if (status === "Input Required" && lead) {
     const reason = inputRequiredReason(lead);
-    const cls = reason === "failed"
-      ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
+    const cls = reason === "missing_data"
+      ? "bg-red-500/15 text-red-400 border-red-500/30"
       : "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
     return (
-      <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", cls)}>
-        {STATUS_LABELS[status]}
+      <span
+        className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", cls)}
+        title={reason === "missing_data"
+          ? "Enrichment finished but no email was found — add one before this lead can be contacted"
+          : "No usable website/profile — campaigns will use the generic name-swap template"}
+      >
+        {inputRequiredLabel(lead)}
       </span>
     );
   }

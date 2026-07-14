@@ -35,12 +35,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  // Regular managers may only demote Manager -> Employee (one-way). Promoting an
-  // Employee to Manager — including restoring one they previously demoted — is
-  // reserved for the Super Admin.
-  if (!caller.isSuperAdmin && role !== undefined && role !== existing.role) {
-    if (!(existing.role === "manager" && role === "employee")) {
-      return fail(403, "FORBIDDEN", "Only the Super Admin can promote an Employee to Manager.");
+  // Managers manage employees only. Anything about another manager — role,
+  // password, activation, profile — is reserved for the Super Admin, so a
+  // regular manager can never demote or lock out a peer (planning.md D5/Q3).
+  if (!caller.isSuperAdmin) {
+    if (existing.role === "manager" && existing.id !== caller.id) {
+      return fail(403, "FORBIDDEN", "Only the Super Admin can manage manager accounts.");
+    }
+    if (role !== undefined && role !== existing.role) {
+      return fail(403, "FORBIDDEN", "Only the Super Admin can change a user's role.");
     }
   }
 
@@ -66,5 +69,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
+
+  // Deactivation must never silently strand work: report what the user still
+  // holds so the Team UI can prompt the manager to reassign it (planning.md 2.2).
+  if (is_active === false) {
+    const [{ count: heldCampaigns }, { count: heldLeads }] = await Promise.all([
+      db.from("campaigns").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
+      db.from("leads").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
+    ]);
+    return ok({ ...data, held_campaigns: heldCampaigns ?? 0, held_leads: heldLeads ?? 0 });
+  }
+
   return ok(data);
 }

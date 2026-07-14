@@ -48,6 +48,11 @@ export const LeadListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(2000).default(50),
 });
 
+// Imports can distribute leads as they land (planning.md Phase 4 / Q5):
+// `assigned_to` = manual target (legacy, still supported); `assignment_strategy`
+// = spread the batch round-robin or by territory instead.
+const ImportAssignmentStrategy = z.enum(["round_robin", "territory"]).optional();
+
 export const ApolloSearchSchema = z.object({
   keywords: z.array(z.string().min(1)).min(1),
   locations: z.array(z.string()).default([]),
@@ -58,6 +63,7 @@ export const ApolloSearchSchema = z.object({
   color: z.string().default("violet"),
   preview: z.boolean().optional(),
   assigned_to: z.string().uuid().nullable().optional(),
+  assignment_strategy: ImportAssignmentStrategy,
 });
 
 export const ExcelImportSchema = z.discriminatedUnion("mode", [
@@ -69,6 +75,7 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     batch_name: z.string().min(1),
     color: z.string().default("violet"),
     assigned_to: z.string().uuid().nullable().optional(),
+    assignment_strategy: ImportAssignmentStrategy,
   }),
   z.object({
     mode: z.literal("direct"),
@@ -77,6 +84,7 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     batch_name: z.string().min(1),
     color: z.string().default("violet"),
     assigned_to: z.string().uuid().nullable().optional(),
+    assignment_strategy: ImportAssignmentStrategy,
   }),
 ]);
 

@@ -225,7 +225,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET) {
+  // A deleted lead's late replies stay in history but must not spawn new AI
+  // drafts — the person was removed from outreach (planning.md Phase 5 / Q7).
+  let leadWasDeleted = false;
+  if (p.event_type === "reply_received" && p.lead_email) {
+    const activeLeadId = await findActiveLeadIdByEmail(db, p.lead_email);
+    if (!activeLeadId) {
+      const { data: deletedLead } = await db
+        .from("leads")
+        .select("id")
+        .ilike("email", p.lead_email)
+        .eq("is_deleted", true)
+        .limit(1)
+        .maybeSingle();
+      leadWasDeleted = !!deletedLead;
+    }
+  }
+
+  if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET && !leadWasDeleted) {
     // we need the reply_events row id we just upserted
     const { data: ev } = await db
       .from("reply_events")

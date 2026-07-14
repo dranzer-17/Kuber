@@ -1,14 +1,29 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchOrgSchema } from "@/lib/validators/organizations";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();
+
+  // Employees may only read orgs tied to their own assigned leads (lead drawer
+  // needs the company panel); everything else is manager territory.
+  if (user.role === "employee") {
+    const { data: assignedLead } = await db
+      .from("leads")
+      .select("id")
+      .eq("organization_id", id)
+      .eq("assigned_to", user.id)
+      .eq("is_deleted", false)
+      .limit(1)
+      .maybeSingle();
+    if (!assignedLead) return fail(404, "NOT_FOUND", "Organization not found");
+  }
 
   const { data: org, error } = await db
     .from("organizations")
@@ -29,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);

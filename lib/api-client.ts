@@ -225,6 +225,27 @@ export async function deleteCampaign(token: string, id: string): Promise<{ delet
   return apiFetch(`/api/v1/campaigns/${id}`, { method: "DELETE" }, token);
 }
 
+export async function pauseCampaign(token: string, id: string): Promise<{ paused: number; errors: string[] }> {
+  return apiFetch(`/api/v1/campaigns/${id}/pause`, { method: "POST" }, token);
+}
+
+export async function resumeCampaign(token: string, id: string): Promise<{ resumed: number; errors: string[] }> {
+  return apiFetch(`/api/v1/campaigns/${id}/resume`, { method: "POST" }, token);
+}
+
+/** Assign a whole campaign to one employee (null returns it to the pool). */
+export async function assignCampaign(
+  token: string,
+  id: string,
+  assignedTo: string | null,
+  reassignLeads: boolean,
+): Promise<{ campaign_id: string; assigned_to: string | null; previous_assignee: string | null; changed: boolean; leads_reassigned: number }> {
+  return apiFetch(`/api/v1/campaigns/${id}/assign`, {
+    method: "POST",
+    body: JSON.stringify({ assigned_to: assignedTo, reassign_leads: reassignLeads }),
+  }, token);
+}
+
 export async function fetchOrg(token: string, id: string): Promise<Record<string, unknown>> {
   return apiFetch(`/api/v1/organizations/${id}`, {}, token);
 }
@@ -252,20 +273,28 @@ export async function createLead(token: string, body: {
   return { ...mapDbLead(data), import_id: data.import_id };
 }
 
+// How an import distributes its leads: a manual target, a spread strategy, or
+// neither (pool). The server treats them independently; callers set at most one.
+export type ImportAssignment = {
+  assigned_to?: string;
+  assignment_strategy?: "round_robin" | "territory";
+};
+
 export async function importExcelDirect(
   token: string,
   rows: Record<string, string>[],
   mapping: Record<string, string>,
   batch_name: string,
   color = "violet",
-  assigned_to?: string,
+  assignment: ImportAssignment = {},
 ): Promise<{
   inserted: number; skipped_blank_email: number; skipped_invalid_email: number;
   skipped_duplicate_in_file: number; skipped_duplicate_in_db: number;
+  assignment_skipped?: number;
 }> {
   return apiFetch("/api/v1/leads/import-excel", {
     method: "POST",
-    body: JSON.stringify({ mode: "direct", rows, mapping, batch_name, color, assigned_to }),
+    body: JSON.stringify({ mode: "direct", rows, mapping, batch_name, color, ...assignment }),
   }, token);
 }
 
@@ -284,7 +313,8 @@ export async function apolloPreview(token: string, body: {
 export async function apolloSearch(token: string, body: {
   keywords: string[]; locations: string[]; max_pages: number;
   titles?: string[]; seniorities?: string[]; batch_name: string; color?: string;
-}): Promise<{ inserted: number; skipped: number; orgs_created: number }> {
+  assigned_to?: string; assignment_strategy?: "round_robin" | "territory";
+}): Promise<{ inserted: number; skipped: number; orgs_created: number; assignment_skipped?: number }> {
   return apiFetch("/api/v1/leads/apollo-search", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
@@ -429,14 +459,45 @@ export async function patchSettings(token: string, body: Record<string, string>)
   return apiFetch("/api/v1/settings", { method: "PATCH", body: JSON.stringify(body) }, token);
 }
 
+// ─── Per-user settings (personal prompt / signature / sender / theme) ─────────
+
+export type MySettings = {
+  draft_prompt: string | null;
+  reply_prompt: string | null;
+  signature: string | null;
+  sender_name: string | null;
+  theme: string | null;
+  theme_mode: string | null;
+  defaults: {
+    draft_prompt: string;
+    reply_prompt: string;
+    signature: string;
+    sender_name: string;
+  };
+};
+
+export async function fetchMySettings(token: string): Promise<MySettings> {
+  return apiFetch("/api/v1/me/settings", {}, token);
+}
+
+/** null (or "") clears a field back to "inherit the company default". */
+export async function patchMySettings(
+  token: string,
+  body: Partial<Record<"draft_prompt" | "reply_prompt" | "signature" | "sender_name" | "theme" | "theme_mode", string | null>>,
+): Promise<MySettings> {
+  return apiFetch("/api/v1/me/settings", { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
 // ─── Roles / users / assignment ───────────────────────────────────────────────
+
+export type Territory = "india" | "europe" | "foreign";
 
 export type Profile = {
   id: string;
   email: string;
   full_name: string | null;
   role: "manager" | "employee";
-  territory: "india" | "foreign" | null;
+  territory: Territory | null;
   is_active: boolean;
   is_super_admin: boolean;
   created_at: string;
@@ -447,15 +508,27 @@ export async function fetchUsers(token: string): Promise<Profile[]> {
 }
 
 export async function createUser(token: string, body: {
-  email: string; password: string; full_name: string; role: "manager" | "employee"; territory?: "india" | "foreign" | null;
+  email: string; password: string; full_name: string; role: "manager" | "employee"; territory?: Territory | null;
 }): Promise<Profile> {
   return apiFetch("/api/v1/settings/users", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory: "india" | "foreign" | null; is_active: boolean; password: string;
+  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; password: string;
 }>): Promise<Profile> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
+// Auto-assignment default for newly-enriched pool leads (manager-only).
+export async function fetchAssignmentSettings(token: string): Promise<{ strategy: "manual" | "round_robin" | "territory" }> {
+  return apiFetch("/api/v1/settings/assignment", {}, token);
+}
+
+export async function patchAssignmentSettings(
+  token: string,
+  strategy: "manual" | "round_robin" | "territory",
+): Promise<{ strategy: string }> {
+  return apiFetch("/api/v1/settings/assignment", { method: "PATCH", body: JSON.stringify({ strategy }) }, token);
 }
 
 export async function fetchOversight(token: string): Promise<{

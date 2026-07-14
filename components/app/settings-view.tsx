@@ -13,8 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { TagInput } from "@/components/app/tag-input";
-import { fetchLogo, fetchSettings, patchSettings, removeLogo, uploadLogo } from "@/lib/api-client";
+import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/branding";
@@ -27,27 +26,35 @@ const TeamView = dynamic(
   { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
 );
 
-const PRODUCT_SUGGESTIONS = [
-  "Masterbatch", "Color Concentrates", "White Masterbatch", "Black Masterbatch",
-  "Additive Masterbatch", "Filler Masterbatch",
-];
-
 type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team";
-type AiSection = "template" | "default" | "replies" | "footer";
+type AiSection = "my-writing" | "my-signature" | "template" | "default" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
 
 const NAV_ITEMS: { id: Section; label: string }[] = [
   { id: "profile",    label: "My Profile" },
   { id: "ai",         label: "AI & Outreach" },
-  { id: "knowledge",  label: "Knowledge Sources" },
   { id: "appearance", label: "Appearance" },
   { id: "account",    label: "Account" },
 ];
 
-const TEAM_NAV_ITEM: { id: Section; label: string } = { id: "team", label: "Team" };
+const MANAGER_NAV_ITEMS: { id: Section; label: string }[] = [
+  { id: "profile",    label: "My Profile" },
+  { id: "ai",         label: "AI & Outreach" },
+  { id: "knowledge",  label: "Knowledge Sources" },
+  { id: "appearance", label: "Appearance" },
+  { id: "account",    label: "Account" },
+  { id: "team",       label: "Team" },
+];
 
-const AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+// Personal tabs (everyone — stored per user, campaigns you create use these) vs
+// company-default tabs (managers only — the fallback every user inherits).
+const PERSONAL_AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "my-writing",   label: "My Writing",   icon: PenLine },
+  { id: "my-signature", label: "My Signature", icon: Type },
+];
+
+const COMPANY_AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "template", label: "Email Template", icon: PenLine },
   { id: "default",  label: "Default draft",  icon: FileText },
   { id: "replies",  label: "Reply AI",       icon: Bot },
@@ -163,15 +170,17 @@ function RichTextEditor({
 export function SettingsView() {
   const { theme, mode, setTheme, setMode, savingTheme } = useTheme();
   const { role } = useApp();
-  const navItems = role === "manager" ? [...NAV_ITEMS, TEAM_NAV_ITEM] : NAV_ITEMS;
+  const isManager = role === "manager";
+  const navItems = isManager ? MANAGER_NAV_ITEMS : NAV_ITEMS;
+  const aiNavItems = isManager ? [...PERSONAL_AI_NAV_ITEMS, ...COMPANY_AI_NAV_ITEMS] : PERSONAL_AI_NAV_ITEMS;
   const [section, setSection] = useState<Section>("profile");
-  const [aiSection, setAiSection] = useState<AiSection>("template");
+  const [aiSection, setAiSection] = useState<AiSection>("my-writing");
   const [knowledgeSection, setKnowledgeSection] = useState<KnowledgeSection>("company");
 
+  // Company-wide settings (managers edit; everyone inherits)
   const [senderName,     setSenderName    ] = useState("");
   const [clientIndustry, setClientIndustry] = useState("");
-  const [clientProducts, setClientProducts] = useState<string[]>([]);
-  const [targetMarkets,  setTargetMarkets ] = useState("");
+  const [companyContext, setCompanyContext] = useState("");
   const [systemPrompt,   setSystemPrompt  ] = useState("");
   const [genericSubject, setGenericSubject] = useState("");
   const [genericBody,    setGenericBody   ] = useState("");
@@ -185,6 +194,13 @@ export function SettingsView() {
 
   const [replyDrafterPrompt,    setReplyDrafterPrompt   ] = useState("");
 
+  // Personal settings (per user — campaigns you create use these; empty = inherit)
+  const [myDraftPrompt, setMyDraftPrompt] = useState("");
+  const [myReplyPrompt, setMyReplyPrompt] = useState("");
+  const [mySignature,   setMySignature  ] = useState("");
+  const [mySenderName,  setMySenderName ] = useState("");
+  const [myDefaults,    setMyDefaults   ] = useState({ draft_prompt: "", reply_prompt: "", signature: "", sender_name: "" });
+
   const [userEmail, setUserEmail] = useState("");
   const [userName,  setUserName  ] = useState("");
 
@@ -197,7 +213,7 @@ export function SettingsView() {
   const [saving,  setSaving  ] = useState(false);
   const [error,   setError   ] = useState("");
 
-  const activeAiNavItem        = AI_NAV_ITEMS.find((i) => i.id === aiSection);
+  const activeAiNavItem        = aiNavItems.find((i) => i.id === aiSection);
   const activeKnowledgeNavItem = KNOWLEDGE_NAV_ITEMS.find((i) => i.id === knowledgeSection);
 
   // The breadcrumb shows the ancestor trail; the deepest active item becomes the page title.
@@ -216,21 +232,33 @@ export function SettingsView() {
         setUserEmail(session?.user?.email ?? "");
         setUserName(session?.user?.user_metadata?.full_name ?? session?.user?.user_metadata?.name ?? "");
 
-        // Settings unlocks the form; logo can arrive after (storage signed URLs are slow).
-        const settingsPromise = fetchSettings(token);
-        const logoPromise = fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
+        // Personal settings load for everyone; company settings + logo only for
+        // managers (employees neither see nor edit those tabs).
+        const myPromise = fetchMySettings(token);
+        const settingsPromise = isManager ? fetchSettings(token) : Promise.resolve(null);
+        const logoPromise = isManager
+          ? fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }))
+          : Promise.resolve({ logo_path: null, logo_url: null });
+
+        const my = await myPromise;
+        setMyDraftPrompt(my.draft_prompt ?? "");
+        setMyReplyPrompt(my.reply_prompt ?? "");
+        setMySignature(my.signature ?? "");
+        setMySenderName(my.sender_name ?? "");
+        setMyDefaults(my.defaults);
 
         const s = await settingsPromise;
-        setSenderName(s.default_sender_name ?? "");
-        setClientIndustry(s.client_industry ?? "");
-        setClientProducts((s.client_products ?? "").split(",").map((p: string) => p.trim()).filter(Boolean));
-        setTargetMarkets(s.client_target_markets ?? "");
-        setSystemPrompt(s.system_prompt ?? "");
-        setGenericSubject(s.generic_email_subject ?? "");
-        setGenericBody(s.generic_email_body ?? "");
-        setSigContact(s.signature_contact ?? "");
-        setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
-        try { setProductOfferings(JSON.parse(s.product_offerings ?? "[]") as ProductOffering[]); } catch { setProductOfferings([]); }
+        if (s) {
+          setSenderName(s.default_sender_name ?? "");
+          setClientIndustry(s.client_industry ?? "");
+          setCompanyContext(s.company_context ?? "");
+          setSystemPrompt(s.system_prompt ?? "");
+          setGenericSubject(s.generic_email_subject ?? "");
+          setGenericBody(s.generic_email_body ?? "");
+          setSigContact(s.signature_contact ?? "");
+          setReplyDrafterPrompt(s.reply_drafter_prompt ?? "");
+          try { setProductOfferings(JSON.parse(s.product_offerings ?? "[]") as ProductOffering[]); } catch { setProductOfferings([]); }
+        }
         setLoading(false);
 
         const l = await logoPromise;
@@ -242,7 +270,7 @@ export function SettingsView() {
       }
     }
     void load();
-  }, []);
+  }, [isManager]);
 
   async function handleLogoPick(file: File | null) {
     if (!file) return;
@@ -273,6 +301,8 @@ export function SettingsView() {
     finally { setLogoUploading(false); }
   }
 
+  const onPersonalTab = section === "ai" && (aiSection === "my-writing" || aiSection === "my-signature");
+
   async function handleSave() {
     // Only validate Product Offerings completeness when the user is actually on that
     // tab. Without this scoping, a stale incomplete product sitting in Knowledge
@@ -293,19 +323,31 @@ export function SettingsView() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token ?? "";
-      await patchSettings(token, {
-        default_sender_name:     senderName,
-        client_industry:         clientIndustry,
-        client_products:         clientProducts.join(", "),
-        client_target_markets:   targetMarkets,
-        system_prompt:           systemPrompt,
-        generic_email_subject:   genericSubject,
-        generic_email_body:      genericBody,
-        signature_contact:       sigContact,
-        product_offerings:       JSON.stringify(productOfferings),
-        reply_drafter_prompt:    replyDrafterPrompt,
-      });
-      toast.success("Settings saved");
+
+      if (onPersonalTab) {
+        // Personal settings — empty fields clear back to "inherit company default".
+        const my = await patchMySettings(token, {
+          draft_prompt: myDraftPrompt.trim() || null,
+          reply_prompt: myReplyPrompt.trim() || null,
+          signature:    mySignature.trim() || null,
+          sender_name:  mySenderName.trim() || null,
+        });
+        setMyDefaults(my.defaults);
+        toast.success("Your settings were saved");
+      } else {
+        await patchSettings(token, {
+          default_sender_name:     senderName,
+          client_industry:         clientIndustry,
+          company_context:         companyContext,
+          system_prompt:           systemPrompt,
+          generic_email_subject:   genericSubject,
+          generic_email_body:      genericBody,
+          signature_contact:       sigContact,
+          product_offerings:       JSON.stringify(productOfferings),
+          reply_drafter_prompt:    replyDrafterPrompt,
+        });
+        toast.success("Company settings saved");
+      }
     } catch (e) {
       toast.error((e as Error).message);
       setError((e as Error).message);
@@ -410,19 +452,31 @@ export function SettingsView() {
         {/* AI secondary sidebar */}
         {section === "ai" && (
           <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">AI &amp; Outreach</p>
-            {AI_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">Personal</p>
+            {PERSONAL_AI_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <button key={id} type="button" onClick={() => setAiSection(id)}
                 className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
                   aiSection === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
                 <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
               </button>
             ))}
+            {isManager && (
+              <>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1 mt-4">Company defaults</p>
+                {COMPANY_AI_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+                  <button key={id} type="button" onClick={() => setAiSection(id)}
+                    className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
+                      aiSection === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
+                    <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </aside>
         )}
 
-        {/* Knowledge secondary sidebar */}
-        {section === "knowledge" && (
+        {/* Knowledge secondary sidebar (managers only) */}
+        {section === "knowledge" && isManager && (
           <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">Knowledge Sources</p>
             {KNOWLEDGE_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
@@ -482,14 +536,137 @@ export function SettingsView() {
               {/* ── AI & Outreach ── */}
               {section === "ai" && (
                 <div className="space-y-6">
-                  {aiSection === "template" && (
+                  {aiSection === "my-writing" && (
+                    <>
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <PenLine className="size-4 text-muted-foreground" />
+                            <h3 className="text-sm font-semibold">My cold-email writing style</h3>
+                          </div>
+                          <span className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            myDraftPrompt.trim()
+                              ? "border-primary/20 bg-primary/10 text-primary"
+                              : "border-border bg-secondary text-muted-foreground",
+                          )}>
+                            {myDraftPrompt.trim() ? "Personal" : "Using company default"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground -mt-2">
+                          Campaigns <strong>you create</strong> generate their emails with this prompt. Leave it empty to write with the company default — other people&apos;s campaigns are never affected by what you put here.
+                        </p>
+                        <RichTextEditor
+                          label="My drafting prompt"
+                          value={myDraftPrompt}
+                          onChange={setMyDraftPrompt}
+                          minHeight={320}
+                          placeholder="Leave empty to use the company default, or write your own subject patterns, openings, offerings and tone here..."
+                          helper="Product library, campaign context and safety rules are appended automatically."
+                        />
+                        {!myDraftPrompt.trim() && myDefaults.draft_prompt && (
+                          <details className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                            <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
+                            <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap font-sans">{myDefaults.draft_prompt}</pre>
+                          </details>
+                        )}
+                      </section>
+
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Bot className="size-4 text-muted-foreground" />
+                            <h3 className="text-sm font-semibold">My reply writing style</h3>
+                          </div>
+                          <span className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            myReplyPrompt.trim()
+                              ? "border-primary/20 bg-primary/10 text-primary"
+                              : "border-border bg-secondary text-muted-foreground",
+                          )}>
+                            {myReplyPrompt.trim() ? "Personal" : "Using company default"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground -mt-2">
+                          AI reply suggestions for <strong>your campaigns&apos;</strong> conversations follow this prompt. Empty = company default.
+                        </p>
+                        <RichTextEditor
+                          label="My reply prompt"
+                          value={myReplyPrompt}
+                          onChange={setMyReplyPrompt}
+                          minHeight={220}
+                          placeholder="Leave empty to use the company default reply prompt..."
+                          helper="Must return JSON with subject and body. Safety rules are appended automatically."
+                        />
+                        {!myReplyPrompt.trim() && myDefaults.reply_prompt && (
+                          <details className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                            <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
+                            <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap font-sans">{myDefaults.reply_prompt}</pre>
+                          </details>
+                        )}
+                      </section>
+                    </>
+                  )}
+
+                  {aiSection === "my-signature" && (
+                    <>
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Type className="size-4 text-muted-foreground" />
+                            <h3 className="text-sm font-semibold">My signature</h3>
+                          </div>
+                          <span className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            mySignature.trim()
+                              ? "border-primary/20 bg-primary/10 text-primary"
+                              : "border-border bg-secondary text-muted-foreground",
+                          )}>
+                            {mySignature.trim() ? "Personal" : "Using company default"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground -mt-2">
+                          Appended to every email of campaigns <strong>you create</strong> (cold emails and replies). A campaign&apos;s own signature override still wins. Empty = company footer.
+                        </p>
+                        <RichTextEditor
+                          label="Sign-off block"
+                          value={mySignature}
+                          onChange={setMySignature}
+                          minHeight={160}
+                          placeholder={"Your Name\nYour Title\nKuber Polyplast\n+91-XXXXXXXXXX"}
+                        />
+                        {!mySignature.trim() && myDefaults.signature && (
+                          <details className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                            <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
+                            <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap font-sans">{myDefaults.signature}</pre>
+                          </details>
+                        )}
+                      </section>
+
+                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <User className="size-4 text-muted-foreground" />
+                          <h3 className="text-sm font-semibold">My sender name</h3>
+                        </div>
+                        <p className="text-xs text-muted-foreground -mt-2">
+                          Pre-filled as the &quot;From&quot; name when you create a campaign. Empty = company default{myDefaults.sender_name ? ` (“${myDefaults.sender_name}”)` : ""}.
+                        </p>
+                        <div className="max-w-sm space-y-1.5">
+                          <Label>Sender name</Label>
+                          <Input value={mySenderName} onChange={(e) => setMySenderName(e.target.value)} placeholder={myDefaults.sender_name || "Kuber Polyplast"} maxLength={200} />
+                        </div>
+                      </section>
+                    </>
+                  )}
+
+                  {isManager && aiSection === "template" && (
                     <section className="rounded-xl border border-border bg-card p-6 space-y-4">
                       <div className="flex items-center gap-2">
                         <Bot className="size-4 text-muted-foreground" />
                         <h3 className="text-sm font-semibold">AI Writing Instructions</h3>
                       </div>
                       <p className="text-xs text-muted-foreground -mt-2">
-                        The base prompt the AI follows when generating every outreach email. Put subject-line patterns, opening/closing options, offerings, key strengths, and tone here — the AI picks from what you write.
+                        The <strong>company default</strong> prompt for outreach emails — used by every campaign whose owner hasn&apos;t set a personal writing style. Put subject-line patterns, opening/closing options, offerings, key strengths, and tone here.
                       </p>
                       <RichTextEditor
                         label="Base prompt"
@@ -502,7 +679,7 @@ export function SettingsView() {
                     </section>
                   )}
 
-                  {aiSection === "default" && (
+                  {isManager && aiSection === "default" && (
                     <section className="rounded-xl border border-border bg-card p-6 space-y-4">
                       <div className="flex items-center gap-2">
                         <FileText className="size-4 text-muted-foreground" />
@@ -537,7 +714,7 @@ export function SettingsView() {
                     </section>
                   )}
 
-                  {aiSection === "replies" && (
+                  {isManager && aiSection === "replies" && (
                     <section className="rounded-xl border border-border bg-card p-6 space-y-5">
                       <div className="flex items-center gap-2">
                         <Bot className="size-4 text-muted-foreground" />
@@ -552,7 +729,7 @@ export function SettingsView() {
                     </section>
                   )}
 
-                  {aiSection === "footer" && (
+                  {isManager && aiSection === "footer" && (
                     <section className="rounded-xl border border-border bg-card p-6 space-y-4">
                       <div className="flex items-center gap-2">
                         <PenLine className="size-4 text-muted-foreground" />
@@ -568,8 +745,8 @@ export function SettingsView() {
                 </div>
               )}
 
-              {/* ── Knowledge Sources ── */}
-              {section === "knowledge" && (
+              {/* ── Knowledge Sources (managers only) ── */}
+              {section === "knowledge" && isManager && (
                 <div className="space-y-6">
 
                   {/* Company Details */}
@@ -618,10 +795,17 @@ export function SettingsView() {
                         </div>
                       </div>
 
-                      <TagInput label="Client products" pills={clientProducts} suggestions={PRODUCT_SUGGESTIONS} onChange={setClientProducts} placeholder="Add product..." />
                       <div className="space-y-1.5">
-                        <Label>Target markets</Label>
-                        <Input value={targetMarkets} onChange={(e) => setTargetMarkets(e.target.value)} placeholder="Packaging, Automotive, Agriculture" />
+                        <Label>Company context</Label>
+                        <Textarea
+                          value={companyContext}
+                          onChange={(e) => setCompanyContext(e.target.value)}
+                          placeholder="Who Kuber Polyplast is, what makes it credible, key accolades — background the AI can draw on in every email and reply."
+                          className="min-h-32 text-sm resize-y"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Given to the AI as background for every draft and reply. Products belong in the Product Offerings tab — the AI reads that library directly.
+                        </p>
                       </div>
                     </section>
                   )}

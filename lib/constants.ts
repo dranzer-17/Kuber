@@ -413,3 +413,18 @@ export const INTEREST_TO_TEMPERATURE: Record<number, string> = {
   [-1]: "cold", [-2]: "cold", [-3]: "cold",
 };
 
+
+// ─── Territory routing (planning.md Phase 4 / Q8) ─────────────────────────────
+// Countries treated as the "europe" region for lead assignment. Lowercased
+// full names as Apollo/Excel return them; everything else non-India = "foreign".
+export const EUROPE_COUNTRIES: ReadonlySet<string> = new Set([
+  "albania", "andorra", "austria", "belarus", "belgium", "bosnia and herzegovina",
+  "bulgaria", "croatia", "cyprus", "czech republic", "czechia", "denmark",
+  "estonia", "finland", "france", "germany", "greece", "hungary", "iceland",
+  "ireland", "italy", "kosovo", "latvia", "liechtenstein", "lithuania",
+  "luxembourg", "malta", "moldova", "monaco", "montenegro", "netherlands",
+  "north macedonia", "norway", "poland", "portugal", "romania", "san marino",
+  "serbia", "slovakia", "slovenia", "spain", "sweden", "switzerland",
+  "ukraine", "united kingdom", "uk", "great britain", "england", "scotland",
+  "wales", "vatican city",
+]);

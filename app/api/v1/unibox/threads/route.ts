@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok } from "@/lib/api-response";
+import { getUniboxScope } from "@/lib/auth/scope";
 import { getThreads, type UniboxReadState, type UniboxTab } from "@/lib/services/unibox";
 
 function parseInterest(raw: string | null): number | "lead" | undefined {
@@ -27,16 +28,19 @@ export async function GET(req: NextRequest) {
   let campaign_ids = campaignIdsRaw
     ? campaignIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
-  const campaign_id: string | undefined = sp.get("campaign_id") ?? undefined;
+  let campaign_id: string | undefined = sp.get("campaign_id") ?? undefined;
 
   const EMPTY_RESULT = { threads: [], next_cursor: null, counts: { unread_total: 0 } };
 
-  if (user.role === "employee") {
-    const { data: owned } = await db.from("campaigns").select("id").eq("created_by", user.id);
-    const ownedIds = new Set((owned ?? []).map((c) => c.id));
-    if (campaign_id && !ownedIds.has(campaign_id)) return ok(EMPTY_RESULT);
-    campaign_ids = campaign_ids ? campaign_ids.filter((id) => ownedIds.has(id)) : [...ownedIds];
-    if (!campaign_id && campaign_ids.length === 0) return ok(EMPTY_RESULT);
+  // Employees see threads of campaigns they created/were assigned, plus threads
+  // of leads assigned to them inside other campaigns (planning.md Phase 2).
+  // The scope is the security boundary; campaign_id(s) stay purely user filters.
+  const scope = (await getUniboxScope(db, user)) ?? undefined;
+  if (scope) {
+    const accessible = new Set(scope.campaign_ids);
+    if (campaign_id && !accessible.has(campaign_id)) campaign_id = undefined;
+    if (campaign_ids) campaign_ids = campaign_ids.filter((id) => accessible.has(id));
+    if (scope.campaign_ids.length === 0 && scope.campaign_lead_ids.length === 0) return ok(EMPTY_RESULT);
   }
 
   const tabRaw = sp.get("tab");
@@ -53,6 +57,7 @@ export async function GET(req: NextRequest) {
     interest_status: parseInterest(sp.get("interest")),
     cursor: sp.get("cursor") ?? undefined,
     limit: sp.get("limit") ? Number(sp.get("limit")) : 30,
+    scope,
   });
 
   return ok(result);

@@ -2,15 +2,17 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { assertThreadAccessById } from "@/lib/auth/scope";
 import { setLeadInterestStatus } from "@/lib/services/unibox";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ threadId: string }> },
 ) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { threadId } = await params;
+  try { await assertThreadAccessById(createAdminClient(), user, threadId); } catch (r) { return r as Response; }
   const body = await req.json().catch(() => null) as { interest_value?: number | null; lead_email?: string } | null;
   if (!body || !("interest_value" in body)) {
     return fail(400, "VALIDATION_ERROR", "interest_value required");

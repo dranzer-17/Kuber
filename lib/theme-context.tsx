@@ -6,7 +6,7 @@ import {
   applyTheme, DEFAULT_THEME_ID, DEFAULT_THEME_MODE, isThemeId, isThemeMode,
   THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY, type ThemeId, type ThemeMode,
 } from "@/lib/branding";
-import { fetchSettings, patchSettings } from "@/lib/api-client";
+import { fetchMySettings, patchMySettings } from "@/lib/api-client";
 
 type ThemeContextValue = {
   theme: ThemeId;
@@ -24,7 +24,8 @@ export function useTheme(): ThemeContextValue {
   return ctx;
 }
 
-/** Persists the theme + mode choice to the `settings` table (per-workspace, server-side). */
+/** Persists the theme + mode choice per user (`user_settings`) — one person's
+ *  appearance preference never changes anyone else's screen. */
 export function ThemeProvider({ session, children }: { session: Session | null; children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(() => {
     if (typeof window === "undefined") return DEFAULT_THEME_ID;
@@ -38,10 +39,10 @@ export function ThemeProvider({ session, children }: { session: Session | null; 
   });
   const [savingTheme, setSavingTheme] = useState(false);
 
-  // Pull the source-of-truth theme from settings once authenticated.
+  // Pull the source-of-truth theme from the user's own settings once authenticated.
   useEffect(() => {
     if (!session) return;
-    fetchSettings(session.access_token)
+    fetchMySettings(session.access_token)
       .then((s) => {
         const nextTheme = isThemeId(s.theme) ? s.theme : theme;
         const nextMode = isThemeMode(s.theme_mode) ? s.theme_mode : mode;
@@ -66,7 +67,7 @@ export function ThemeProvider({ session, children }: { session: Session | null; 
     if (!session) return;
     setSavingTheme(true);
     try {
-      await patchSettings(session.access_token, { theme: id });
+      await patchMySettings(session.access_token, { theme: id });
     } finally {
       setSavingTheme(false);
     }
@@ -79,7 +80,7 @@ export function ThemeProvider({ session, children }: { session: Session | null; 
     if (!session) return;
     setSavingTheme(true);
     try {
-      await patchSettings(session.access_token, { theme_mode: next });
+      await patchMySettings(session.access_token, { theme_mode: next });
     } finally {
       setSavingTheme(false);
     }

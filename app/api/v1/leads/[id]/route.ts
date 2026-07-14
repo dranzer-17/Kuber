@@ -44,7 +44,12 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { error } = await db.from("leads").update({ is_deleted: true }).eq("id", id);
   if (error) return fail(500, "INTERNAL", error.message);
 
-  return ok({ deleted: id });
+  // Deleting must actually stop outreach: remove from Instantly (kills
+  // follow-ups) and clean campaign memberships (planning.md Phase 5 / Q7).
+  const { removeLeadFromOutreach } = await import("@/lib/services/lead-removal");
+  const removal = await removeLeadFromOutreach(db, id);
+
+  return ok({ deleted: id, ...removal });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -71,6 +76,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       .from("leads")
       .select("id")
       .eq("email", email.toLowerCase())
+      .eq("is_deleted", false)
       .neq("id", id)
       .maybeSingle();
     if (conflict) return fail(409, "DUPLICATE", "Another lead with this email already exists");

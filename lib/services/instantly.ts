@@ -243,6 +243,22 @@ export async function addLeadsToInstantly(
   return iJson<BulkAddResult>(res);
 }
 
+/**
+ * Permanently remove a lead from Instantly — stops all scheduled follow-up
+ * steps for that person. 404 = already gone (idempotent), so retrying a
+ * partially-failed delete is safe.
+ */
+export async function deleteInstantlyLead(instantlyLeadId: string): Promise<void> {
+  const res = await fetch(`${BASE}/leads/${instantlyLeadId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const data = await res.json().catch(() => ({})) as { message?: string };
+    throw new Error(`Instantly lead delete ${res.status}: ${data.message ?? "failed"}`);
+  }
+}
+
 // ─── Leads: post-add updates ──────────────────────────────────────────────────
 // PATCH /leads/{id} — used to push updated custom_variables (e.g. a follow-up
 // draft's customBodyN/customSubjectN) to a lead that was already added to a

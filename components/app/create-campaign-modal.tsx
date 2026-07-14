@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads";
 import { isCampaignEligible, CAMPAIGN_ACTION_HELP, getMostCommonCountry } from "@/lib/leads";
 import { COUNTRY_TO_TIMEZONE } from "@/lib/constants";
-import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchSettings, uploadCampaignAttachment } from "@/lib/api-client";
+import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchMySettings, uploadCampaignAttachment } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 
 export type Campaign = {
@@ -41,6 +41,7 @@ export type Campaign = {
   cold?: number;
   followupDays?: number[];
   createdBy?: string;
+  assignedTo?: string | null;
 };
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
@@ -175,8 +176,9 @@ export function CreateCampaignModal({
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token ?? "";
-        const s = await fetchSettings(token);
-        setSenderName(s.default_sender_name ?? "");
+        // Default "From" name: the creator's personal sender name, else the company default.
+        const s = await fetchMySettings(token);
+        setSenderName(s.sender_name ?? s.defaults.sender_name ?? "");
       } catch { /* use empty default */ }
     }
     void loadSettings();

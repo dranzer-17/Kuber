@@ -38,11 +38,17 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
 
+  // Only STEP-1 runs drive the campaign's status (draft ↔ processing). A
+  // follow-up (step > 1) run happens on an already-ACTIVE campaign — flipping
+  // its status here dragged live campaigns back to "Draft" in the UI
+  // (planning.md Phase 6.4).
+  const drivesStatus = stepNumber === 1;
+
   const targets = await fetchDraftTargets(db, campaignId, 10, stepNumber);
 
   if (targets.length === 0) {
     const pending = await countPendingDrafts(db, campaignId);
-    if (pending === 0) {
+    if (pending === 0 && drivesStatus && campaign.status === "processing") {
       await db.from("campaigns").update({
         status: "draft",
         updated_at: new Date().toISOString(),
@@ -51,10 +57,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ processed: 0, succeeded: 0, failed: 0, status: "no_more_pending" });
   }
 
-  await db.from("campaigns").update({
-    status: "processing",
-    updated_at: new Date().toISOString(),
-  }).eq("id", campaignId);
+  if (drivesStatus && ["draft", "processing"].includes(campaign.status)) {
+    await db.from("campaigns").update({
+      status: "processing",
+      updated_at: new Date().toISOString(),
+    }).eq("id", campaignId);
+  }
 
   let succeeded = 0;
   let failed = 0;
@@ -93,7 +101,7 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({ campaign_id: campaignId, step_number: stepNumber }),
       }).catch(() => {});
     });
-  } else {
+  } else if (drivesStatus) {
     await db.from("campaigns").update({
       status: "draft",
       updated_at: new Date().toISOString(),

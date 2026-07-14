@@ -72,6 +72,7 @@ export interface DbCampaign {
   hot_count: number;
   cold_count: number;
   created_by: string;
+  assigned_to?: string | null;
 }
 
 // ─── Mapper functions ─────────────────────────────────────────────────────────
@@ -139,5 +140,6 @@ export function mapDbCampaign(c: DbCampaign): Campaign {
     hot: c.hot_count ?? 0,
     cold: c.cold_count ?? 0,
     createdBy: c.created_by,
+    assignedTo: c.assigned_to ?? null,
   };
 }

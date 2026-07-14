@@ -22,6 +22,11 @@ export interface ApolloSearchPerson {
   first_name: string | null;
   title: string | null;
   has_email: boolean;
+  // Location comes back on search results too — stored at insert so
+  // territory-based assignment can route the batch immediately (Phase 4).
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
   organization: {
     id?: string;
     name: string | null;

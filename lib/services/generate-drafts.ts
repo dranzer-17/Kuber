@@ -2,8 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
 import {
-  getDraftSystemPrompt,
-  getEmailSignature,
+  resolveDraftSystemPrompt,
+  resolveCampaignSignature,
   getProductOfferings,
   getCompanyContext,
   getGenericTemplate,
@@ -173,16 +173,15 @@ export async function generateOneDraft(
   if (!lead) return { ok: false, reason: "Lead not found" };
   if (!lead.email) return { ok: false, reason: "Lead has no email" };
 
-  // --- Fetch full campaign for attachment resolution ---
+  // --- Fetch full campaign for attachment + owner resolution ---
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, signature_override, attachment_name, attachment_path, attachment_url, ai_prompt_context")
+    .select("id, created_by, signature_override, attachment_name, attachment_path, attachment_url, ai_prompt_context")
     .eq("id", campaignId)
     .maybeSingle();
 
-  // Signature: campaign-level override wins; otherwise use the Email Footer setting.
-  const emailFooter = await getEmailSignature(db);
-  const signatureBlock = campaign?.signature_override?.trim() || emailFooter;
+  // Signature: campaign override → campaign owner's personal signature → company default.
+  const signatureBlock = await resolveCampaignSignature(db, campaign ?? {});
 
   // Per-lead attachment overrides campaign default. Instantly's API cannot send
   // real file attachments, so an "attachment" is delivered as a hosted download
@@ -249,10 +248,18 @@ export async function generateOneDraft(
           .trim();
       }
 
+      // Tokenise the brochure mention in the BODY text before assembly so the
+      // download link can never land inside the signature (planning.md 6.6).
+      const BROCHURE_TOKEN = "XBROCHURELINKX";
+      const linkBrochure = stepNumber === 1 && !!effectiveAttachmentName && !!effectiveAttachmentUrl && /brochure/i.test(genericBody);
+      if (linkBrochure) genericBody = genericBody.replace(/brochure/i, BROCHURE_TOKEN);
+
       let finalBody = plainToHtml([greeting, genericBody, signatureBlock].filter(Boolean).join("\n\n"));
-      if (stepNumber === 1 && effectiveAttachmentName && effectiveAttachmentUrl && /brochure/i.test(finalBody)) {
-        const anchor = `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`;
-        finalBody = finalBody.replace(/brochure/i, anchor);
+      if (linkBrochure) {
+        finalBody = finalBody.replace(
+          BROCHURE_TOKEN,
+          `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`,
+        );
       }
       const finalSubject = stepNumber > 1 ? "" : fillTemplate(template.subject, vars);
 
@@ -277,22 +284,18 @@ export async function generateOneDraft(
 
       return { ok: true, draftId: activeDraftId, status: finalStatus };
     } catch (err) {
+      // Mark only the draft row failed — campaign_leads.draft_id stays NULL so
+      // the auto-generator retries this lead on the next batch instead of
+      // skipping it forever (planning.md Phase 6.5).
       const now = new Date().toISOString();
       await db.from("email_drafts").update({ status: "failed", updated_at: now }).eq("id", activeDraftId);
-      if (stepNumber === 1) {
-        await db.from("campaign_leads").update({
-          draft_id: activeDraftId,
-          crm_status: "draft",
-          updated_at: now,
-        }).eq("id", target.id);
-      }
       return { ok: false, reason: (err as Error).message };
     }
   }
 
   try {
     const [baseSystemPrompt, products, companyContext] = await Promise.all([
-      getDraftSystemPrompt(db),
+      resolveDraftSystemPrompt(db, campaign?.created_by),
       getProductOfferings(db),
       getCompanyContext(db),
     ]);
@@ -343,12 +346,19 @@ export async function generateOneDraft(
     const greetingName = lead.first_name?.trim();
     const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
 
-    let finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
+    // Instantly cannot send real attachments, so deliver the brochure as a
+    // link — tokenised in the AI body BEFORE assembly so the anchor can never
+    // land inside the signature block (planning.md 6.6).
+    const BROCHURE_TOKEN = "XBROCHURELINKX";
+    const linkBrochure = stepNumber === 1 && !!effectiveAttachmentName && !!effectiveAttachmentUrl && /brochure/i.test(aiBody);
+    if (linkBrochure) aiBody = aiBody.replace(/brochure/i, BROCHURE_TOKEN);
 
-    // Instantly cannot send real attachments, so deliver the brochure as a link.
-    if (stepNumber === 1 && effectiveAttachmentName && effectiveAttachmentUrl) {
-      const anchor = `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`;
-      finalBody = finalBody.replace(/brochure/i, anchor);
+    let finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
+    if (linkBrochure) {
+      finalBody = finalBody.replace(
+        BROCHURE_TOKEN,
+        `<a href="${effectiveAttachmentUrl}" target="_blank" rel="noopener">brochure</a>`,
+      );
     }
 
     // Follow-ups must thread as a reply in the original conversation, which
@@ -383,18 +393,15 @@ export async function generateOneDraft(
 
     return { ok: true, draftId: activeDraftId, status: finalStatus };
   } catch (err) {
+    // Mark only the draft row failed — campaign_leads.draft_id stays NULL so
+    // the auto-generator retries this lead on the next batch instead of
+    // skipping it forever (planning.md Phase 6.5). fetchDraftTargets caps
+    // retries at 3 failed versions per lead/step.
     const now = new Date().toISOString();
     await db.from("email_drafts").update({
       status: "failed",
       updated_at: now,
     }).eq("id", activeDraftId);
-    if (stepNumber === 1) {
-      await db.from("campaign_leads").update({
-        draft_id: activeDraftId,
-        crm_status: "draft",
-        updated_at: now,
-      }).eq("id", target.id);
-    }
     return { ok: false, reason: (err as Error).message };
   }
 }
@@ -413,6 +420,21 @@ export async function fetchDraftTargets(
     .eq("status", "generating");
 
   const generatingLeadIds = new Set((generatingDrafts ?? []).map((d) => d.lead_id));
+
+  // Failed drafts leave draft_id NULL so leads are retried — but cap retries at
+  // 3 failed versions per lead/step to stop a pathological lead looping the LLM
+  // forever (planning.md Phase 6.5). Beyond the cap, retry is manual.
+  const { data: failedDrafts } = await db
+    .from("email_drafts")
+    .select("lead_id")
+    .eq("campaign_id", campaignId)
+    .eq("step_number", stepNumber)
+    .eq("status", "failed");
+  const failCount = new Map<string, number>();
+  for (const d of failedDrafts ?? []) {
+    failCount.set(d.lead_id, (failCount.get(d.lead_id) ?? 0) + 1);
+  }
+  const overFailCap = (leadId: string) => (failCount.get(leadId) ?? 0) >= 3;
 
   if (stepNumber === 1) {
     const { data: rows } = await db
@@ -433,7 +455,7 @@ export async function fetchDraftTargets(
       .limit(limit * 2);
 
     return (rows ?? [])
-      .filter((r) => !generatingLeadIds.has(r.lead_id))
+      .filter((r) => !generatingLeadIds.has(r.lead_id) && !overFailCap(r.lead_id))
       .slice(0, limit) as CampaignLeadTarget[];
   }
 
@@ -463,18 +485,37 @@ export async function fetchDraftTargets(
     .limit(limit * 2);
 
   return (rows ?? [])
-    .filter((r) => !generatingLeadIds.has(r.lead_id) && !alreadyHasStep.has(r.lead_id))
+    .filter((r) => !generatingLeadIds.has(r.lead_id) && !alreadyHasStep.has(r.lead_id) && !overFailCap(r.lead_id))
     .slice(0, limit) as CampaignLeadTarget[];
 }
 
-/** Count leads still pending draft generation. */
+/**
+ * Count leads still pending draft generation. Leads that have exhausted their
+ * retry cap (3 failed versions) are excluded — otherwise the worker would loop
+ * forever thinking there's work left (pairs with fetchDraftTargets' cap).
+ */
 export async function countPendingDrafts(db: SupabaseClient, campaignId: string): Promise<number> {
-  const { count } = await db
+  const { data: pending } = await db
     .from("campaign_leads")
-    .select("id", { count: "exact", head: true })
+    .select("lead_id")
     .eq("campaign_id", campaignId)
     .is("draft_id", null)
     .in("crm_status", ["new", "enriched", "draft"]);
+
+  let pendingCount = pending?.length ?? 0;
+  if (pendingCount > 0) {
+    const { data: failedDrafts } = await db
+      .from("email_drafts")
+      .select("lead_id")
+      .eq("campaign_id", campaignId)
+      .eq("step_number", 1)
+      .eq("status", "failed");
+    const failCount = new Map<string, number>();
+    for (const d of failedDrafts ?? []) {
+      failCount.set(d.lead_id, (failCount.get(d.lead_id) ?? 0) + 1);
+    }
+    pendingCount = (pending ?? []).filter((p) => (failCount.get(p.lead_id) ?? 0) < 3).length;
+  }
 
   const { count: generatingCount } = await db
     .from("email_drafts")
@@ -482,5 +523,5 @@ export async function countPendingDrafts(db: SupabaseClient, campaignId: string)
     .eq("campaign_id", campaignId)
     .eq("status", "generating");
 
-  return (count ?? 0) + (generatingCount ?? 0);
+  return pendingCount + (generatingCount ?? 0);
 }

@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
-import { resolveCampaignSignature, getReplyPrompts, getProductOfferings, getCompanyContext } from "@/lib/services/settings";
+import { resolveCampaignSignature, resolveReplyPrompt, getProductOfferings, getCompanyContext } from "@/lib/services/settings";
 import { appendSignatureToBody } from "@/lib/reply-body-html";
 import { listThreadEmails, type InstantlyEmail } from "@/lib/services/instantly";
 
@@ -57,17 +57,21 @@ export async function generateReplyDraft(
       ].join("\n");
     }
 
-    // Resolve campaign signature + additional AI context from the master campaign.
+    // Resolve campaign owner (their prompt + signature) and additional AI
+    // context from the master campaign. Replies speak with the same voice as
+    // the cold email that started the thread (planning.md D1).
     let signatureBlock = "";
     let aiPromptContext = args.aiPromptContext?.trim() || null;
     let campaignName = args.campaignName;
+    let campaignOwnerId: string | null = null;
     if (args.masterCampaignId) {
       const { data: campaign } = await db
         .from("campaigns")
-        .select("name, signature_override, signature_user_id, created_by, ai_prompt_context")
+        .select("name, signature_override, created_by, ai_prompt_context")
         .eq("id", args.masterCampaignId)
         .maybeSingle();
       if (campaign) {
+        campaignOwnerId = campaign.created_by ?? null;
         if (!aiPromptContext && campaign.ai_prompt_context?.trim()) {
           aiPromptContext = campaign.ai_prompt_context.trim();
         }
@@ -76,8 +80,8 @@ export async function generateReplyDraft(
       }
     }
 
-    const [{ drafter }, products, companyContext] = await Promise.all([
-      getReplyPrompts(db),
+    const [drafter, products, companyContext] = await Promise.all([
+      resolveReplyPrompt(db, campaignOwnerId),
       getProductOfferings(db),
       getCompanyContext(db),
     ]);

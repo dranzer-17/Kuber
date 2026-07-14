@@ -23,14 +23,19 @@ function resolveCountryCode(countryName: string | null): string {
   const MAP: Record<string, string> = {
     "india": "IN", "bangladesh": "BD", "pakistan": "PK", "sri lanka": "LK",
     "nepal": "NP", "united states": "US", "usa": "US",
-    "united kingdom": "UK", "uk": "UK",
+    // ISO-2 for the UK is GB (planning.md Phase 6.6)
+    "united kingdom": "GB", "uk": "GB", "great britain": "GB", "england": "GB",
     "germany": "DE", "france": "FR", "poland": "PL",
-    "united arab emirates": "AE", "uae": "AE",
+    "italy": "IT", "spain": "ES", "netherlands": "NL", "belgium": "BE",
+    "sweden": "SE", "switzerland": "CH", "austria": "AT", "portugal": "PT",
+    "united arab emirates": "AE", "uae": "AE", "qatar": "QA", "oman": "OM",
+    "kuwait": "KW", "bahrain": "BH", "israel": "IL",
     "turkey": "TR", "saudi arabia": "SA", "vietnam": "VN",
     "thailand": "TH", "indonesia": "ID", "malaysia": "MY",
-    "china": "CN", "brazil": "BR", "mexico": "MX",
+    "singapore": "SG", "philippines": "PH", "japan": "JP", "south korea": "KR",
+    "china": "CN", "brazil": "BR", "mexico": "MX", "argentina": "AR",
     "egypt": "EG", "nigeria": "NG", "kenya": "KE",
-    "south africa": "ZA", "australia": "AU", "canada": "CA",
+    "south africa": "ZA", "australia": "AU", "new zealand": "NZ", "canada": "CA",
   };
   const key = (countryName ?? "").trim().toLowerCase();
   return MAP[key] ?? "XX";
@@ -112,6 +117,12 @@ export async function sendCampaign(
   // (24h window, all 7 days) instead of queuing until the next configured window.
   // ⚠️ TURN OFF IN PRODUCTION — otherwise emails can go out at 3am local time.
   const isTestMode = process.env.INSTANTLY_TEST_MODE === "true";
+  if (isTestMode) {
+    console.warn(
+      "⚠️ INSTANTLY_TEST_MODE=true — campaign schedules are OVERRIDDEN to 24×7. " +
+      "Emails may send at any hour. Never enable this in production.",
+    );
+  }
   const effWindowFrom = isTestMode ? "00:00" : (campaign.window_from ?? "09:00");
   const effWindowTo   = isTestMode ? "23:59" : (campaign.window_to ?? "18:00");
   const effSendDays: Record<string, boolean> = isTestMode
@@ -147,7 +158,7 @@ export async function sendCampaign(
       leads:lead_id ( email, first_name, last_name, country, time_zone )
     `)
     .eq("campaign_id", campaignId)
-    .in("crm_status", ["approved", "draft_ready"])
+    .eq("crm_status", "approved")
     .is("instantly_campaign_id", null);
 
   if (opts?.campaignLeadIds?.length) {
@@ -175,7 +186,7 @@ export async function sendCampaign(
       .select("lead_id,step_number,subject,body,version")
       .eq("campaign_id", campaignId)
       .in("lead_id", leadIds)
-      .in("status", ["approved", "draft_ready"]);
+      .eq("status", "approved");
 
     const draftMap = new Map<string, Map<number, { subject: string | null; body: string | null }>>();
     for (const d of ((allDrafts ?? []).sort((a, b) => (b.version ?? 0) - (a.version ?? 0)))) {
@@ -331,7 +342,7 @@ export async function sendCampaign(
               .update({ status: "sent", updated_at: now })
               .eq("campaign_id", campaignId)
               .in("lead_id", sentSlice.map((p) => p.leadId))
-              .in("status", ["approved", "draft_ready"]);
+              .eq("status", "approved");
           }
 
           bucketSent += sentSlice.length;

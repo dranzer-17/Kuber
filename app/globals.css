@@ -26,6 +26,17 @@
   --radius-xl:  calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
   --font-sans:  var(--font-sans);
+
+  /* Elevation ladder (issues_ui §3) — overrides Tailwind's default shadow
+     scale so every existing shadow-sm/md/lg utility gets the upgrade. The
+     inset 1px top highlight is the classic premium-dark-card edge. */
+  --shadow-sm: inset 0 1px 0 hsl(0 0% 100% / .04), 0 1px 2px hsl(0 0% 0% / .30);
+  --shadow-md: inset 0 1px 0 hsl(0 0% 100% / .04), 0 4px 12px hsl(0 0% 0% / .35);
+  --shadow-lg: inset 0 1px 0 hsl(0 0% 100% / .05), 0 12px 32px hsl(0 0% 0% / .45);
+  --shadow-xl: inset 0 1px 0 hsl(0 0% 100% / .05), 0 20px 48px hsl(0 0% 0% / .50);
+
+  /* Motion tokens (issues_ui §4) */
+  --ease-out-quart: cubic-bezier(.2, .8, .2, 1);
 }
 
 /* ── Dark theme — matching ACE_2.0 neutral dark palette ──────────────────── */
@@ -41,7 +52,8 @@
   --secondary:            hsl(0 0% 14.9%);
   --secondary-foreground: hsl(0 0% 98%);
   --muted:                hsl(0 0% 14.9%);
-  --muted-foreground:     hsl(0 0% 63.9%);
+  /* 70% (was 63.9%) — AA contrast for small text on 7% cards (issues_ui §9). */
+  --muted-foreground:     hsl(0 0% 70%);
   --accent:               hsl(0 0% 14.9%);
   --accent-foreground:    hsl(0 0% 98%);
   --destructive:          hsl(0 72% 51%);
@@ -50,7 +62,8 @@
   --input:                hsl(0 0% 14.9%);
   --ring:                 hsl(0 0% 83.1%);
   --radius:               0.5rem;
-  --font-sans:            ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Inter (self-hosted via next/font) with the system stack as fallback. */
+  --font-sans:            var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 /* ── Surface ladder ───────────────────────────────────────────────────────────
@@ -81,6 +94,18 @@ body {
 
 button, [role="button"], a, label[for], select { cursor: pointer; }
 button:disabled, [role="button"][aria-disabled="true"] { cursor: not-allowed; }
+
+/* Press feedback on every interactive control (issues_ui §4). Gated behind
+   prefers-reduced-motion so it never fights accessibility settings. */
+@media (prefers-reduced-motion: no-preference) {
+  button, [role="button"] {
+    transition: transform 120ms var(--ease-out-quart, ease-out);
+  }
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: scale(0.98);
+  }
+}
 
 .rich-editor:empty::before {
   content: attr(data-placeholder);

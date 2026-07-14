@@ -59,12 +59,10 @@ export async function POST(
 
   if (!cl) return fail(404, "NOT_FOUND", "Campaign lead not found");
 
-  await db.from("email_drafts").update({
-    status: "rejected",
-    rejection_reason: "superseded by regeneration",
-    updated_at: new Date().toISOString(),
-  }).eq("id", id);
-
+  // Generate the replacement FIRST; only demote the old draft once the new one
+  // actually exists. Previously the old draft was rejected up front, so a
+  // failed LLM call left the lead with NO usable draft — an approved email
+  // could silently vanish (planning.md Phase 6.2).
   const nextVersion = (oldDraft.version ?? 1) + 1;
   const { data: newDraftRow, error: insertErr } = await db
     .from("email_drafts")
@@ -82,11 +80,6 @@ export async function POST(
 
   if (insertErr || !newDraftRow) return fail(500, "INTERNAL", insertErr?.message ?? "Failed to create draft row");
 
-  await db.from("campaign_leads").update({
-    draft_id: newDraftRow.id,
-    updated_at: new Date().toISOString(),
-  }).eq("id", cl.id);
-
   const result = await generateOneDraft(
     db,
     cl,
@@ -100,7 +93,26 @@ export async function POST(
     oldDraft.step_number ?? 1,
   );
 
-  if (!result.ok) return fail(500, "GENERATION_FAILED", result.reason);
+  if (!result.ok) {
+    // The new row is marked failed by generateOneDraft; the old draft keeps its
+    // status (approved stays approved) and remains the active version.
+    return fail(500, "GENERATION_FAILED", result.reason);
+  }
+
+  await db.from("email_drafts").update({
+    status: "rejected",
+    rejection_reason: "superseded by regeneration",
+    updated_at: new Date().toISOString(),
+  }).eq("id", id);
+
+  // generateOneDraft repoints campaign_leads.draft_id for step-1 drafts on
+  // success; make sure it points at the new version even for edge paths.
+  if ((oldDraft.step_number ?? 1) === 1) {
+    await db.from("campaign_leads").update({
+      draft_id: newDraftRow.id,
+      updated_at: new Date().toISOString(),
+    }).eq("id", cl.id);
+  }
 
   const { data: newDraft } = await db
     .from("email_drafts")

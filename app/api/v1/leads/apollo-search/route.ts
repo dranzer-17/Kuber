@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const parsed = ApolloSearchSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to } = parsed.data;
+  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy } = parsed.data;
 
   if (!process.env.APOLLO_API_KEY) return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured");
 
@@ -149,6 +149,9 @@ export async function POST(req: NextRequest) {
           first_name: person.first_name,
           title: person.title,
           has_email: person.has_email,
+          city: person.city ?? null,
+          state: person.state ?? null,
+          country: person.country ?? null,
           organization_id: orgId,
           lead_source: "apollo",
           created_by: user.id,
@@ -189,6 +192,16 @@ export async function POST(req: NextRequest) {
     await db.from("imports").update({ lead_count: inserted }).eq("id", importId);
   }
 
+  // Strategy-based distribution at import time (planning.md Phase 4 / Q5).
+  // Leads Apollo returned without a country stay in the pool (surfaced below);
+  // territory auto-assignment can still pick them up after enrichment.
+  let assignmentSkipped = 0;
+  if (assignment_strategy && newLeadTargets.length > 0) {
+    const { bulkAssignByStrategy } = await import("@/lib/services/assignment");
+    const res = await bulkAssignByStrategy(db, newLeadTargets.map((t) => t.id), assignment_strategy, null);
+    assignmentSkipped = res.skipped;
+  }
+
   // Phase 1 complete — leads are now in the DB. Fire-and-forget Phase 2A
   // (email reveal) and Phase 2B (org scraping) so the client can redirect.
   const baseUrl = internalAppBaseUrl(req);
@@ -219,6 +232,7 @@ export async function POST(req: NextRequest) {
     orgs_created: orgsCreated,
     orgs_reused: orgsReused,
     enrich_queued: newLeadTargets.length,
+    assignment_skipped: assignmentSkipped,
     ...(warnings.length > 0 ? { warnings } : {}),
   });
 }

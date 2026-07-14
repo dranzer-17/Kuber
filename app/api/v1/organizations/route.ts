@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateOrgSchema, OrgListQuerySchema } from "@/lib/validators/organizations";
@@ -12,8 +12,11 @@ function normalizeDomain(raw: string): string {
     .toLowerCase();
 }
 
+// Organizations are enrichment territory — manager-only (planning.md D8).
+// Employees reach org data only through their own leads' drawers
+// (GET /organizations/[id], scoped there).
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
   const parsed = OrgListQuerySchema.safeParse(sp);
@@ -38,8 +41,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let user: { id: string };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateOrgSchema.safeParse(body);

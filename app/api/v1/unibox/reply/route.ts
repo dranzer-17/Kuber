@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { getThreadMessages, sendThreadReply } from "@/lib/services/unibox";
-import { assertCampaignAccess } from "@/lib/auth/scope";
+import { assertThreadAccess } from "@/lib/auth/scope";
 
 export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -24,10 +24,13 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
   const thread = await getThreadMessages(db, body.thread_id);
-  const campaignId = (thread.campaign as { id?: string } | null)?.id;
-  if (user.role === "employee") {
-    if (!campaignId) return fail(404, "NOT_FOUND", "Thread not found");
-    try { await assertCampaignAccess(db, user, campaignId); } catch (r) { return r as Response; }
+  try {
+    await assertThreadAccess(db, user, {
+      campaignId: (thread.campaign as { id?: string } | null)?.id ?? null,
+      campaignLeadId: thread.campaign_lead_id,
+    });
+  } catch (r) {
+    return r as Response;
   }
   if (!thread.reply_to_uuid || !thread.eaccount) {
     return fail(400, "MISSING_THREAD", "No received message to reply to in this thread");

@@ -465,6 +465,36 @@ function campaignMatches(
   return true;
 }
 
+/**
+ * The employee visibility boundary (planning.md Phase 2): a message is in scope
+ * when its campaign is accessible (created/assigned) OR its campaign_lead's
+ * lead is assigned to the employee. Managers pass no scope (see everything).
+ */
+export type UniboxScope = { campaign_ids: string[]; campaign_lead_ids: string[] };
+
+function scopeMatches(
+  row: { campaign_id?: string | null; campaign_lead_id?: string | null },
+  scope: UniboxScope | undefined,
+): boolean {
+  if (!scope) return true;
+  if (row.campaign_id && scope.campaign_ids.includes(row.campaign_id)) return true;
+  if (row.campaign_lead_id && scope.campaign_lead_ids.includes(row.campaign_lead_id)) return true;
+  return false;
+}
+
+/** PostgREST `.or()` filter for the scope; null when the scope allows nothing. */
+function scopeOrFilter(scope: UniboxScope): string | null {
+  const parts: string[] = [];
+  if (scope.campaign_ids.length > 0) parts.push(`campaign_id.in.(${scope.campaign_ids.join(",")})`);
+  if (scope.campaign_lead_ids.length > 0) parts.push(`campaign_lead_id.in.(${scope.campaign_lead_ids.join(",")})`);
+  return parts.length > 0 ? parts.join(",") : null;
+}
+
+/** Strip characters that would break out of a PostgREST `.or(...ilike...)` filter. */
+function sanitizeSearch(raw: string): string {
+  return raw.replace(/[,()"\\]/g, " ").trim();
+}
+
 export async function getThreads(db: Db, filters: {
   tab?: UniboxTab;
   campaign_id?: string;
@@ -476,13 +506,22 @@ export async function getThreads(db: Db, filters: {
   interest_status?: number | "lead";
   cursor?: string;
   limit?: number;
+  scope?: UniboxScope;
 }): Promise<{
   threads: UniboxThreadSummary[];
   next_cursor: string | null;
   counts: { unread_total: number };
 }> {
   const limit = filters.limit ?? 30;
+  const EMPTY = { threads: [], next_cursor: null, counts: { unread_total: 0 } };
+
   let query = db.from("unibox_emails").select("*").not("thread_id", "is", null);
+
+  if (filters.scope) {
+    const orFilter = scopeOrFilter(filters.scope);
+    if (!orFilter) return EMPTY;
+    query = query.or(orFilter);
+  }
 
   if (filters.campaign_ids && filters.campaign_ids.length > 0) {
     query = query.in("campaign_id", filters.campaign_ids);
@@ -492,13 +531,13 @@ export async function getThreads(db: Db, filters: {
   if (filters.eaccount) query = query.eq("eaccount", filters.eaccount);
 
   let nameMatchEmails = new Set<string>();
-  if (filters.q?.trim()) {
-    const q = filters.q.trim();
-    query = query.or(`lead_email.ilike.%${q}%,subject.ilike.%${q}%,from_email.ilike.%${q}%`);
+  const search = filters.q?.trim() ? sanitizeSearch(filters.q) : "";
+  if (search) {
+    query = query.or(`lead_email.ilike.%${search}%,subject.ilike.%${search}%,from_email.ilike.%${search}%`);
     const { data: nameHits } = await db
       .from("leads")
       .select("email")
-      .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`);
+      .or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%,email.ilike.%${search}%`);
     nameMatchEmails = new Set((nameHits ?? []).map((l) => (l.email as string).toLowerCase()));
   }
 
@@ -523,6 +562,7 @@ export async function getThreads(db: Db, filters: {
     for (const r of extraRows ?? []) {
       if (!r.thread_id) continue;
       if (filters.tab && !matchesTab(filters.tab, { is_focused: r.is_focused, is_auto_reply: r.is_auto_reply })) continue;
+      if (!scopeMatches(r, filters.scope)) continue;
       if (!campaignMatches(r.campaign_id, filters)) continue;
       if (filters.eaccount && r.eaccount !== filters.eaccount) continue;
       if (!threadMap.has(r.thread_id)) threadMap.set(r.thread_id, []);
@@ -746,12 +786,18 @@ export async function hydrateThreadIfStale(db: Db, threadId: string): Promise<vo
   }
 }
 
-export async function getUnreadCount(db: Db): Promise<number> {
-  const { count } = await db
+export async function getUnreadCount(db: Db, scope?: UniboxScope): Promise<number> {
+  let q = db
     .from("unibox_emails")
     .select("thread_id", { count: "exact", head: true })
     .eq("is_unread", true)
     .eq("direction", "received");
+  if (scope) {
+    const orFilter = scopeOrFilter(scope);
+    if (!orFilter) return 0;
+    q = q.or(orFilter);
+  }
+  const { count } = await q;
   return count ?? 0;
 }
 

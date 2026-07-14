@@ -1,22 +1,22 @@
 import { z } from "zod";
 
-const THEME_IDS = ["monochrome", "blue", "green", "purple", "orange", "rose"] as const;
-const THEME_MODES = ["dark", "light"] as const;
-
+// Company-wide settings (the `settings` table). Personal preferences — drafting
+// prompt, reply prompt, signature, sender name, theme — live in `user_settings`
+// and are validated by UserSettingsSchema below (planning.md Phase 1).
+//
+// Removed keys: client_products / client_target_markets (duplicated the Product
+// Offerings library — planning.md D2), theme / theme_mode (per-user now).
 export const PatchSettingsSchema = z.object({
-  default_sender_name:   z.string().optional(),
+  default_sender_name:   z.string().max(200).optional(),
   system_prompt:         z.string().optional(),
-  client_industry:       z.string().optional(),
-  client_products:       z.string().optional(),
-  client_target_markets: z.string().optional(),
+  client_industry:       z.string().max(300).optional(),
+  company_context:       z.string().optional(),
   email_signature:       z.string().optional(),
   brand_logo_path:       z.string().optional(),
   signature_name:        z.string().max(200).optional(),
   signature_title:       z.string().max(200).optional(),
   signature_contact:     z.string().max(500).optional(),
   signature_company:     z.string().max(200).optional(),
-  theme:                 z.enum(THEME_IDS).optional(),
-  theme_mode:            z.enum(THEME_MODES).optional(),
   email_subject_template:  z.string().max(300).optional(), // supports {product} and {company}
   product_offerings:       z.string().optional(), // JSON: [{name, description}]
   reply_classifier_prompt: z.string().optional(),
@@ -31,16 +31,13 @@ export const SETTINGS_KEYS = [
   "default_sender_name",
   "system_prompt",
   "client_industry",
-  "client_products",
-  "client_target_markets",
+  "company_context",
   "email_signature",
   "brand_logo_path",
   "signature_name",
   "signature_title",
   "signature_contact",
   "signature_company",
-  "theme",
-  "theme_mode",
   "email_subject_template",
   "product_offerings",
   "reply_classifier_prompt",
@@ -48,3 +45,21 @@ export const SETTINGS_KEYS = [
   "generic_email_subject",
   "generic_email_body",
 ] as const;
+
+// ── Per-user settings (`user_settings` table) ────────────────────────────────
+// Every field is optional; sending null clears the value back to "inherit the
+// company default".
+
+const THEME_IDS = ["monochrome", "blue", "green", "purple", "orange", "rose"] as const;
+const THEME_MODES = ["dark", "light"] as const;
+
+export const PatchUserSettingsSchema = z.object({
+  draft_prompt: z.string().max(20_000).nullable().optional(),
+  reply_prompt: z.string().max(20_000).nullable().optional(),
+  signature:    z.string().max(2_000).nullable().optional(),
+  sender_name:  z.string().max(200).nullable().optional(),
+  theme:        z.enum(THEME_IDS).nullable().optional(),
+  theme_mode:   z.enum(THEME_MODES).nullable().optional(),
+});
+
+export type PatchUserSettings = z.infer<typeof PatchUserSettingsSchema>;

@@ -1,7 +1,16 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import { APP_DESCRIPTION, APP_TITLE, THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY } from "@/lib/branding";
+
+// Self-hosted via next/font (no external request at runtime, zero layout
+// shift). globals.css falls back to the system stack if the variable is absent.
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: APP_TITLE,
@@ -41,7 +50,7 @@ const THEME_INIT_SCRIPT = `
         "--secondary": "hsl(" + h + " " + s + "% 14.9%)",
         "--secondary-foreground": "hsl(" + h + " " + fgS + "% 98%)",
         "--muted": "hsl(" + h + " " + s + "% 14.9%)",
-        "--muted-foreground": "hsl(" + h + " " + fgS + "% 63.9%)",
+        "--muted-foreground": "hsl(" + h + " " + fgS + "% 70%)",
         "--accent": "hsl(" + h + " " + s + "% 16.9%)",
         "--accent-foreground": "hsl(" + h + " " + fgS + "% 98%)",
         "--border": "hsl(" + h + " " + s + "% 14.9%)",
@@ -93,7 +102,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={inter.variable}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

@@ -3,8 +3,7 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok } from "@/lib/api-response";
 import { getThreadMessages, hydrateThreadIfStale } from "@/lib/services/unibox";
-import { assertCampaignAccess } from "@/lib/auth/scope";
-import { fail } from "@/lib/api-response";
+import { assertThreadAccess } from "@/lib/auth/scope";
 
 export async function GET(
   req: NextRequest,
@@ -20,11 +19,13 @@ export async function GET(
   }
 
   const detail = await getThreadMessages(db, threadId);
-  const campaignId = (detail.campaign as { id?: string } | null)?.id;
-  if (user.role === "employee" && campaignId) {
-    try { await assertCampaignAccess(db, user, campaignId); } catch (r) { return r as Response; }
-  } else if (user.role === "employee") {
-    return fail(404, "NOT_FOUND", "Thread not found");
+  try {
+    await assertThreadAccess(db, user, {
+      campaignId: (detail.campaign as { id?: string } | null)?.id ?? null,
+      campaignLeadId: detail.campaign_lead_id,
+    });
+  } catch (r) {
+    return r as Response;
   }
   return ok(detail);
 }

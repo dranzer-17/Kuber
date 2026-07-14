@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
 import { getCampaigns } from "@/lib/server/campaigns";
-import { getDashboardAnalytics, type DashboardAnalytics } from "@/lib/server/dashboard";
+import { getDashboardAnalytics, getEmployeeDashboard, type DashboardAnalytics } from "@/lib/server/dashboard";
 import { getImports } from "@/lib/server/imports";
 import { DashboardClient } from "./dashboard-client";
 
@@ -24,7 +24,13 @@ export default async function DashboardPage() {
 
   const [campaigns, analytics, imports] = await Promise.all([
     getCampaigns(db, isManager ? undefined : user?.id),
-    isManager ? getDashboardAnalytics(db) : getEmployeeAnalytics(db, user?.id),
+    // Employees get the same dashboard, scoped to their own leads + campaigns
+    // (planning.md Phase 7 / Q9).
+    isManager
+      ? getDashboardAnalytics(db)
+      : user?.id
+        ? getEmployeeDashboard(db, user.id)
+        : Promise.resolve(EMPTY_ANALYTICS),
     isManager ? getImports(db) : Promise.resolve([]),
   ]);
 
@@ -35,13 +41,4 @@ export default async function DashboardPage() {
       imports={imports}
     />
   );
-}
-
-async function getEmployeeAnalytics(db: ReturnType<typeof createAdminClient>, userId?: string): Promise<DashboardAnalytics> {
-  if (!userId) return EMPTY_ANALYTICS;
-  const [{ count: totalLeads }, { count: enrichedLeads }] = await Promise.all([
-    db.from("leads").select("id", { count: "exact", head: true }).eq("is_deleted", false).eq("assigned_to", userId),
-    db.from("leads").select("id", { count: "exact", head: true }).eq("is_deleted", false).eq("assigned_to", userId).eq("status", "enriched"),
-  ]);
-  return { ...EMPTY_ANALYTICS, totalLeads: totalLeads ?? 0, enrichedLeads: enrichedLeads ?? 0 };
 }

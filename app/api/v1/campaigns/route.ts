@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
     .select("*")
     .eq("is_deleted", false);
 
-  if (user.role === "employee") q = q.eq("created_by", user.id);
+  // Employees see campaigns they created OR were assigned (planning.md Phase 2).
+  if (user.role === "employee") q = q.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`);
 
   const { data, error } = await q.order("created_at", { ascending: false });
 

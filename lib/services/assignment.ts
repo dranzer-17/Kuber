@@ -1,86 +1,100 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { EUROPE_COUNTRIES } from "@/lib/constants";
 
 type Db = ReturnType<typeof createAdminClient>;
-type Territory = "india" | "foreign";
+export type Territory = "india" | "europe" | "foreign";
 export type AssignmentStrategy = "manual" | "round_robin" | "territory";
 
-function normalizeTerritory(country: string | null | undefined): Territory | null {
-  if (!country) return null;
-  return country.trim().toLowerCase() === "india" ? "india" : "foreign";
+/**
+ * Map a lead's country to a routing region (planning.md Phase 4 / Q8):
+ * india / europe / foreign (rest of world). Null only when country is empty —
+ * such leads are skipped by territory routing and stay in the manager pool.
+ */
+export function normalizeTerritory(country: string | null | undefined): Territory | null {
+  const c = country?.trim().toLowerCase();
+  if (!c) return null;
+  if (c === "india") return "india";
+  if (EUROPE_COUNTRIES.has(c)) return "europe";
+  return "foreign";
 }
 
-async function getActiveEmployees(db: Db, territory?: Territory) {
+type Candidate = { id: string; load: number };
+
+async function getActiveEmployees(db: Db, territory?: Territory): Promise<string[]> {
   let query = db.from("profiles").select("id").eq("role", "employee").eq("is_active", true);
   if (territory) query = query.eq("territory", territory);
   const { data } = await query.order("id");
   return (data ?? []).map((row) => row.id as string);
 }
 
-async function getCursorRow(db: Db) {
+/** Current live-lead count per employee — the fairness signal for picks. */
+async function getLeadLoads(db: Db, employeeIds: string[]): Promise<Map<string, number>> {
+  const loads = new Map<string, number>(employeeIds.map((id) => [id, 0]));
+  if (employeeIds.length === 0) return loads;
   const { data } = await db
-    .from("assignment_settings")
-    .select("id, round_robin_cursor")
-    .limit(1)
-    .maybeSingle();
-  return data;
-}
-
-async function pickRoundRobin(
-  db: Db,
-  settingsId: string,
-  cursor: string | null,
-  candidateIds: string[],
-): Promise<string> {
-  // Atomic pick-and-advance (concurrency-safe) via RPC. Falls back to the old
-  // read-modify-write only if the function isn't present yet (pre-migration §2.5).
-  const { data, error } = await db.rpc("assignment_pick_round_robin", {
-    p_candidate_ids: candidateIds,
-  });
-  if (!error && typeof data === "string" && data) return data;
-
-  const lastIdx = cursor ? candidateIds.indexOf(cursor) : -1;
-  const next = candidateIds[(lastIdx + 1) % candidateIds.length];
-  await db
-    .from("assignment_settings")
-    .update({ round_robin_cursor: next, updated_at: new Date().toISOString() })
-    .eq("id", settingsId);
-  return next;
+    .from("leads")
+    .select("assigned_to")
+    .in("assigned_to", employeeIds)
+    .eq("is_deleted", false);
+  for (const row of data ?? []) {
+    const id = row.assigned_to as string;
+    loads.set(id, (loads.get(id) ?? 0) + 1);
+  }
+  return loads;
 }
 
 /**
- * Resolves who a lead should assign to under an explicitly-chosen strategy —
- * used by the manual "Assign" bulk action (strategy picked per action, not
- * read from a persisted default). Returns null for "manual" (caller supplies
- * the assignee directly in that case) or when no eligible candidate exists.
+ * Candidates for a region, exact-specialist-first (planning.md Phase 4.2):
+ *   india   → india reps only (no sensible fallback — pool if none)
+ *   europe  → europe reps; if none active, the foreign (rest-of-world) reps
+ *   foreign → foreign reps only
+ * Exact-match-first is what keeps the 20/20/60 example fair: the Europe rep
+ * gets ALL Europe leads while they exist; the rest-of-world rep is never
+ * double-loaded with Europe on top of their own region.
  */
-export async function resolveAssigneeForStrategy(
-  db: Db,
-  strategy: AssignmentStrategy,
-  leadCountry: string | null | undefined,
-): Promise<string | null> {
-  if (strategy === "manual") return null;
+async function candidatesForRegion(db: Db, region: Territory): Promise<string[]> {
+  const exact = await getActiveEmployees(db, region);
+  if (exact.length > 0) return exact;
+  if (region === "europe") return getActiveEmployees(db, "foreign");
+  return [];
+}
 
-  const cursorRow = await getCursorRow(db);
-  if (!cursorRow) return null;
+/**
+ * Stateful picker for a bulk action: least-loaded first, round-robin cursor as
+ * the tiebreak. Loads are fetched once and incremented locally so a 500-lead
+ * import doesn't issue 500 count queries.
+ */
+class LoadBalancedPicker {
+  private loads: Map<string, number>;
+  private rrIndex = 0;
 
-  if (strategy === "territory") {
-    const territory = normalizeTerritory(leadCountry);
-    if (!territory) return null;
-    const candidates = await getActiveEmployees(db, territory);
-    if (!candidates.length) return null;
-    return pickRoundRobin(db, cursorRow.id, cursorRow.round_robin_cursor, candidates);
+  constructor(loads: Map<string, number>) {
+    this.loads = loads;
   }
 
-  const candidates = await getActiveEmployees(db);
-  if (!candidates.length) return null;
-  return pickRoundRobin(db, cursorRow.id, cursorRow.round_robin_cursor, candidates);
+  static async create(db: Db): Promise<LoadBalancedPicker> {
+    const all = await getActiveEmployees(db);
+    return new LoadBalancedPicker(await getLeadLoads(db, all));
+  }
+
+  pick(candidateIds: string[]): string | null {
+    if (candidateIds.length === 0) return null;
+    const ranked: Candidate[] = candidateIds.map((id) => ({ id, load: this.loads.get(id) ?? 0 }));
+    const minLoad = Math.min(...ranked.map((c) => c.load));
+    const tied = ranked.filter((c) => c.load === minLoad);
+    const chosen = tied[this.rrIndex % tied.length];
+    this.rrIndex++;
+    this.loads.set(chosen.id, chosen.load + 1);
+    return chosen.id;
+  }
 }
 
 /**
  * Assigns a specific set of leads under an explicitly-chosen strategy (the
- * manual bulk "Assign" action on the Leads page). For "manual", every lead
- * goes to `assignedTo`. For "round_robin"/"territory", each lead is resolved
- * one at a time (round-robin must advance sequentially per lead).
+ * bulk "Assign" action on the Leads page, or the picker on Apollo/Excel
+ * imports). For "manual", every lead goes to `assignedTo` (or the pool when
+ * null). For "round_robin"/"territory", leads are distributed least-loaded
+ * first within their candidate set.
  */
 export async function bulkAssignByStrategy(
   db: Db,
@@ -93,22 +107,38 @@ export async function bulkAssignByStrategy(
   if (strategy === "manual") {
     const { error, count } = await db
       .from("leads")
-      .update({ assigned_to: assignedTo, assigned_at: assignedTo ? now : null, updated_at: now })
+      .update({ assigned_to: assignedTo, assigned_at: assignedTo ? now : null }, { count: "exact" })
       .in("id", leadIds);
     if (error) throw new Error(error.message);
     return { assigned: count ?? leadIds.length, skipped: 0 };
   }
 
   const { data: leads } = await db.from("leads").select("id, country").in("id", leadIds);
+  const picker = await LoadBalancedPicker.create(db);
+
+  const allCandidates = await getActiveEmployees(db);
+  const candidatesByRegion = new Map<Territory, string[]>();
 
   let assigned = 0;
   let skipped = 0;
   for (const lead of leads ?? []) {
-    const assigneeId = await resolveAssigneeForStrategy(db, strategy, lead.country as string | null);
+    let candidates: string[];
+    if (strategy === "territory") {
+      const region = normalizeTerritory(lead.country as string | null);
+      if (!region) { skipped++; continue; }
+      if (!candidatesByRegion.has(region)) {
+        candidatesByRegion.set(region, await candidatesForRegion(db, region));
+      }
+      candidates = candidatesByRegion.get(region)!;
+    } else {
+      candidates = allCandidates;
+    }
+
+    const assigneeId = picker.pick(candidates);
     if (!assigneeId) { skipped++; continue; }
     await db
       .from("leads")
-      .update({ assigned_to: assigneeId, assigned_at: now, updated_at: now })
+      .update({ assigned_to: assigneeId, assigned_at: now })
       .eq("id", lead.id);
     assigned++;
   }
@@ -124,8 +154,20 @@ export async function resolveAssignee(db: Db, leadCountry: string | null | undef
     .limit(1)
     .maybeSingle();
 
-  if (!settings) return null;
-  return resolveAssigneeForStrategy(db, settings.strategy as AssignmentStrategy, leadCountry);
+  if (!settings || settings.strategy === "manual") return null;
+
+  let candidates: string[];
+  if (settings.strategy === "territory") {
+    const region = normalizeTerritory(leadCountry);
+    if (!region) return null;
+    candidates = await candidatesForRegion(db, region);
+  } else {
+    candidates = await getActiveEmployees(db);
+  }
+  if (candidates.length === 0) return null;
+
+  const loads = await getLeadLoads(db, candidates);
+  return new LoadBalancedPicker(loads).pick(candidates);
 }
 
 /**

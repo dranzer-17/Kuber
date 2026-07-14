@@ -405,16 +405,40 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
 
-  // ── Watchdog: reset orgs stuck in 'scraping' beyond the function's max lifetime
-  await db.from("organizations")
-    .update({
-      enrichment_stage: "queued",
-      enrichment_status: "REQUEUED_STUCK_SCRAPING",
-      has_scraped: false,
-      updated_at: new Date().toISOString(),
-    })
+  // ── Watchdog: reset orgs stuck in 'scraping' beyond the function's max
+  // lifetime. Each requeue counts as an attempt so a pathological org can't
+  // loop forever burning Firecrawl/LLM credits (planning.md Phase 3.2).
+  const { data: stuckScraping } = await db.from("organizations")
+    .select("id, enrichment_attempts")
     .eq("enrichment_stage", "scraping")
     .lt("enrichment_started_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+  for (const stuck of stuckScraping ?? []) {
+    const attempts = (stuck.enrichment_attempts ?? 0) + 1;
+    const givenUp = attempts >= 3;
+    await db.from("organizations").update({
+      enrichment_stage: givenUp ? "failed" : "queued",
+      enrichment_status: givenUp ? "ENRICHMENT_FAILED_PERMANENT" : "REQUEUED_STUCK_SCRAPING",
+      enrichment_attempts: attempts,
+      has_scraped: false,
+      ...(givenUp ? { last_error: "Scrape repeatedly stalled mid-run" } : {}),
+      updated_at: new Date().toISOString(),
+    }).eq("id", stuck.id);
+  }
+
+  // ── Watchdog: orgs sitting in 'queued' for over 24h were dropped by a dead
+  // worker chain. Conclude them so their leads become Input Required instead
+  // of showing "New" forever ("New" = pipeline in flight).
+  await db.from("organizations")
+    .update({
+      enrichment_stage: "failed",
+      enrichment_status: "ENRICHMENT_NEVER_RAN",
+      last_error: "Enrichment never ran — queued for over 24h",
+      enrichment_done_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("enrichment_stage", "queued")
+    .lt("updated_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
   let processed = 0;
   let succeeded = 0;
   let failed = 0;

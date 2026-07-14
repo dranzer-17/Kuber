@@ -1,0 +1,94 @@
+import type { createAdminClient } from "@/lib/supabase/admin";
+import { deleteInstantlyLead } from "@/lib/services/instantly";
+
+type Db = ReturnType<typeof createAdminClient>;
+
+export type LeadRemovalResult = {
+  instantly_removed: number;
+  instantly_errors: string[];
+  memberships_closed: number;
+  memberships_removed: number;
+};
+
+// Statuses that mean "nothing was ever sent for this membership" — safe to
+// hard-remove so the lead simply vanishes from the campaign's kanban/counts.
+const PRE_SEND_STATUSES = ["new", "enriching", "enriched", "draft", "draft_ready", "approved", "skipped", "failed"];
+
+/**
+ * Deleting a lead must actually stop outreach (planning.md Phase 5 / Q7):
+ *   • memberships already pushed to Instantly → delete the Instantly lead
+ *     (kills scheduled follow-ups) and close the membership (history kept);
+ *   • memberships never sent → remove them and their unsent drafts entirely;
+ *   • affected campaigns get their total_leads recounted.
+ * Idempotent: re-running after a partial Instantly failure retries cleanly
+ * (Instantly 404s are treated as already-removed).
+ */
+export async function removeLeadFromOutreach(db: Db, leadId: string): Promise<LeadRemovalResult> {
+  const result: LeadRemovalResult = {
+    instantly_removed: 0,
+    instantly_errors: [],
+    memberships_closed: 0,
+    memberships_removed: 0,
+  };
+
+  const { data: memberships } = await db
+    .from("campaign_leads")
+    .select("id, campaign_id, crm_status, instantly_lead_id")
+    .eq("lead_id", leadId);
+
+  if (!memberships || memberships.length === 0) return result;
+
+  const now = new Date().toISOString();
+  const affectedCampaignIds = new Set<string>();
+
+  for (const m of memberships) {
+    affectedCampaignIds.add(m.campaign_id as string);
+
+    if (m.instantly_lead_id) {
+      // Already in Instantly — stop future sends, keep the membership as history.
+      try {
+        await deleteInstantlyLead(m.instantly_lead_id as string);
+        result.instantly_removed++;
+      } catch (e) {
+        result.instantly_errors.push(`campaign_lead ${m.id}: ${(e as Error).message}`);
+        // Still close the membership — the lead is deleted in our system either
+        // way, and re-running the delete retries the Instantly removal.
+      }
+      if (m.crm_status !== "closed") {
+        await db.from("campaign_leads")
+          .update({ crm_status: "closed", updated_at: now })
+          .eq("id", m.id);
+        result.memberships_closed++;
+      }
+    } else if (PRE_SEND_STATUSES.includes(m.crm_status as string)) {
+      // Never sent — remove the membership and its unsent drafts entirely.
+      await db.from("email_drafts")
+        .delete()
+        .eq("campaign_id", m.campaign_id)
+        .eq("lead_id", leadId)
+        .neq("status", "sent");
+      await db.from("campaign_leads").delete().eq("id", m.id);
+      result.memberships_removed++;
+    } else if (m.crm_status !== "closed") {
+      // Post-send status without an Instantly id (e.g. replied via unmapped
+      // path) — just close it.
+      await db.from("campaign_leads")
+        .update({ crm_status: "closed", updated_at: now })
+        .eq("id", m.id);
+      result.memberships_closed++;
+    }
+  }
+
+  // Recount total_leads from ground truth for every affected campaign.
+  for (const campaignId of affectedCampaignIds) {
+    const { count } = await db
+      .from("campaign_leads")
+      .select("id", { count: "exact", head: true })
+      .eq("campaign_id", campaignId);
+    await db.from("campaigns")
+      .update({ total_leads: count ?? 0, updated_at: now })
+      .eq("id", campaignId);
+  }
+
+  return result;
+}

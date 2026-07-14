@@ -66,7 +66,8 @@ function buildDarkPalette(c: ColorDefinition): Palette {
     "--secondary":            `hsl(${h} ${s}% 14.9%)`,
     "--secondary-foreground": `hsl(${h} ${fgS}% 98%)`,
     "--muted":                `hsl(${h} ${s}% 14.9%)`,
-    "--muted-foreground":     `hsl(${h} ${fgS}% 63.9%)`,
+    // 70% (was 63.9%) — AA contrast for small text on 7% cards (issues_ui §9).
+    "--muted-foreground":     `hsl(${h} ${fgS}% 70%)`,
     "--accent":               `hsl(${h} ${s}% 16.9%)`,
     "--accent-foreground":    `hsl(${h} ${fgS}% 98%)`,
     "--border":                `hsl(${h} ${s}% 14.9%)`,

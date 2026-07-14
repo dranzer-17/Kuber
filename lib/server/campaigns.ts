@@ -1,13 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapDbCampaign, type DbCampaign } from "@/lib/mappers";
 
-export async function getCampaigns(db: SupabaseClient, createdBy?: string) {
+/** List campaigns; when `scopedUserId` is given (an employee), only campaigns
+ *  they created or were assigned. */
+export async function getCampaigns(db: SupabaseClient, scopedUserId?: string) {
   let q = db
     .from("campaigns")
     .select("*")
     .eq("is_deleted", false)
     .order("created_at", { ascending: false });
-  if (createdBy) q = q.eq("created_by", createdBy);
+  if (scopedUserId) q = q.or(`created_by.eq.${scopedUserId},assigned_to.eq.${scopedUserId}`);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []).map((c) => mapDbCampaign(c as unknown as DbCampaign));

@@ -172,6 +172,80 @@ function AssignToField({
   );
 }
 
+// ─── AssignStrategyPicker ─────────────────────────────────────────────────────
+// Batch imports (Apollo, Excel) can distribute leads as they land: to one
+// employee, spread round-robin (least-loaded first), or by territory
+// (India / Europe / rest of world) — planning.md Phase 4 / Q5.
+
+export type ImportAssignMode = "pool" | "manual" | "round_robin" | "territory";
+
+const ASSIGN_MODE_OPTIONS: { value: ImportAssignMode; label: string; hint: string }[] = [
+  { value: "pool",        label: "Leave in pool",      hint: "Unassigned — distribute later from the Leads page." },
+  { value: "manual",      label: "One employee",       hint: "The whole batch goes to one person." },
+  { value: "round_robin", label: "Round-robin",        hint: "Spread across all active employees, least-loaded first." },
+  { value: "territory",   label: "By territory",       hint: "India → India reps, Europe → Europe reps, rest → Foreign reps. Leads without a country stay in the pool." },
+];
+
+/** Request fields for the chosen mode — matches the import APIs. */
+export function buildImportAssignment(mode: ImportAssignMode, assignTo: string):
+  { assigned_to?: string; assignment_strategy?: "round_robin" | "territory" } {
+  if (mode === "manual" && assignTo) return { assigned_to: assignTo };
+  if (mode === "round_robin" || mode === "territory") return { assignment_strategy: mode };
+  return {};
+}
+
+function AssignStrategyPicker({
+  employees,
+  mode,
+  onModeChange,
+  assignTo,
+  onAssignToChange,
+}: {
+  employees: Profile[];
+  mode: ImportAssignMode;
+  onModeChange: (m: ImportAssignMode) => void;
+  assignTo: string;
+  onAssignToChange: (v: string) => void;
+}) {
+  if (employees.length === 0) return null;
+  const active = ASSIGN_MODE_OPTIONS.find((o) => o.value === mode);
+  return (
+    <div className="space-y-1.5">
+      <Label>Assign imported leads</Label>
+      <div className="flex flex-wrap gap-1.5">
+        {ASSIGN_MODE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            title={opt.hint}
+            onClick={() => onModeChange(opt.value)}
+            className={cn(
+              "px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+              mode === opt.value
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-transparent text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {mode === "manual" && (
+        <Select value={assignTo || "unassigned"} onValueChange={(v) => onAssignToChange(v === "unassigned" ? "" : v)}>
+          <SelectTrigger className="bg-card"><SelectValue placeholder="Pick an employee" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="unassigned">Pick an employee…</SelectItem>
+            {employees.map((e) => (
+              <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {active && <p className="text-xs text-muted-foreground">{active.hint}</p>}
+    </div>
+  );
+}
+
 // ─── IndustryKeywordsDropdown ─────────────────────────────────────────────────
 
 const ALL_INDUSTRY_KEYWORDS = INDUSTRY_KEYWORD_CATEGORIES.flatMap((c) => c.keywords.map((k) => k.label));
@@ -606,6 +680,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [importing,     setImporting    ] = useState(false);
   const [error,         setError        ] = useState("");
   const [assignTo,      setAssignTo     ] = useState("");
+  const [assignMode,    setAssignMode   ] = useState<ImportAssignMode>("pool");
   const employees = useAssignableEmployees(true);
 
   function toggleSen(s: string) {
@@ -640,7 +715,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           seniorities: seniorities.length > 0 ? seniorities : undefined,
           batch_name: batchName,
           color,
-          assigned_to: assignTo || undefined,
+          ...buildImportAssignment(assignMode, assignTo),
         }),
       });
       const json = await response.json().catch(() => ({}));
@@ -715,7 +790,13 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           error={batchNameError}
         />
 
-        <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />
+        <AssignStrategyPicker
+          employees={employees}
+          mode={assignMode}
+          onModeChange={setAssignMode}
+          assignTo={assignTo}
+          onAssignToChange={setAssignTo}
+        />
 
         <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
           <Search className="size-3.5" />
@@ -768,6 +849,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const [result,          setResult         ] = useState<ParseResult | null>(null);
   const [fileError,       setFileError      ] = useState("");
   const [assignTo,        setAssignTo       ] = useState("");
+  const [assignMode,      setAssignMode     ] = useState<ImportAssignMode>("pool");
   const employees = useAssignableEmployees(true);
 
   function tryAutoMap(cols: string[]): Record<string, string> {
@@ -820,7 +902,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     setImporting(true);
     try {
       const token = await getToken();
-      const res = await importExcelDirect(token, rows, mapping, batchName, color, assignTo || undefined);
+      const res = await importExcelDirect(token, rows, mapping, batchName, color, buildImportAssignment(assignMode, assignTo));
       setShowConfirm(false);
       setResult(res);
       setStage("result");
@@ -836,7 +918,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   function reset() {
     setStage("upload"); setFileName(""); setHeaders([]); setRows([]); setMapping({});
     setBatchName(""); setColor("violet"); setBatchNameError(false);
-    setResult(null); setFileError(""); setAssignTo("");
+    setResult(null); setFileError(""); setAssignTo(""); setAssignMode("pool");
   }
 
   const previewLeads: PreviewLead[] = rows.map((row) => ({
@@ -933,7 +1015,13 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
           error={batchNameError}
         />
 
-        <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />
+        <AssignStrategyPicker
+          employees={employees}
+          mode={assignMode}
+          onModeChange={setAssignMode}
+          assignTo={assignTo}
+          onAssignToChange={setAssignTo}
+        />
 
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>

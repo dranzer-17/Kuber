@@ -8,6 +8,7 @@ import {
   MapPin, Save, ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/lib/app-context";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
 import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
 import { fetchLead, patchLead, rescrapeOrg } from "@/lib/api-client";
@@ -154,6 +155,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   onLeadUpdated?: (updated: Lead) => void;
   onOrgClick?: (orgId: string) => void;
 }) {
+  const { role } = useApp();
   const [freshLead,   setFreshLead  ] = useState<Lead | null>(null);
   const [loadingLead, setLoadingLead] = useState(false);
   const [enrichData,  setEnrichData ] = useState<EnrichStatus | null>(null);
@@ -510,7 +512,10 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     <EnrichStageBadge stage={currentStage} hasData={enrichHasData} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {(currentStage === "failed" || currentStage === "queued" || currentStage === null || (currentStage === "done" && !enrichHasData)) && attempts < 3 && (
+                    {/* Rescraping spends credits — manager-only. Employees work
+                        their leads as given; enrichment is the manager's job
+                        (planning.md D8 / Q6). */}
+                    {role === "manager" && (currentStage === "failed" || currentStage === "queued" || currentStage === null || (currentStage === "done" && !enrichHasData)) && attempts < 3 && (
                       <Button
                         size="sm" variant="outline"
                         className="h-6 px-2 text-[11px] gap-1"

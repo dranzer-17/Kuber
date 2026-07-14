@@ -1,85 +1,124 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DRAFT_JSON_SUFFIX } from "@/lib/services/llm";
 
-let cachedPrompt: { value: string; expiresAt: number } | null = null;
-let cachedClient: { value: ClientContext; expiresAt: number } | null = null;
-let cachedProductOfferings: { value: ProductOffering[]; expiresAt: number } | null = null;
-let cachedReplyPrompts: { value: ReplyPrompts; expiresAt: number } | null = null;
-let cachedCompanyContext: { value: string; expiresAt: number } | null = null;
-let cachedGenericTemplate: { value: GenericTemplate; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 60_000;
+// Settings live in two layers (planning.md Phase 1):
+//   • `settings`       — company-wide defaults, editable by managers only.
+//   • `user_settings`  — one row per user; every column is nullable and NULL
+//     means "inherit the company default". Generation always resolves through
+//     the CAMPAIGN OWNER's user_settings first, then the company default.
+//
+// No module-level caching here: these are single-row indexed reads that sit
+// next to multi-second LLM calls, and the old per-instance 60s cache caused
+// "my edit didn't apply" confusion on serverless (stale instances).
 
 export type ClientContext = {
   industry: string;
-  products: string;
-  targetMarkets: string;
   defaultSenderName: string;
 };
 
-const CLIENT_KEYS = [
-  "client_industry",
-  "client_products",
-  "client_target_markets",
-  "default_sender_name",
-] as const;
-
 export async function getSystemPrompt(db: SupabaseClient): Promise<string> {
-  const now = Date.now();
-  if (cachedPrompt && cachedPrompt.expiresAt > now) return cachedPrompt.value;
-
   const { data } = await db
     .from("settings")
     .select("value")
     .eq("key", "system_prompt")
     .maybeSingle();
 
-  const value = data?.value?.trim() ?? "";
-  cachedPrompt = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
+  return data?.value?.trim() ?? "";
 }
 
 export { DRAFT_JSON_SUFFIX };
 
 export async function getClientContext(db: SupabaseClient): Promise<ClientContext> {
-  const now = Date.now();
-  if (cachedClient && cachedClient.expiresAt > now) return cachedClient.value;
-
   const { data: rows } = await db
     .from("settings")
     .select("key, value")
-    .in("key", [...CLIENT_KEYS]);
+    .in("key", ["client_industry", "default_sender_name"]);
 
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
 
-  const value: ClientContext = {
+  return {
     industry: map.client_industry || "Plastics & Polymer Manufacturing",
-    products: map.client_products || "Masterbatch, specialty compounds",
-    targetMarkets: map.client_target_markets || "Packaging, Automotive, Consumer Goods",
     defaultSenderName: map.default_sender_name || "Kuber Polyplast",
   };
-
-  cachedClient = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
 }
 
-function buildClientContextBlock(client: ClientContext): string {
-  return [
-    "Client context:",
-    `Industry: ${client.industry}`,
-    `Products: ${client.products}`,
-    `Target markets: ${client.targetMarkets}`,
-  ].join("\n");
+// ── Per-user settings ─────────────────────────────────────────────────────────
+
+export type UserSettings = {
+  user_id: string;
+  draft_prompt: string | null;
+  reply_prompt: string | null;
+  signature: string | null;
+  sender_name: string | null;
+  theme: string | null;
+  theme_mode: string | null;
+};
+
+export async function getUserSettings(db: SupabaseClient, userId: string | null | undefined): Promise<UserSettings | null> {
+  if (!userId) return null;
+  const { data } = await db
+    .from("user_settings")
+    .select("user_id, draft_prompt, reply_prompt, signature, sender_name, theme, theme_mode")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data as UserSettings | null) ?? null;
 }
 
-/** Tone prompt from settings + client info, with JSON output instructions for draft generation. */
-export async function getDraftSystemPrompt(db: SupabaseClient): Promise<string> {
-  const base = await getSystemPrompt(db);
+/** The campaign owner's personal drafting prompt, else the company default. */
+export async function resolveDraftPrompt(db: SupabaseClient, ownerId: string | null | undefined): Promise<string> {
+  const user = await getUserSettings(db, ownerId);
+  const personal = user?.draft_prompt?.trim();
+  if (personal) return personal;
+  return getSystemPrompt(db);
+}
+
+/** The campaign owner's personal reply prompt, else the company default. */
+export async function resolveReplyPrompt(db: SupabaseClient, ownerId: string | null | undefined): Promise<string> {
+  const user = await getUserSettings(db, ownerId);
+  const personal = user?.reply_prompt?.trim();
+  if (personal) return personal;
+  const { drafter } = await getReplyPrompts(db);
+  return drafter;
+}
+
+/** The campaign owner's personal "From" name, else the company default. */
+export async function resolveSenderName(db: SupabaseClient, ownerId: string | null | undefined): Promise<string> {
+  const user = await getUserSettings(db, ownerId);
+  const personal = user?.sender_name?.trim();
+  if (personal) return personal;
+  const client = await getClientContext(db);
+  return client.defaultSenderName;
+}
+
+// ── Client-context block appended to draft prompts ───────────────────────────
+// Products come from the Product Offerings library (the single source of truth);
+// the old client_products / client_target_markets settings were removed as
+// duplicates (planning.md D2).
+
+async function buildClientContextBlock(db: SupabaseClient): Promise<string> {
+  const [client, products] = await Promise.all([
+    getClientContext(db),
+    getProductOfferings(db),
+  ]);
+  const lines = ["Client context:", `Industry: ${client.industry}`];
+  if (products.length > 0) {
+    lines.push(`Products: ${products.map((p) => p.name).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Full drafting system prompt for a campaign: the owner's prompt (or company
+ * default) + JSON output instructions + the client-context block.
+ */
+export async function resolveDraftSystemPrompt(db: SupabaseClient, ownerId: string | null | undefined): Promise<string> {
+  const base = await resolveDraftPrompt(db, ownerId);
   const withJson =
     /["']subject["']/.test(base) && /["']body["']/.test(base) && /["']product_match["']/.test(base)
       ? base
       : `${base.trimEnd()}${DRAFT_JSON_SUFFIX}`;
-  const client = await getClientContext(db);
-  return `${withJson}\n\n${buildClientContextBlock(client)}`;
+  const contextBlock = await buildClientContextBlock(db);
+  return `${withJson}\n\n${contextBlock}`;
 }
 
 export async function getEmailSignature(db: SupabaseClient): Promise<string> {
@@ -104,7 +143,6 @@ const SIGNATURE_DEFAULTS = {
   name:    "Kuber Polyplast Sales Team",
   title:   "Business Development",
   // TODO: Replace +91-XXXXXXXXXX with the real phone number before sending live campaigns.
-  // Also run: UPDATE settings SET value='Kuber Polyplast\n+91-<REAL_NUMBER>\nsales@kuberpolyplast.com' WHERE key='signature_contact';
   contact: "Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com",
   company: "Kuber Polyplast",
 };
@@ -132,64 +170,53 @@ export async function getSignature(db: SupabaseClient): Promise<Signature> {
   };
 }
 
-// ── Per-admin campaign signature resolver ────────────────────────────────────
+// ── Campaign signature resolver ──────────────────────────────────────────────
 
 /**
- * Resolve the signature block for a campaign, per the resolution order:
- *   1. campaign.signature_override (free-text)
- *   2. global settings.signature_contact (the "Email Footer" setting)
- *   3. hardcoded defaults
- *
- * Returns the full text block to append to the email body.
+ * Resolve the signature block for a campaign:
+ *   1. campaign.signature_override (free-text, wins always)
+ *   2. the campaign OWNER's personal signature (user_settings)
+ *   3. company default (settings.signature_contact)
  */
 export async function resolveCampaignSignature(
   db: SupabaseClient,
   campaign: {
     signature_override?: string | null;
+    created_by?: string | null;
   },
 ): Promise<string> {
-  // 1. Free-text override wins
   if (campaign.signature_override?.trim()) {
     return campaign.signature_override.trim();
   }
 
-  // 2. Global settings fallback
+  const owner = await getUserSettings(db, campaign.created_by);
+  if (owner?.signature?.trim()) {
+    return owner.signature.trim();
+  }
+
   const sig = await getSignature(db);
   return sig.contact;
 }
-
-// ── Subject line template ─────────────────────────────────────────────────────
-
 
 // ── Dynamic product offerings ─────────────────────────────────────────────────
 
 export type ProductOffering = { name: string; description: string };
 
 export async function getProductOfferings(db: SupabaseClient): Promise<ProductOffering[]> {
-  const now = Date.now();
-  if (cachedProductOfferings && cachedProductOfferings.expiresAt > now) return cachedProductOfferings.value;
-
   const { data } = await db
     .from("settings")
     .select("value")
     .eq("key", "product_offerings")
     .maybeSingle();
 
-  let value: ProductOffering[] = [];
-  try { value = JSON.parse(data?.value ?? "[]") as ProductOffering[]; } catch { value = []; }
-
-  cachedProductOfferings = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
+  try { return JSON.parse(data?.value ?? "[]") as ProductOffering[]; } catch { return []; }
 }
 
-// ── Reply classification & drafting prompts ──────────────────────────────────
+// ── Reply classification & drafting prompts (company defaults) ───────────────
 
 export type ReplyPrompts = { classifier: string; drafter: string };
 
 export async function getReplyPrompts(db: SupabaseClient): Promise<ReplyPrompts> {
-  const now = Date.now();
-  if (cachedReplyPrompts && cachedReplyPrompts.expiresAt > now) return cachedReplyPrompts.value;
-
   const { data: rows } = await db
     .from("settings")
     .select("key, value")
@@ -197,28 +224,20 @@ export async function getReplyPrompts(db: SupabaseClient): Promise<ReplyPrompts>
 
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
 
-  const value: ReplyPrompts = {
+  return {
     classifier: map.reply_classifier_prompt?.trim() ?? "",
     drafter: map.reply_drafter_prompt?.trim() ?? "",
   };
-
-  cachedReplyPrompts = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
 }
 
 export async function getCompanyContext(db: SupabaseClient): Promise<string> {
-  const now = Date.now();
-  if (cachedCompanyContext && cachedCompanyContext.expiresAt > now) return cachedCompanyContext.value;
-
   const { data } = await db
     .from("settings")
     .select("value")
     .eq("key", "company_context")
     .maybeSingle();
 
-  const value = data?.value?.trim() ?? "";
-  cachedCompanyContext = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
+  return data?.value?.trim() ?? "";
 }
 
 // ── Generic (name-swap) template for un-enriched leads ────────────────────────
@@ -240,9 +259,6 @@ const GENERIC_TEMPLATE_DEFAULTS: GenericTemplate = {
 };
 
 export async function getGenericTemplate(db: SupabaseClient): Promise<GenericTemplate> {
-  const now = Date.now();
-  if (cachedGenericTemplate && cachedGenericTemplate.expiresAt > now) return cachedGenericTemplate.value;
-
   const { data: rows } = await db
     .from("settings")
     .select("key, value")
@@ -250,21 +266,11 @@ export async function getGenericTemplate(db: SupabaseClient): Promise<GenericTem
 
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value ?? ""]));
 
-  const value: GenericTemplate = {
+  return {
     subject: map.generic_email_subject?.trim() || GENERIC_TEMPLATE_DEFAULTS.subject,
     body: map.generic_email_body?.trim() || GENERIC_TEMPLATE_DEFAULTS.body,
   };
-
-  cachedGenericTemplate = { value, expiresAt: now + CACHE_TTL_MS };
-  return value;
 }
 
-export function invalidateSettingsCache() {
-  cachedPrompt = null;
-  cachedClient = null;
-  cachedProductOfferings = null;
-  cachedReplyPrompts = null;
-  cachedCompanyContext = null;
-  cachedGenericTemplate = null;
-}
-
+/** Kept for call-site compatibility; the settings layer is no longer cached. */
+export function invalidateSettingsCache() {}

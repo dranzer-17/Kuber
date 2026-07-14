@@ -34,6 +34,11 @@ export async function enrichLeads(
   let processedCount = 0;
   const missingApolloIds: string[] = [];
   const enrichedOrgIds = new Set<string>();
+  // Every org this run touched — used to conclude the pipeline afterwards so
+  // no lead is left showing "New" forever (planning.md Phase 3.2).
+  const touchedOrgIds = new Set<string>(
+    targets.map((t) => t.organization_id).filter(Boolean) as string[],
+  );
   let warning: string | undefined;
 
   try {
@@ -140,7 +145,10 @@ export async function enrichLeads(
             .not("email", "is", null);
         }
 
-        if (orgId) enrichedOrgIds.add(orgId);
+        if (orgId) {
+          enrichedOrgIds.add(orgId);
+          touchedOrgIds.add(orgId);
+        }
 
         // Only overwrite fields the match actually returned. A partial Apollo re-match
         // must NOT erase previously-good values with null (§3.1).
@@ -182,6 +190,39 @@ export async function enrichLeads(
     warning = status === 402
       ? `Credits exhausted after ${matched} matched`
       : (err as Error).message;
+  }
+
+  // ── Conclude the pipeline for every touched org (planning.md Phase 3.2) ────
+  // "New" now means "enrichment in flight", so a bulk-match run must leave no
+  // org dangling: revive previously-failed orgs that just gained a domain
+  // (they'll be scraped), and mark still-domainless orgs failed so their
+  // leads move to Input Required instead of sitting in New forever.
+  if (touchedOrgIds.size > 0) {
+    const ids = [...touchedOrgIds];
+    const now = new Date().toISOString();
+
+    await db.from("organizations")
+      .update({
+        enrichment_stage: "queued",
+        enrichment_status: "SCRAPE_QUEUED",
+        last_error: null,
+        updated_at: now,
+      })
+      .in("id", ids)
+      .eq("enrichment_stage", "failed")
+      .not("domain", "is", null)
+      .or("enrichment_attempts.is.null,enrichment_attempts.lt.3");
+
+    await db.from("organizations")
+      .update({
+        enrichment_stage: "failed",
+        enrichment_status: "No website found",
+        enrichment_done_at: now,
+        updated_at: now,
+      })
+      .in("id", ids)
+      .is("domain", null)
+      .in("enrichment_stage", ["queued", "scraping"]);
   }
 
   // Collect missing (still no email after enrichment)

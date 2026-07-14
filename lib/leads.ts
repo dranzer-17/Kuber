@@ -60,8 +60,8 @@ export const STATUS_LABELS: Record<LeadStatus, string> = {
 };
 
 export const STEP_DESCRIPTIONS: Record<LeadStatus, string> = {
-  "Input Required": "Missing email or company domain — add details before enrichment",
-  New: "Lead created, awaiting enrichment",
+  "Input Required": "Enrichment finished — needs an email, or will use the generic template",
+  New: "In queue — enrichment is running on this lead",
   Enriching: "Firecrawl scraping company website",
   Enriched: "Company profile ready",
   Open: "Active — outreach in progress",
@@ -123,11 +123,22 @@ export function campaignIneligibleReason(lead: Lead): string | null {
 
 export type InputRequiredReason = "missing_data" | "failed" | null;
 
-/** Why a lead is in Input Required — drives the card sub-color. */
+/**
+ * Why a lead is in Input Required — drives the badge label + sub-color.
+ * "missing_data" = no email → unusable until someone adds one.
+ * "failed"       = has email but no usable company profile (no website /
+ *                  unscrapeable / enrichment failed) → campaign-eligible via
+ *                  the generic name-swap template.
+ */
 export function inputRequiredReason(lead: Lead): InputRequiredReason {
   if (lead.status !== "Input Required") return null;
-  if (!lead.email || !lead.domain) return "missing_data";  // yellow
-  return "failed";                                          // orange (has domain, but failed/no-data)
+  if (!lead.email) return "missing_data";
+  return "failed";
+}
+
+/** Human label for the two Input-Required flavours (planning.md Phase 3.3). */
+export function inputRequiredLabel(lead: Lead): string {
+  return inputRequiredReason(lead) === "missing_data" ? "Needs email" : "No website · generic";
 }
 
 export const ENRICHMENT_DOT_HELP: Record<EnrichmentStage | "none", string> = {
