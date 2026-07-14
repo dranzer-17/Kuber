@@ -213,7 +213,7 @@ function AssignStrategyPicker({
   return (
     <div className="space-y-1.5">
       <Label>Assign imported leads</Label>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-col gap-1.5">
         {ASSIGN_MODE_OPTIONS.map((opt) => (
           <button
             key={opt.value}
@@ -221,7 +221,7 @@ function AssignStrategyPicker({
             title={opt.hint}
             onClick={() => onModeChange(opt.value)}
             className={cn(
-              "px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+              "w-full px-2.5 py-1.5 rounded-lg text-xs font-medium border text-left transition-colors",
               mode === opt.value
                 ? "bg-primary text-primary-foreground border-primary"
                 : "bg-transparent text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
@@ -700,7 +700,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [importing,     setImporting    ] = useState(false);
   const [error,         setError        ] = useState("");
   const [assignTo,      setAssignTo     ] = useState("");
-  const [assignMode,    setAssignMode   ] = useState<ImportAssignMode>("pool");
+  const [assignMode,    setAssignMode   ] = useState<ImportAssignMode>("manual");
   const employees = useAssignableEmployees(true);
 
   function toggleSen(s: string) {
@@ -881,7 +881,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const [result,          setResult         ] = useState<ParseResult | null>(null);
   const [fileError,       setFileError      ] = useState("");
   const [assignTo,        setAssignTo       ] = useState("");
-  const [assignMode,      setAssignMode     ] = useState<ImportAssignMode>("pool");
+  const [assignMode,      setAssignMode     ] = useState<ImportAssignMode>("manual");
   const employees = useAssignableEmployees(true);
 
   function tryAutoMap(cols: string[]): Record<string, string> {
@@ -951,7 +951,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   function reset() {
     setStage("upload"); setFileName(""); setHeaders([]); setRows([]); setMapping({});
     setBatchName(""); setColor("violet"); setBatchNameError(false);
-    setResult(null); setFileError(""); setAssignTo(""); setAssignMode("pool");
+    setResult(null); setFileError(""); setAssignTo(""); setAssignMode("manual");
   }
 
   const previewLeads: PreviewLead[] = rows.map((row) => ({
