@@ -25,23 +25,18 @@ export async function GET(req: NextRequest) {
   const db = createAdminClient();
 
   const campaignIdsRaw = sp.get("campaign_ids");
-  let campaign_ids = campaignIdsRaw
+  const campaign_ids = campaignIdsRaw
     ? campaignIdsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
-  let campaign_id: string | undefined = sp.get("campaign_id") ?? undefined;
+  const campaign_id: string | undefined = sp.get("campaign_id") ?? undefined;
 
   const EMPTY_RESULT = { threads: [], next_cursor: null, counts: { unread_total: 0 } };
 
-  // Employees see threads of campaigns they created/were assigned, plus threads
-  // of leads assigned to them inside other campaigns (planning.md Phase 2).
-  // The scope is the security boundary; campaign_id(s) stay purely user filters.
+  // Employees see ONLY threads of leads assigned to them (spec §7). The scope
+  // (a campaign_lead_id allow-list) is the security boundary; campaign_id(s)
+  // stay purely user-facing filters intersected on top.
   const scope = (await getUniboxScope(db, user)) ?? undefined;
-  if (scope) {
-    const accessible = new Set(scope.campaign_ids);
-    if (campaign_id && !accessible.has(campaign_id)) campaign_id = undefined;
-    if (campaign_ids) campaign_ids = campaign_ids.filter((id) => accessible.has(id));
-    if (scope.campaign_ids.length === 0 && scope.campaign_lead_ids.length === 0) return ok(EMPTY_RESULT);
-  }
+  if (scope && scope.campaign_lead_ids.length === 0) return ok(EMPTY_RESULT);
 
   const tabRaw = sp.get("tab");
   const tab = tabRaw ? (tabRaw as UniboxTab) : undefined;

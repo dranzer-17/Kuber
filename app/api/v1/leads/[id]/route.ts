@@ -3,7 +3,6 @@ import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchLeadSchema } from "@/lib/validators/leads";
-import { getCampaignAccessibleLeadIds } from "@/lib/auth/scope";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -20,12 +19,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (error) return fail(500, "INTERNAL", error.message);
   if (!lead) return fail(404, "NOT_FOUND", "Lead not found");
-  // View access: direct assignment OR a campaign the employee has access to
-  // (matches Unibox's broader visibility — review §3.1/§4.1). Editing (PATCH,
-  // below) is intentionally narrower — direct assignment only.
+  // Employees see only their own assigned leads (spec §5).
   if (user.role === "employee" && lead.assigned_to !== user.id) {
-    const accessibleIds = await getCampaignAccessibleLeadIds(db, user);
-    if (!accessibleIds.includes(id)) return fail(404, "NOT_FOUND", "Lead not found");
+    return fail(404, "NOT_FOUND", "Lead not found");
   }
 
   const { data: cls } = await db

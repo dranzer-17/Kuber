@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo, fetchUsers } from "@/lib/api-client";
+import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo, fetchUsers, fetchMyAvailability, setMyAvailability, type AvailabilityStatus } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/branding";
@@ -163,6 +163,58 @@ function RichTextEditor({
           style={{ minHeight }} />
       </div>
       {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
+    </div>
+  );
+}
+
+// Self-service availability toggle (spec §2B) — an employee marking themselves
+// available/away (e.g. going on leave) so they stop receiving new automatic
+// assignments, without being deactivated. Self-contained (own fetch/save).
+function AvailabilityCard() {
+  const [status, setStatus] = useState<AvailabilityStatus | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token ?? "";
+        const res = await fetchMyAvailability(token);
+        setStatus(res.availability_status);
+      } catch { /* leave null */ }
+    })();
+  }, []);
+
+  async function toggle() {
+    if (saving || !status) return;
+    const next: AvailabilityStatus = status === "online" ? "offline" : "online";
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await setMyAvailability(token, next);
+      setStatus(res.availability_status);
+      toast.success(res.availability_status === "offline" ? "You're now marked as away" : "You're now available");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium">Availability</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {status === "offline"
+            ? "You're marked away — you won't receive new automatic lead assignments (you can still be assigned manually)."
+            : "You're available for new automatic lead assignments."}
+        </p>
+      </div>
+      <Button variant="outline" className="h-9 shrink-0" disabled={saving || !status} onClick={() => void toggle()}>
+        {status === "offline" ? "Set available" : "Set away"}
+      </Button>
     </div>
   );
 }
@@ -538,6 +590,8 @@ export function SettingsView() {
                       {isSuperAdmin ? "Super Admin" : role === "manager" ? "Manager" : role === "employee" ? "Employee" : "—"}
                     </span>
                   </div>
+                  {/* Employees can mark themselves away (spec §2B). */}
+                  {role === "employee" && <AvailabilityCard />}
                 </>
               )}
 

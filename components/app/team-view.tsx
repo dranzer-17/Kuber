@@ -108,7 +108,7 @@ export function TeamView() {
     }
   }
 
-  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean; reassign_to: string }>) {
+  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean; availability_status: "online" | "offline"; reassign_to: string }>) {
     if (!session) return;
     try {
       const updated = await patchUser(session.access_token, id, patch);
@@ -364,41 +364,65 @@ export function TeamView() {
                     </TableCell>
 
                     <TableCell className="py-3">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1.5 text-xs font-medium",
-                          u.is_active ? "text-emerald-400" : "text-muted-foreground",
-                        )}
-                      >
+                      <div className="flex flex-col gap-1">
                         <span
                           className={cn(
-                            "size-1.5 rounded-full",
-                            u.is_active ? "bg-emerald-400" : "bg-muted-foreground/50",
+                            "inline-flex items-center gap-1.5 text-xs font-medium",
+                            u.is_active ? "text-emerald-400" : "text-muted-foreground",
                           )}
-                          aria-hidden
-                        />
-                        {u.is_active ? "Active" : "Inactive"}
-                      </span>
+                        >
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              u.is_active ? "bg-emerald-400" : "bg-muted-foreground/50",
+                            )}
+                            aria-hidden
+                          />
+                          {u.is_active ? "Active" : "Inactive"}
+                        </span>
+                        {/* Availability (spec §2B): offline = excluded from auto-assignment. */}
+                        {u.is_active && u.role === "employee" && u.availability_status === "offline" && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-400" title="Offline — excluded from round-robin and territory routing">
+                            <span className="size-1.5 rounded-full bg-amber-400" aria-hidden />
+                            Offline
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
 
                     <TableCell className="pr-5 py-3 text-right">
-                      {canToggleActive ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className={cn(
-                            "h-8 text-xs",
-                            u.is_active
-                              ? "border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400",
-                          )}
-                          onClick={() => (u.is_active ? handleDeactivateClick(u) : void handlePatch(u.id, { is_active: true }))}
-                        >
-                          {u.is_active ? "Deactivate" : "Reactivate"}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Availability toggle (spec §2B) — mark an active employee
+                            temporarily unavailable without deactivating them. */}
+                        {u.is_active && u.role === "employee" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs"
+                            title={u.availability_status === "offline" ? "Mark available (include in auto-assignment)" : "Mark away (exclude from auto-assignment)"}
+                            onClick={() => void handlePatch(u.id, { availability_status: u.availability_status === "offline" ? "online" : "offline" })}
+                          >
+                            {u.availability_status === "offline" ? "Set available" : "Set away"}
+                          </Button>
+                        )}
+                        {canToggleActive ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={cn(
+                              "h-8 text-xs",
+                              u.is_active
+                                ? "border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400",
+                            )}
+                            onClick={() => (u.is_active ? handleDeactivateClick(u) : void handlePatch(u.id, { is_active: true }))}
+                          >
+                            {u.is_active ? "Deactivate" : "Reactivate"}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

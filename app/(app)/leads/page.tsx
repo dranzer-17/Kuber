@@ -1,6 +1,7 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, type ImportBatch, type Profile, type BulkAssignStrategy } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
+import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getBatchColor } from "@/lib/constants";
@@ -608,6 +609,7 @@ export default function LeadsPage() {
   const [assignStrategy,   setAssignStrategy  ] = useState<BulkAssignStrategy>("manual");
   const [assignTarget,     setAssignTarget    ] = useState<string>("unassigned");
   const [assignOverwriteConfirmed, setAssignOverwriteConfirmed] = useState(false);
+  const [assignSkipAssigned, setAssignSkipAssigned] = useState(false);
   const [employees,        setEmployees       ] = useState<Profile[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
 
@@ -747,12 +749,12 @@ export default function LeadsPage() {
             <Button
               size="sm" variant="outline" className="gap-1.5 bg-card"
               disabled={checkedIds.size === 0}
-              onClick={() => { if (checkedIds.size > 0) { setAssignOverwriteConfirmed(false); setShowBulkAssign(true); } }}
+              onClick={() => { if (checkedIds.size > 0) { setAssignOverwriteConfirmed(false); setAssignSkipAssigned(false); setShowBulkAssign(true); } }}
             >
               <UserPlus className="size-3.5" /> Assign{checkedIds.size > 0 ? ` (${checkedIds.size})` : ""}
             </Button>
           )}
-          {someChecked && (
+          {someChecked && role === "manager" && (
             <Button
               size="sm" className="gap-1.5"
               disabled={!canCreateCampaign}
@@ -1165,7 +1167,9 @@ export default function LeadsPage() {
       {/* Bulk assign modal */}
       {showBulkAssign && (() => {
         const alreadyAssignedCount = leads.filter((l) => checkedIds.has(l.id) && l.assignedTo).length;
-        const needsOverwriteConfirm = alreadyAssignedCount > 0 && !assignOverwriteConfirmed;
+        // With "skip already assigned" on, nothing gets overwritten, so no
+        // reassignment confirmation is needed (spec §4).
+        const needsOverwriteConfirm = alreadyAssignedCount > 0 && !assignSkipAssigned && !assignOverwriteConfirmed;
         return (
         <div className="fixed inset-0 z-200 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!bulkAssigning) setShowBulkAssign(false); }} />
@@ -1218,8 +1222,25 @@ export default function LeadsPage() {
             )}
 
             {alreadyAssignedCount > 0 && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-                {alreadyAssignedCount} of these {alreadyAssignedCount !== 1 ? "leads are" : "lead is"} already assigned to someone else — proceeding will reassign {alreadyAssignedCount !== 1 ? "them" : "it"}.
+              <div className="space-y-2">
+                <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 text-xs cursor-pointer hover:bg-secondary/40">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={assignSkipAssigned}
+                    onChange={(e) => setAssignSkipAssigned(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-foreground">Skip already assigned leads</span>
+                    <br />
+                    <span className="text-muted-foreground">Leave the {alreadyAssignedCount} already-owned {alreadyAssignedCount !== 1 ? "leads" : "lead"} untouched and only assign the rest.</span>
+                  </span>
+                </label>
+                {!assignSkipAssigned && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                    {alreadyAssignedCount} of these {alreadyAssignedCount !== 1 ? "leads are" : "lead is"} already assigned to someone else — proceeding will reassign {alreadyAssignedCount !== 1 ? "them" : "it"}.
+                  </div>
+                )}
               </div>
             )}
 
@@ -1243,17 +1264,33 @@ export default function LeadsPage() {
                   if (!session) return;
                   setBulkAssigning(true);
                   try {
-                    await bulkAssignLeads(
+                    const summary: AssignmentSummary = await bulkAssignLeads(
                       session.access_token,
                       [...checkedIds],
                       assignStrategy,
                       assignStrategy === "manual" ? (assignTarget === "unassigned" ? null : assignTarget) : undefined,
+                      assignSkipAssigned,
                     );
                     setCheckedIds(new Set());
                     setShowBulkAssign(false);
                     void loadLeads(session.access_token);
+
+                    // Summarise the result (spec §3): what moved, what was skipped,
+                    // and any offline/unmatched caveats.
+                    const parts: string[] = [];
+                    if (summary.newly_assigned) parts.push(`${summary.newly_assigned} assigned`);
+                    if (summary.reassigned) parts.push(`${summary.reassigned} reassigned`);
+                    if (summary.skipped_already_assigned) parts.push(`${summary.skipped_already_assigned} skipped (already owned)`);
+                    if (summary.unmatched) parts.push(`${summary.unmatched} left unassigned (no eligible employee)`);
+                    toast.success(parts.length ? parts.join(" · ") : "No changes");
+                    if (summary.manual_target_offline) {
+                      toast.warning("Heads up: that employee is currently marked offline (away).");
+                    }
+                    if (summary.excluded_offline > 0 && assignStrategy !== "manual") {
+                      toast.message(`${summary.excluded_offline} offline employee${summary.excluded_offline !== 1 ? "s were" : " was"} excluded from routing.`);
+                    }
                   } catch (e) {
-                    console.error("Bulk assign failed:", e);
+                    toast.error((e as Error).message || "Bulk assign failed");
                   } finally {
                     setBulkAssigning(false);
                   }

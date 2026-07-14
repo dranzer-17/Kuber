@@ -32,10 +32,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     .select(
       `*, attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
        email_drafts(id, subject, body, status, created_at, step_number),
-       leads(first_name, last_name, email, title, country, organizations(name))`,
+       leads!inner(first_name, last_name, email, title, country, assigned_to, organizations(name))`,
       { count: "exact" }
     )
     .eq("campaign_id", id);
+
+  // A campaign is a container spanning multiple employees (spec §5) — an
+  // employee sees ONLY their own leads within it, never a co-worker's.
+  if (user.role === "employee") q = q.eq("leads.assigned_to", user.id);
 
   if (crm_status) q = q.eq("crm_status", crm_status);
   q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);

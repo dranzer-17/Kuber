@@ -5,10 +5,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { bulkAssignByStrategy } from "@/lib/services/assignment";
 
+// skip_already_assigned (spec §4): when true, leads that already have an owner
+// are left untouched — only pool/unassigned leads are processed.
 const BulkAssignSchema = z.discriminatedUnion("strategy", [
-  z.object({ strategy: z.literal("manual"), ids: z.array(z.string().uuid()).min(1), assigned_to: z.string().uuid().nullable() }),
-  z.object({ strategy: z.literal("round_robin"), ids: z.array(z.string().uuid()).min(1) }),
-  z.object({ strategy: z.literal("territory"), ids: z.array(z.string().uuid()).min(1) }),
+  z.object({ strategy: z.literal("manual"), ids: z.array(z.string().uuid()).min(1), assigned_to: z.string().uuid().nullable(), skip_already_assigned: z.boolean().optional() }),
+  z.object({ strategy: z.literal("round_robin"), ids: z.array(z.string().uuid()).min(1), skip_already_assigned: z.boolean().optional() }),
+  z.object({ strategy: z.literal("territory"), ids: z.array(z.string().uuid()).min(1), skip_already_assigned: z.boolean().optional() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -20,6 +22,8 @@ export async function POST(req: NextRequest) {
 
   const db = createAdminClient();
 
+  // Deactivated target is rejected; an offline target is allowed but the
+  // returned summary flags manual_target_offline so the UI can warn (spec §2B).
   if (parsed.data.strategy === "manual" && parsed.data.assigned_to) {
     const { data: employee } = await db
       .from("profiles")
@@ -35,7 +39,17 @@ export async function POST(req: NextRequest) {
       parsed.data.ids,
       parsed.data.strategy,
       parsed.data.strategy === "manual" ? parsed.data.assigned_to : null,
+      parsed.data.skip_already_assigned ?? false,
     );
+
+    // round-robin / territory with zero eligible employees is a hard failure —
+    // nothing could be assigned; surface it clearly (spec §3 "block with error").
+    if (parsed.data.strategy !== "manual" && result.eligible_employee_count === 0 && result.total > 0) {
+      return fail(409, "NO_ELIGIBLE_EMPLOYEES",
+        "No eligible employees are available (all are offline, deactivated, or outside the required territory).",
+        result);
+    }
+
     return ok(result);
   } catch (e) {
     return fail(500, "INTERNAL", (e as Error).message);

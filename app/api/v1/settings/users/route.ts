@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const db = createAdminClient();
   const { data, error } = await db
     .from("profiles")
-    .select("id, email, full_name, role, territory, is_active, is_super_admin, created_at")
+    .select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin, created_at")
     .order("created_at", { ascending: true });
 
   if (error) return fail(500, "INTERNAL", error.message);
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       territory: role === "employee" ? (territory ?? null) : null,
       is_active: true,
     })
-    .select("id, email, full_name, role, territory, is_active, is_super_admin, created_at")
+    .select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin, created_at")
     .single();
 
   if (profileError) {

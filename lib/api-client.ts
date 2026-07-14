@@ -231,13 +231,29 @@ export async function bulkDeleteLeads(token: string, ids: string[]): Promise<{ d
 
 export type BulkAssignStrategy = "manual" | "round_robin" | "territory";
 
+// Mirror of the server AssignmentSummary (spec §3/§4).
+export type AssignmentSummary = {
+  total: number;
+  newly_assigned: number;
+  reassigned: number;
+  skipped_already_assigned: number;
+  unmatched: number;
+  eligible_employee_count: number;
+  excluded_offline: number;
+  excluded_deactivated: number;
+  manual_target_offline: boolean;
+};
+
 export async function bulkAssignLeads(
   token: string,
   ids: string[],
   strategy: BulkAssignStrategy,
   assignedTo?: string | null,
-): Promise<{ assigned: number; skipped: number }> {
-  const body = strategy === "manual" ? { strategy, ids, assigned_to: assignedTo ?? null } : { strategy, ids };
+  skipAlreadyAssigned = false,
+): Promise<AssignmentSummary> {
+  const body = strategy === "manual"
+    ? { strategy, ids, assigned_to: assignedTo ?? null, skip_already_assigned: skipAlreadyAssigned }
+    : { strategy, ids, skip_already_assigned: skipAlreadyAssigned };
   return apiFetch("/api/v1/leads/bulk-assign", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
@@ -517,6 +533,7 @@ export async function patchMySettings(
 // ─── Roles / users / assignment ───────────────────────────────────────────────
 
 export type Territory = "india" | "foreign";
+export type AvailabilityStatus = "online" | "offline";
 
 export type Profile = {
   id: string;
@@ -525,6 +542,7 @@ export type Profile = {
   role: "manager" | "employee";
   territory: Territory | null;
   is_active: boolean;
+  availability_status: AvailabilityStatus;
   is_super_admin: boolean;
   created_at: string;
 };
@@ -540,9 +558,18 @@ export async function createUser(token: string, body: {
 }
 
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; password: string; reassign_to: string;
+  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; availability_status: AvailabilityStatus; password: string; reassign_to: string;
 }>): Promise<Profile> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
+// Self-service availability (spec §2B) — mark yourself online/offline.
+export async function fetchMyAvailability(token: string): Promise<{ availability_status: AvailabilityStatus }> {
+  return apiFetch("/api/v1/me/availability", {}, token);
+}
+
+export async function setMyAvailability(token: string, availability_status: AvailabilityStatus): Promise<{ availability_status: AvailabilityStatus }> {
+  return apiFetch("/api/v1/me/availability", { method: "PATCH", body: JSON.stringify({ availability_status }) }, token);
 }
 
 // Auto-assignment default for newly-enriched pool leads (manager-only).

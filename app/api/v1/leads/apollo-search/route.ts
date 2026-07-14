@@ -213,7 +213,9 @@ export async function POST(req: NextRequest) {
   if (assignment_strategy && newLeadTargets.length > 0) {
     const { bulkAssignByStrategy } = await import("@/lib/services/assignment");
     const res = await bulkAssignByStrategy(db, newLeadTargets.map((t) => t.id), assignment_strategy, null);
-    assignmentSkipped = res.skipped;
+    // Fresh imports are never pre-assigned, so "skipped" here means unmatched
+    // (no eligible rep / no country under territory routing).
+    assignmentSkipped = res.unmatched;
   }
 
   // Phase 1 complete — leads are now in the DB. Fire-and-forget Phase 2A

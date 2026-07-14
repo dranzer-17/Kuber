@@ -6,7 +6,6 @@ import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
-import { getCampaignAccessibleLeadIds } from "@/lib/auth/scope";
 
 async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -95,17 +94,11 @@ export async function GET(req: NextRequest) {
     .eq("is_deleted", false);
 
   if (user.role === "employee") {
-    // Visibility: leads assigned to them directly, OR leads in a campaign they
-    // have access to (created by or assigned to them) — matches Unibox's
-    // broader model instead of the previous strictly-assigned-only view
-    // (review §3.1 / §4.1). Without this an employee could reply to a
-    // thread in Unibox but never see the underlying Lead record.
-    const campaignLeadIds = await getCampaignAccessibleLeadIds(db, user);
-    if (campaignLeadIds.length > 0) {
-      q = q.or(`assigned_to.eq.${user.id},id.in.(${campaignLeadIds.join(",")})`);
-    } else {
-      q = q.eq("assigned_to", user.id);
-    }
+    // Employees see ONLY their own assigned leads (spec §5). Unibox threads and
+    // drafts are likewise scoped to their assigned leads, so the whole
+    // employee surface is consistently lead-assignment based — no seeing a
+    // co-worker's leads just because they share a campaign.
+    q = q.eq("assigned_to", user.id);
   } else if (assigned_to === "unassigned") {
     q = q.is("assigned_to", null);
   } else if (assigned_to) {

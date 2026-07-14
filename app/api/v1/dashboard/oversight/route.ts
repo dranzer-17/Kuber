@@ -8,24 +8,40 @@ export async function GET(req: NextRequest) {
 
   const db = createAdminClient();
 
-  const [{ data: campaigns, error: campaignsError }, { data: profiles }, { data: leadCounts }] = await Promise.all([
+  const [{ data: campaigns, error: campaignsError }, { data: profiles }, { data: leadCounts }, { data: memberships }] = await Promise.all([
     db
       .from("campaigns")
       .select("id, name, status, created_by, total_leads, sent_count, opened_count, replied_count, hot_count, created_at")
       .eq("is_deleted", false)
       .order("created_at", { ascending: false }),
-    db.from("profiles").select("id, email, full_name, role, territory, is_active"),
+    db.from("profiles").select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin"),
     db.from("leads").select("assigned_to").eq("is_deleted", false).not("assigned_to", "is", null),
+    // campaign_leads joined to their lead's owner — the basis for BOTH the
+    // lead→campaign fan-out and the "campaigns containing this employee's
+    // leads" count (spec §6).
+    db.from("campaign_leads").select("campaign_id, leads!inner(assigned_to, is_deleted)").eq("leads.is_deleted", false),
   ]);
 
   if (campaignsError) return fail(500, "INTERNAL", campaignsError.message);
 
   const profileMap = new Map((profiles ?? []).map((p) => [p.id, p]));
 
+  // Leads: N = distinct live leads assigned to the employee.
   const assignedLeadCounts = new Map<string, number>();
   for (const row of leadCounts ?? []) {
     if (!row.assigned_to) continue;
     assignedLeadCounts.set(row.assigned_to, (assignedLeadCounts.get(row.assigned_to) ?? 0) + 1);
+  }
+
+  // Campaigns: M = number of DISTINCT campaigns that contain at least one lead
+  // assigned to the employee (spec §6) — NOT the campaigns they created. An
+  // employee with leads but none in any campaign correctly reports 0.
+  const campaignsByEmployee = new Map<string, Set<string>>();
+  for (const m of memberships ?? []) {
+    const owner = (m.leads as { assigned_to?: string | null } | null)?.assigned_to;
+    if (!owner || !m.campaign_id) continue;
+    if (!campaignsByEmployee.has(owner)) campaignsByEmployee.set(owner, new Set());
+    campaignsByEmployee.get(owner)!.add(m.campaign_id as string);
   }
 
   const campaignsWithOwner = (campaigns ?? []).map((c) => ({
@@ -38,7 +54,7 @@ export async function GET(req: NextRequest) {
     .map((p) => ({
       ...p,
       assigned_lead_count: assignedLeadCounts.get(p.id) ?? 0,
-      campaign_count: campaignsWithOwner.filter((c) => c.created_by === p.id).length,
+      campaign_count: campaignsByEmployee.get(p.id)?.size ?? 0,
     }));
 
   return ok({ campaigns: campaignsWithOwner, employees });

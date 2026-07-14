@@ -223,7 +223,9 @@ async function processRows(
   if (assignmentStrategy && insertedIds.length > 0) {
     const { bulkAssignByStrategy } = await import("@/lib/services/assignment");
     const res = await bulkAssignByStrategy(db, insertedIds, assignmentStrategy, null);
-    assignmentSkipped = res.skipped;
+    // Fresh imports are never pre-assigned, so "skipped" here means unmatched
+    // (no eligible rep / no country under territory routing).
+    assignmentSkipped = res.unmatched;
   }
 
   return {

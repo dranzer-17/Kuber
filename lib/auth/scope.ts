@@ -4,14 +4,40 @@ import type { AuthedUser } from "@/lib/auth/api-auth";
 
 type Db = ReturnType<typeof createAdminClient>;
 
-// Access model (planning.md Phase 2):
+// Access model (spec §5 / §7 — the multi-employee campaign container):
 //   • Managers / super-admins see everything.
-//   • An employee can access a CAMPAIGN they created OR were assigned
-//     (campaigns.assigned_to).
-//   • An employee can additionally access individual THREADS / reply drafts
-//     whose lead is assigned to them, even inside someone else's campaign.
+//   • A campaign is a CONTAINER that may hold leads owned by several
+//     employees. For an EMPLOYEE, access is uniformly LEAD-ASSIGNMENT based:
+//       - a lead: they see/work it only if it is assigned to them;
+//       - a campaign: they can open it if it contains ≥1 lead assigned to them
+//         (or, for back-compat, it was assigned to / created by them), but the
+//         detail view still shows only THEIR leads within it;
+//       - a thread / draft / reply-draft: only if the underlying lead is
+//         assigned to them — never merely because they can see the campaign.
+//   This keeps one consistent rule across Leads, Campaigns and Unibox, and
+//   prevents an employee from seeing a co-worker's leads inside a shared
+//   campaign.
 
-/** Throws a 404 Response unless the campaign exists and (for employees) is created by or assigned to them. */
+/** Campaign ids an employee may access: contains a lead assigned to them, OR (back-compat) created by / assigned to them. */
+export async function getAccessibleCampaignIds(db: Db, user: AuthedUser): Promise<string[]> {
+  if (user.role !== "employee") {
+    const { data } = await db.from("campaigns").select("id").eq("is_deleted", false);
+    return (data ?? []).map((c) => c.id as string);
+  }
+
+  const [{ data: owned }, { data: viaLeads }] = await Promise.all([
+    db.from("campaigns").select("id").eq("is_deleted", false).or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`),
+    db.from("campaign_leads").select("campaign_id, leads!inner(assigned_to, is_deleted)")
+      .eq("leads.assigned_to", user.id).eq("leads.is_deleted", false),
+  ]);
+
+  const ids = new Set<string>();
+  for (const c of owned ?? []) ids.add(c.id as string);
+  for (const cl of viaLeads ?? []) if (cl.campaign_id) ids.add(cl.campaign_id as string);
+  return [...ids];
+}
+
+/** Throws a 404 unless the campaign exists and (for employees) is accessible per the model above. */
 export async function assertCampaignAccess(db: Db, user: AuthedUser, campaignId: string): Promise<void> {
   const { data } = await db
     .from("campaigns")
@@ -19,52 +45,52 @@ export async function assertCampaignAccess(db: Db, user: AuthedUser, campaignId:
     .eq("id", campaignId)
     .maybeSingle();
   if (!data) throw fail(404, "NOT_FOUND", "Campaign not found");
-  if (user.role === "employee" && data.created_by !== user.id && data.assigned_to !== user.id) {
-    throw fail(404, "NOT_FOUND", "Campaign not found");
-  }
+  if (user.role !== "employee") return;
+  if (data.created_by === user.id || data.assigned_to === user.id) return;
+
+  // Otherwise: accessible only if it holds at least one lead assigned to them.
+  const { data: cl } = await db
+    .from("campaign_leads")
+    .select("id, leads!inner(assigned_to, is_deleted)")
+    .eq("campaign_id", campaignId)
+    .eq("leads.assigned_to", user.id)
+    .eq("leads.is_deleted", false)
+    .limit(1)
+    .maybeSingle();
+  if (cl) return;
+
+  throw fail(404, "NOT_FOUND", "Campaign not found");
 }
 
-/** Campaign ids an employee may fully access (created by OR assigned to them). */
-export async function getAccessibleCampaignIds(db: Db, user: AuthedUser): Promise<string[]> {
+/** True when the underlying lead of a campaign_lead is assigned to this employee. */
+async function ownsCampaignLead(db: Db, userId: string, campaignLeadId: string): Promise<boolean> {
   const { data } = await db
-    .from("campaigns")
-    .select("id")
-    .eq("is_deleted", false)
-    .or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`);
-  return (data ?? []).map((c) => c.id as string);
+    .from("campaign_leads")
+    .select("id, leads!inner(assigned_to)")
+    .eq("id", campaignLeadId)
+    .eq("leads.assigned_to", userId)
+    .maybeSingle();
+  return !!data;
 }
 
-/**
- * campaign_leads ids whose LEAD is assigned to this employee — grants
- * thread-level Unibox visibility inside campaigns they don't otherwise see
- * (the "manager kept the campaign but split its leads" pattern).
- */
-export async function getAccessibleCampaignLeadIds(db: Db, user: AuthedUser): Promise<string[]> {
+/** Unibox visibility boundary for an employee: threads whose campaign_lead's lead is assigned to them (spec §7). Null for managers (see everything). */
+export async function getUniboxScope(
+  db: Db,
+  user: AuthedUser,
+): Promise<{ campaign_lead_ids: string[] } | null> {
+  if (user.role !== "employee") return null;
   const { data } = await db
     .from("campaign_leads")
     .select("id, leads!inner(assigned_to, is_deleted)")
     .eq("leads.assigned_to", user.id)
     .eq("leads.is_deleted", false);
-  return (data ?? []).map((cl) => cl.id as string);
-}
-
-/** Unibox visibility boundary for an employee; null for managers (see everything). */
-export async function getUniboxScope(
-  db: Db,
-  user: AuthedUser,
-): Promise<{ campaign_ids: string[]; campaign_lead_ids: string[] } | null> {
-  if (user.role !== "employee") return null;
-  const [campaignIds, campaignLeadIds] = await Promise.all([
-    getAccessibleCampaignIds(db, user),
-    getAccessibleCampaignLeadIds(db, user),
-  ]);
-  return { campaign_ids: campaignIds, campaign_lead_ids: campaignLeadIds };
+  return { campaign_lead_ids: (data ?? []).map((cl) => cl.id as string) };
 }
 
 /**
- * Throws a 404 Response unless the caller may see a thread identified by its
- * campaign and/or campaign_lead: managers always; employees via campaign
- * access OR because the thread's lead is assigned to them.
+ * Throws a 404 unless the caller may see a thread. Employees: only when the
+ * thread's campaign_lead resolves to a lead assigned to them (spec §7) — campaign
+ * access alone is NOT enough, so co-workers' threads in a shared campaign stay hidden.
  */
 export async function assertThreadAccess(
   db: Db,
@@ -72,99 +98,47 @@ export async function assertThreadAccess(
   thread: { campaignId?: string | null; campaignLeadId?: string | null },
 ): Promise<void> {
   if (user.role !== "employee") return;
-
-  if (thread.campaignId) {
-    try {
-      await assertCampaignAccess(db, user, thread.campaignId);
-      return;
-    } catch {
-      // fall through to the lead-assignment check
-    }
-  }
-
-  if (thread.campaignLeadId) {
-    const { data: cl } = await db
-      .from("campaign_leads")
-      .select("id, leads!inner(assigned_to)")
-      .eq("id", thread.campaignLeadId)
-      .eq("leads.assigned_to", user.id)
-      .maybeSingle();
-    if (cl) return;
-  }
-
+  if (thread.campaignLeadId && await ownsCampaignLead(db, user.id, thread.campaignLeadId)) return;
   throw fail(404, "NOT_FOUND", "Thread not found");
 }
 
-/** assertThreadAccess, resolving the campaign/campaign_lead from a unibox thread id. */
+/** assertThreadAccess, resolving the campaign_lead(s) from a unibox thread id. */
 export async function assertThreadAccessById(db: Db, user: AuthedUser, threadId: string): Promise<void> {
   if (user.role !== "employee") return;
   const { data: rows } = await db
     .from("unibox_emails")
-    .select("campaign_id, campaign_lead_id")
+    .select("campaign_lead_id")
     .eq("thread_id", threadId)
+    .not("campaign_lead_id", "is", null)
     .limit(20);
   if (!rows || rows.length === 0) throw fail(404, "NOT_FOUND", "Thread not found");
 
-  // A thread's messages may be unevenly mapped — allow if ANY message grants access.
   for (const row of rows) {
-    try {
-      await assertThreadAccess(db, user, {
-        campaignId: row.campaign_id as string | null,
-        campaignLeadId: row.campaign_lead_id as string | null,
-      });
-      return;
-    } catch {
-      // try the next message
-    }
+    if (row.campaign_lead_id && await ownsCampaignLead(db, user.id, row.campaign_lead_id as string)) return;
   }
   throw fail(404, "NOT_FOUND", "Thread not found");
 }
 
-/**
- * Lead ids an employee may see because they have access to a campaign the
- * lead belongs to (created by or assigned to them) — the same broadened
- * visibility Unibox threads already grant. Without this, an employee could
- * work a reply thread for a lead (via campaign access) but couldn't open the
- * underlying Lead record at all — a real, user-facing inconsistency
- * (planning review §3.1 / §4.1).
- */
-export async function getCampaignAccessibleLeadIds(db: Db, user: AuthedUser): Promise<string[]> {
-  if (user.role !== "employee") return [];
-  const campaignIds = await getAccessibleCampaignIds(db, user);
-  if (campaignIds.length === 0) return [];
-  const { data } = await db.from("campaign_leads").select("lead_id").in("campaign_id", campaignIds);
-  return [...new Set((data ?? []).map((r) => r.lead_id as string))];
-}
-
-/**
- * Throws a 404 Response unless the lead is visible to the caller: managers
- * always; employees when the lead is directly assigned to them OR they have
- * access to a campaign it belongs to. This is a VIEW check only — editing a
- * lead (PATCH) stays restricted to direct assignment, a separate, stricter
- * permission (see leads/[id]/route.ts).
- */
+/** Throws a 404 unless the lead exists and (for employees) is assigned to them (spec §5: own assigned leads only). */
 export async function assertLeadAccess(db: Db, user: AuthedUser, leadId: string): Promise<void> {
   const { data } = await db.from("leads").select("assigned_to").eq("id", leadId).maybeSingle();
   if (!data) throw fail(404, "NOT_FOUND", "Lead not found");
   if (user.role !== "employee") return;
   if (data.assigned_to === user.id) return;
-  const accessibleIds = await getCampaignAccessibleLeadIds(db, user);
-  if (accessibleIds.includes(leadId)) return;
   throw fail(404, "NOT_FOUND", "Lead not found");
 }
 
-/** Throws a 404 Response unless the email_drafts row exists and (for employees) its campaign is accessible. */
+/** Throws a 404 unless the email_drafts row exists and (for employees) its lead is assigned to them (spec §2.8 consistency). */
 export async function assertDraftAccess(db: Db, user: AuthedUser, draftId: string): Promise<void> {
-  const { data } = await db.from("email_drafts").select("campaign_id").eq("id", draftId).maybeSingle();
+  const { data } = await db.from("email_drafts").select("campaign_id, lead_id").eq("id", draftId).maybeSingle();
   if (!data) throw fail(404, "NOT_FOUND", "Draft not found");
-  await assertCampaignAccess(db, user, data.campaign_id);
+  if (user.role !== "employee") return;
+  const { data: lead } = await db.from("leads").select("assigned_to").eq("id", data.lead_id).maybeSingle();
+  if (lead?.assigned_to === user.id) return;
+  throw fail(404, "NOT_FOUND", "Draft not found");
 }
 
-/**
- * Throws a 404 Response unless the reply_drafts row exists and the caller may
- * work it: managers always; employees via campaign access OR because the
- * underlying lead is assigned to them.
- */
+/** Throws a 404 unless the reply_drafts row exists and (for employees) its lead is assigned to them (spec §2.9 consistency). */
 export async function assertReplyDraftAccess(db: Db, user: AuthedUser, replyDraftId: string): Promise<void> {
   const { data } = await db
     .from("reply_drafts")
@@ -173,25 +147,6 @@ export async function assertReplyDraftAccess(db: Db, user: AuthedUser, replyDraf
     .maybeSingle();
   if (!data) throw fail(404, "NOT_FOUND", "Reply draft not found");
   if (user.role !== "employee") return;
-
-  if (data.campaign_id) {
-    try {
-      await assertCampaignAccess(db, user, data.campaign_id);
-      return;
-    } catch {
-      // fall through to the lead-assignment check
-    }
-  }
-
-  if (data.campaign_lead_id) {
-    const { data: cl } = await db
-      .from("campaign_leads")
-      .select("id, leads!inner(assigned_to)")
-      .eq("id", data.campaign_lead_id)
-      .eq("leads.assigned_to", user.id)
-      .maybeSingle();
-    if (cl) return;
-  }
-
+  if (data.campaign_lead_id && await ownsCampaignLead(db, user.id, data.campaign_lead_id)) return;
   throw fail(404, "NOT_FOUND", "Reply draft not found");
 }

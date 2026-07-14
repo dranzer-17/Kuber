@@ -12,7 +12,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
   const parsed = PatchUserSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
-  const { password, role, territory, full_name, is_active, reassign_to } = parsed.data;
+  const { password, role, territory, full_name, is_active, availability_status, reassign_to } = parsed.data;
 
   const db = createAdminClient();
 
@@ -132,12 +132,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (role !== undefined) patch.role = role;
   if (territory !== undefined) patch.territory = role === "employee" || role === undefined ? territory : null;
   if (is_active !== undefined) patch.is_active = is_active;
+  // Online/offline availability (spec §2B) — a manager marking an employee
+  // temporarily unavailable (leave/vacation). Distinct from is_active.
+  if (availability_status !== undefined) patch.availability_status = availability_status;
 
   const { data, error } = await db
     .from("profiles")
     .update(patch)
     .eq("id", id)
-    .select("id, email, full_name, role, territory, is_active, is_super_admin, created_at")
+    .select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin, created_at")
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);

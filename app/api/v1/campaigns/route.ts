@@ -1,33 +1,50 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateCampaignSchema } from "@/lib/validators/campaigns";
 import { buildDefaultCampaignSteps } from "@/lib/constants";
+import { getAccessibleCampaignIds } from "@/lib/auth/scope";
 
 
 export async function GET(req: NextRequest) {
-  let user: { id: string; role: "manager" | "employee" };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const db = createAdminClient();
-  let q = db
+
+  // A campaign is a container that may hold leads from several employees
+  // (spec §5). An employee sees any campaign that contains at least one lead
+  // assigned to them (getAccessibleCampaignIds resolves that); the per-lead
+  // filtering happens in the campaign-detail route.
+  if (user.role === "employee") {
+    const ids = await getAccessibleCampaignIds(db, user);
+    if (ids.length === 0) return ok({ campaigns: [] });
+    const { data, error } = await db
+      .from("campaigns")
+      .select("*")
+      .eq("is_deleted", false)
+      .in("id", ids)
+      .order("created_at", { ascending: false });
+    if (error) return fail(500, "INTERNAL", error.message);
+    return ok({ campaigns: data });
+  }
+
+  const { data, error } = await db
     .from("campaigns")
     .select("*")
-    .eq("is_deleted", false);
-
-  // Employees see campaigns they created OR were assigned (planning.md Phase 2).
-  if (user.role === "employee") q = q.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`);
-
-  const { data, error } = await q.order("created_at", { ascending: false });
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false });
 
   if (error) return fail(500, "INTERNAL", error.message);
   return ok({ campaigns: data });
 }
 
+// Campaign creation is a manager/super-admin action — employees are
+// execution-only and cannot create campaigns (spec §1).
 export async function POST(req: NextRequest) {
-  let user: { id: string };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateCampaignSchema.safeParse(body);

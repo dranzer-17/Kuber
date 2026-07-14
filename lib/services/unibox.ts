@@ -482,28 +482,25 @@ function campaignMatches(
 }
 
 /**
- * The employee visibility boundary (planning.md Phase 2): a message is in scope
- * when its campaign is accessible (created/assigned) OR its campaign_lead's
- * lead is assigned to the employee. Managers pass no scope (see everything).
+ * The employee visibility boundary (spec §7): a message is in scope ONLY when
+ * its campaign_lead's lead is assigned to the employee — campaign access alone
+ * is not enough, so a co-worker's threads in a shared campaign stay hidden.
+ * Managers pass no scope (see everything).
  */
-export type UniboxScope = { campaign_ids: string[]; campaign_lead_ids: string[] };
+export type UniboxScope = { campaign_lead_ids: string[] };
 
 function scopeMatches(
   row: { campaign_id?: string | null; campaign_lead_id?: string | null },
   scope: UniboxScope | undefined,
 ): boolean {
   if (!scope) return true;
-  if (row.campaign_id && scope.campaign_ids.includes(row.campaign_id)) return true;
-  if (row.campaign_lead_id && scope.campaign_lead_ids.includes(row.campaign_lead_id)) return true;
-  return false;
+  return !!row.campaign_lead_id && scope.campaign_lead_ids.includes(row.campaign_lead_id);
 }
 
-/** PostgREST `.or()` filter for the scope; null when the scope allows nothing. */
+/** PostgREST filter value for the scope; null when the scope allows nothing. */
 function scopeOrFilter(scope: UniboxScope): string | null {
-  const parts: string[] = [];
-  if (scope.campaign_ids.length > 0) parts.push(`campaign_id.in.(${scope.campaign_ids.join(",")})`);
-  if (scope.campaign_lead_ids.length > 0) parts.push(`campaign_lead_id.in.(${scope.campaign_lead_ids.join(",")})`);
-  return parts.length > 0 ? parts.join(",") : null;
+  if (scope.campaign_lead_ids.length === 0) return null;
+  return `campaign_lead_id.in.(${scope.campaign_lead_ids.join(",")})`;
 }
 
 /** Strip characters that would break out of a PostgREST `.or(...ilike...)` filter. */

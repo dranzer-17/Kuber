@@ -3,7 +3,6 @@ import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchOrgSchema } from "@/lib/validators/organizations";
-import { getCampaignAccessibleLeadIds } from "@/lib/auth/scope";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -12,9 +11,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const db = createAdminClient();
 
-  // Employees may read orgs tied to their own assigned leads, or to a lead
-  // they can see via campaign access (review §3.1) — everything else is
-  // manager territory.
+  // Employees may read an org only if they have a lead of their own under it
+  // (spec §5) — everything else is manager territory.
   if (user.role === "employee") {
     const { data: assignedLead } = await db
       .from("leads")
@@ -24,13 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .eq("is_deleted", false)
       .limit(1)
       .maybeSingle();
-    if (!assignedLead) {
-      const campaignLeadIds = await getCampaignAccessibleLeadIds(db, user);
-      const { data: viaCampaign } = campaignLeadIds.length > 0
-        ? await db.from("leads").select("id").eq("organization_id", id).eq("is_deleted", false).in("id", campaignLeadIds).limit(1).maybeSingle()
-        : { data: null };
-      if (!viaCampaign) return fail(404, "NOT_FOUND", "Organization not found");
-    }
+    if (!assignedLead) return fail(404, "NOT_FOUND", "Organization not found");
   }
 
   const { data: org, error } = await db

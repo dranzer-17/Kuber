@@ -24,11 +24,32 @@ export function normalizeTerritory(country: string | null | undefined): Territor
 
 type Candidate = { id: string; load: number };
 
-async function getActiveEmployees(db: Db, territory?: Territory): Promise<string[]> {
-  let query = db.from("profiles").select("id").eq("role", "employee").eq("is_active", true);
+/**
+ * Employees ELIGIBLE for automatic assignment (spec §2B/§3): role=employee,
+ * is_active=true, AND availability_status='online'. Deactivated users can't be
+ * assigned at all; offline users are temporarily excluded from round-robin and
+ * territory routing (but can still receive a manual assignment, with a warning).
+ */
+async function getEligibleEmployees(db: Db, territory?: Territory): Promise<string[]> {
+  let query = db.from("profiles")
+    .select("id")
+    .eq("role", "employee")
+    .eq("is_active", true)
+    .eq("availability_status", "online");
   if (territory) query = query.eq("territory", territory);
   const { data } = await query.order("id");
   return (data ?? []).map((row) => row.id as string);
+}
+
+/** Workspace-level exclusion counts for assignment summaries (spec §3 response). */
+async function getExclusionCounts(db: Db): Promise<{ excluded_offline: number; excluded_deactivated: number }> {
+  const [{ count: offline }, { count: deactivated }] = await Promise.all([
+    db.from("profiles").select("id", { count: "exact", head: true })
+      .eq("role", "employee").eq("is_active", true).eq("availability_status", "offline"),
+    db.from("profiles").select("id", { count: "exact", head: true })
+      .eq("role", "employee").eq("is_active", false),
+  ]);
+  return { excluded_offline: offline ?? 0, excluded_deactivated: deactivated ?? 0 };
 }
 
 /** Current live-lead count per employee — the fairness signal for round-robin picks. */
@@ -72,12 +93,12 @@ async function getTerritoryScopedLoads(db: Db, employeeIds: string[], territory:
 }
 
 /**
- * Candidates for a region:
+ * Candidates for a region (active + online reps in that territory):
  *   india   → india reps only (no sensible fallback — pool if none)
  *   foreign → foreign (rest-of-world) reps only
  */
 async function candidatesForRegion(db: Db, region: Territory): Promise<string[]> {
-  return getActiveEmployees(db, region);
+  return getEligibleEmployees(db, region);
 }
 
 /**
@@ -94,7 +115,7 @@ class LoadBalancedPicker {
   }
 
   static async create(db: Db): Promise<LoadBalancedPicker> {
-    const all = await getActiveEmployees(db);
+    const all = await getEligibleEmployees(db);
     return new LoadBalancedPicker(await getLeadLoads(db, all));
   }
 
@@ -110,75 +131,129 @@ class LoadBalancedPicker {
   }
 }
 
+/** Rich result summary for a bulk assignment (spec §3/§4). */
+export type AssignmentSummary = {
+  total: number;                    // leads processed
+  newly_assigned: number;           // were unassigned (pool), now assigned
+  reassigned: number;               // were assigned to someone else, now moved
+  skipped_already_assigned: number; // left untouched because they were already assigned
+  unmatched: number;                // territory/RR: no eligible employee (or no country) → left in pool
+  eligible_employee_count: number;  // distinct eligible employees available for this run
+  excluded_offline: number;         // active employees skipped for being offline
+  excluded_deactivated: number;     // deactivated employees (never eligible)
+  manual_target_offline: boolean;   // manual: chosen target is offline (allowed, but warned)
+};
+
 /**
  * Assigns a specific set of leads under an explicitly-chosen strategy (the
  * bulk "Assign" action on the Leads page, or the picker on Apollo/Excel
- * imports). For "manual", every lead goes to `assignedTo` (or the pool when
- * null). For "round_robin", leads are distributed least-loaded first across
- * ALL active employees (a genuinely company-wide, not territory-scoped,
- * fairness signal). For "territory", each region gets its OWN least-loaded
- * picker seeded with region-scoped loads (review §3.7) — so 30 India leads
- * split fairly between India reps based on how many India leads they already
- * hold, not their unrelated total lead count.
+ * imports). Returns a full summary (spec §3).
+ *
+ * - "manual": every eligible lead goes to `assignedTo` (or the pool when null).
+ *   A deactivated target is rejected upstream; an offline target is allowed but
+ *   flagged (`manual_target_offline`).
+ * - "round_robin": distributed least-loaded first across all ELIGIBLE (active +
+ *   online) employees.
+ * - "territory": each region gets its own least-loaded picker seeded with
+ *   region-scoped loads (review §3.7); a lead whose region has no eligible rep,
+ *   or no country at all, is left unmatched in the pool.
+ *
+ * When `skipAlreadyAssigned` is true, any lead that already has an owner is
+ * left completely untouched (spec §4) — the safeguard against silently
+ * yanking a lead out from under whoever is working it.
  */
 export async function bulkAssignByStrategy(
   db: Db,
   leadIds: string[],
   strategy: AssignmentStrategy,
   assignedTo: string | null,
-): Promise<{ assigned: number; skipped: number }> {
+  skipAlreadyAssigned = false,
+): Promise<AssignmentSummary> {
   const now = new Date().toISOString();
 
-  if (strategy === "manual") {
-    const { error, count } = await db
-      .from("leads")
-      .update({ assigned_to: assignedTo, assigned_at: assignedTo ? now : null }, { count: "exact" })
-      .in("id", leadIds);
-    if (error) throw new Error(error.message);
-    return { assigned: count ?? leadIds.length, skipped: 0 };
+  const { data: leads } = await db.from("leads").select("id, country, assigned_to").in("id", leadIds);
+  const rows = leads ?? [];
+  const exclusions = await getExclusionCounts(db);
+
+  const summary: AssignmentSummary = {
+    total: rows.length,
+    newly_assigned: 0,
+    reassigned: 0,
+    skipped_already_assigned: 0,
+    unmatched: 0,
+    eligible_employee_count: 0,
+    excluded_offline: exclusions.excluded_offline,
+    excluded_deactivated: exclusions.excluded_deactivated,
+    manual_target_offline: false,
+  };
+
+  // Records one lead move and updates the summary tallies.
+  async function applyAssignment(leadId: string, prior: string | null, next: string | null) {
+    await db.from("leads").update({ assigned_to: next, assigned_at: next ? now : null }).eq("id", leadId);
+    if (next && !prior) summary.newly_assigned++;
+    else if (next && prior && prior !== next) summary.reassigned++;
   }
 
-  const { data: leads } = await db.from("leads").select("id, country").in("id", leadIds);
-
-  let assigned = 0;
-  let skipped = 0;
+  if (strategy === "manual") {
+    if (assignedTo) {
+      const { data: target } = await db
+        .from("profiles")
+        .select("id, is_active, availability_status")
+        .eq("id", assignedTo)
+        .maybeSingle();
+      if (!target || !target.is_active) throw new Error("Employee not found or inactive");
+      summary.manual_target_offline = target.availability_status === "offline";
+      summary.eligible_employee_count = 1;
+    }
+    for (const lead of rows) {
+      const prior = (lead.assigned_to as string | null) ?? null;
+      if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
+      if (prior === assignedTo) { summary.skipped_already_assigned++; continue; } // already theirs
+      await applyAssignment(lead.id, prior, assignedTo);
+    }
+    return summary;
+  }
 
   if (strategy === "territory") {
     const candidatesByRegion = new Map<Territory, string[]>();
     const pickersByRegion = new Map<Territory, LoadBalancedPicker>();
+    const usedEmployees = new Set<string>();
 
-    for (const lead of leads ?? []) {
+    for (const lead of rows) {
+      const prior = (lead.assigned_to as string | null) ?? null;
+      if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
+
       const region = normalizeTerritory(lead.country as string | null);
-      if (!region) { skipped++; continue; }
+      if (!region) { summary.unmatched++; continue; }
 
       if (!candidatesByRegion.has(region)) {
         candidatesByRegion.set(region, await candidatesForRegion(db, region));
       }
       const candidates = candidatesByRegion.get(region)!;
-
       if (!pickersByRegion.has(region)) {
         pickersByRegion.set(region, new LoadBalancedPicker(await getTerritoryScopedLoads(db, candidates, region)));
       }
-      const picker = pickersByRegion.get(region)!;
-
-      const assigneeId = picker.pick(candidates);
-      if (!assigneeId) { skipped++; continue; }
-      await db.from("leads").update({ assigned_to: assigneeId, assigned_at: now }).eq("id", lead.id);
-      assigned++;
+      const assigneeId = pickersByRegion.get(region)!.pick(candidates);
+      if (!assigneeId) { summary.unmatched++; continue; }
+      usedEmployees.add(assigneeId);
+      await applyAssignment(lead.id, prior, assigneeId);
     }
-    return { assigned, skipped };
+    summary.eligible_employee_count = usedEmployees.size;
+    return summary;
   }
 
-  // round_robin: one global least-loaded picker across all active employees.
+  // round_robin: one global least-loaded picker across all eligible employees.
+  const candidates = await getEligibleEmployees(db);
+  summary.eligible_employee_count = candidates.length;
   const picker = await LoadBalancedPicker.create(db);
-  const allCandidates = await getActiveEmployees(db);
-  for (const lead of leads ?? []) {
-    const assigneeId = picker.pick(allCandidates);
-    if (!assigneeId) { skipped++; continue; }
-    await db.from("leads").update({ assigned_to: assigneeId, assigned_at: now }).eq("id", lead.id);
-    assigned++;
+  for (const lead of rows) {
+    const prior = (lead.assigned_to as string | null) ?? null;
+    if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
+    const assigneeId = picker.pick(candidates);
+    if (!assigneeId) { summary.unmatched++; continue; }
+    await applyAssignment(lead.id, prior, assigneeId);
   }
-  return { assigned, skipped };
+  return summary;
 }
 
 /** Resolves who a newly-enriched lead should auto-assign to, or null to leave it in the Manager's pool. */
@@ -202,7 +277,7 @@ export async function resolveAssignee(db: Db, leadCountry: string | null | undef
     return new LoadBalancedPicker(loads).pick(candidates);
   }
 
-  const candidates = await getActiveEmployees(db);
+  const candidates = await getEligibleEmployees(db);
   if (candidates.length === 0) return null;
   const loads = await getLeadLoads(db, candidates);
   return new LoadBalancedPicker(loads).pick(candidates);

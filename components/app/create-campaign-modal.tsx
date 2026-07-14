@@ -132,13 +132,12 @@ export function CreateCampaignModal({
   const [employees, setEmployees] = useState<Profile[]>([]);
   const [assignTo, setAssignTo] = useState("");
 
-  // If every selected lead already belongs to the same one employee, that
-  // employee is pre-selected below (manager can still change it). Otherwise
-  // the dropdown starts empty and the manager must pick who this campaign
-  // (and its leads) should belong to before it can be created.
+  // A campaign is a CONTAINER (spec §5): its leads keep their existing owners
+  // and each employee sees only their own subset. Assigning the whole campaign
+  // to one employee is an OPTIONAL convenience (it moves every lead to them);
+  // by default we keep current owners and force nothing.
   const distinctOwners = new Set(leads.map((l) => l.assignedTo).filter((id): id is string => !!id));
-  const singleOwner = distinctOwners.size === 1 && leads.every((l) => l.assignedTo) ? [...distinctOwners][0] : null;
-  const needsAssignmentChoice = role === "manager" && !assignTo;
+  const multipleOwners = distinctOwners.size > 1;
 
   const [attachment, setAttachment] = useState<{
     attachment_path: string;
@@ -184,7 +183,7 @@ export function CreateCampaignModal({
     setPrimaryCountry(country);
     setTimezone(autoTz);
     setTimezoneOverride(false);
-    setAssignTo(singleOwner ?? "");
+    setAssignTo(""); // default: container mode, keep current lead owners
 
     async function loadSettings() {
       try {
@@ -200,7 +199,7 @@ export function CreateCampaignModal({
       } catch { /* use empty default */ }
     }
     void loadSettings();
-  }, [open, leads, role, singleOwner]);
+  }, [open, leads, role]);
 
   function reset() {
     setName(""); setHumanInLoop(true);
@@ -221,10 +220,6 @@ export function CreateCampaignModal({
     const eligibleLeads = leads.filter(isCampaignEligible);
     if (eligibleLeads.length === 0) {
       setError("None of the selected leads are ready for a campaign. Add leads that are Enriched, or Input Required (they'll use the generic template). New leads are still being enriched — wait for them to finish.");
-      return;
-    }
-    if (needsAssignmentChoice && !assignTo) {
-      setError("These leads belong to more than one employee (or the pool) — pick who this campaign should be assigned to.");
       return;
     }
     setCreating(true);
@@ -263,12 +258,10 @@ export function CreateCampaignModal({
 
       await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
 
-      // Manager-created campaigns always resolve to exactly one employee
-      // owner — the dropdown is pre-filled when every selected lead is
-      // already theirs, otherwise whoever the manager picks — and its
-      // leads are synced to match. created_by stays the manager; this
-      // only sets who the campaign (and its leads) belong to going forward.
-      const owner = role === "manager" ? assignTo : null;
+      // Container by default (spec §5): leads keep their existing owners. Only
+      // if the manager explicitly picked "assign entire campaign to X" do we
+      // move every lead to that one employee.
+      const owner = role === "manager" && assignTo ? assignTo : null;
       if (owner) {
         await assignCampaign(token, dbCampaign.id, owner, true);
       }
@@ -306,21 +299,22 @@ export function CreateCampaignModal({
 
           {role === "manager" && (
             <div className="space-y-1.5">
-              <Label className="text-sm font-medium">
-                Assign campaign to <span className="text-destructive">*</span>
-              </Label>
-              <Select value={assignTo} onValueChange={setAssignTo}>
-                <SelectTrigger className="bg-card"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
+              <Label className="text-sm font-medium">Assign entire campaign to (optional)</Label>
+              <Select value={assignTo || "keep"} onValueChange={(v) => setAssignTo(v === "keep" ? "" : v)}>
+                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="keep">Keep current lead owners</SelectItem>
                   {employees.map((e) => (
                     <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {singleOwner
-                  ? "All selected leads already belong to this employee — change it here if this campaign should go to someone else instead."
-                  : "These leads belong to more than one employee (or the unassigned pool) — pick who this campaign, and all its leads, should belong to."}
+                {assignTo
+                  ? "Every lead in this campaign will be reassigned to this employee."
+                  : multipleOwners
+                    ? "This campaign holds leads from several employees — each will see only their own leads in it. Pick a single owner above only if you want to hand the whole campaign to one person."
+                    : "Leads keep their current owners; each employee sees only their own leads in this campaign."}
               </p>
             </div>
           )}
@@ -571,7 +565,7 @@ export function CreateCampaignModal({
         </div>
 
         <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
-          <Button disabled={!name.trim() || creating || uploading || leads.length === 0 || (needsAssignmentChoice && !assignTo)} onClick={handleCreate} className="gap-1.5">
+          <Button disabled={!name.trim() || creating || uploading || leads.length === 0} onClick={handleCreate} className="gap-1.5">
             {creating ? (
               <><Loader2 className="size-3.5 animate-spin" /> Creating…</>
             ) : (
