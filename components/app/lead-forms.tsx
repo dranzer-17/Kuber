@@ -209,25 +209,24 @@ function AssignStrategyPicker({
   onAssignToChange: (v: string) => void;
 }) {
   if (employees.length === 0) return null;
-  const active = ASSIGN_MODE_OPTIONS.find((o) => o.value === mode);
   return (
     <div className="space-y-1.5">
       <Label>Assign imported leads</Label>
-      <div className="flex flex-col gap-1.5">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {ASSIGN_MODE_OPTIONS.map((opt) => (
           <button
             key={opt.value}
             type="button"
-            title={opt.hint}
             onClick={() => onModeChange(opt.value)}
             className={cn(
-              "w-full px-2.5 py-1.5 rounded-lg text-xs font-medium border text-left transition-colors",
+              "rounded-lg border p-3 text-left transition-colors",
               mode === opt.value
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-card text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
+                ? "border-primary bg-primary/10"
+                : "border-border bg-card hover:border-muted-foreground/40",
             )}
           >
-            {opt.label}
+            <p className="text-sm font-medium">{opt.label}</p>
+            <p className="text-xs text-muted-foreground mt-1">{opt.hint}</p>
           </button>
         ))}
       </div>
@@ -242,7 +241,6 @@ function AssignStrategyPicker({
           </SelectContent>
         </Select>
       )}
-      {active && <p className="text-xs text-muted-foreground">{active.hint}</p>}
     </div>
   );
 }
