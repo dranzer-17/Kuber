@@ -718,9 +718,8 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
     setImporting(true);
     try {
       const token = await getToken();
-      // Await only the response headers — the server returns 200 immediately and
-      // streams progress in the background. We don't need to read the body;
-      // the server-side stream continues even after the client disconnects.
+      // Search + lead insert happen synchronously server-side; only email
+      // enrichment (Phase 2) runs in the background after this responds.
       const response = await fetch("/api/v1/leads/apollo-search", {
         method: "POST",
         headers: {
@@ -740,10 +739,22 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
       });
       const json = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(json?.message ?? `Request failed: ${response.status}`);
+      const inserted = json?.data?.inserted ?? 0;
+      const warnings: string[] = json?.data?.warnings ?? [];
+      if (inserted === 0) {
+        // Nothing was saved — don't redirect into an empty batch, tell the user why.
+        setError(
+          warnings.length > 0
+            ? `No leads were imported: ${warnings[0]}`
+            : "No leads matched this search. Try different keywords, titles, or locations."
+        );
+        setImporting(false);
+        return;
+      }
       // Phase 1 complete — leads are in the DB, redirect now.
       // Email enrichment runs in the background on the server.
       notifyDuplicateOwners(json?.data?.duplicate_owners, employees);
-      onImport(json?.data?.inserted ?? 0);
+      onImport(inserted);
     } catch (e) {
       setError((e as Error).message);
       setImporting(false);
