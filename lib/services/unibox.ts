@@ -51,6 +51,10 @@ export type UniboxMessage = {
   is_unread: boolean;
   attachments: unknown;
   reply_event_id: string | null;
+  // Who sent this, when known (review §4.2) — only set for replies sent
+  // through our own reply endpoints, not messages synced from Instantly.
+  sent_by: string | null;
+  sent_by_name: string | null;
 };
 
 type Db = SupabaseClient;
@@ -94,6 +98,7 @@ function emailToRow(email: InstantlyEmail, opts: {
   masterCampaignId?: string | null;
   campaignLeadId?: string | null;
   replyEventId?: string | null;
+  sentBy?: string | null;
 }) {
   const bodyText = email.body?.text ?? null;
   const bodyHtml = email.body?.html ?? null;
@@ -120,6 +125,9 @@ function emailToRow(email: InstantlyEmail, opts: {
     campaign_id: opts.masterCampaignId ?? null,
     campaign_lead_id: opts.campaignLeadId ?? null,
     reply_event_id: opts.replyEventId ?? null,
+    // Only meaningful for outbound replies WE just sent (review §4.2) — never
+    // set on resync/webhook ingestion, and never overwritten on update below.
+    sent_by: opts.sentBy ?? null,
     step: email.step != null ? String(email.step) : null,
     is_unread: email.ue_type === 2 ? boolish(email.is_unread) : false,
     is_auto_reply: boolish(email.is_auto_reply),
@@ -172,7 +180,7 @@ async function backfillInterestFromEmail(
 export async function ingestInstantlyEmail(
   db: Db,
   email: InstantlyEmail,
-  opts?: { replyEventId?: string; masterCampaignId?: string | null; campaignLeadId?: string | null },
+  opts?: { replyEventId?: string; masterCampaignId?: string | null; campaignLeadId?: string | null; sentBy?: string | null },
 ): Promise<void> {
   const masterId = opts?.masterCampaignId ?? await resolveMasterCampaignId(db, email.campaign_id);
   const leadEmail = normEmail(email.lead ?? email.from_address_email);
@@ -181,6 +189,7 @@ export async function ingestInstantlyEmail(
     masterCampaignId: masterId,
     campaignLeadId,
     replyEventId: opts?.replyEventId,
+    sentBy: opts?.sentBy,
   });
 
   const { data: existing } = await db
@@ -190,6 +199,8 @@ export async function ingestInstantlyEmail(
     .maybeSingle();
 
   if (existing) {
+    // sent_by is deliberately excluded here — a later resync/webhook re-ingest
+    // of the same message must never overwrite the original sender (review §4.2).
     await db.from("unibox_emails").update({
       thread_id: row.thread_id,
       campaign_id: row.campaign_id,
@@ -225,6 +236,10 @@ export async function sendThreadReply(
     replyEventId?: string | null;
     source: "unibox" | "campaign_replies";
     replyDraftId?: string;
+    // Who triggered this send — records accountability for who actually sent
+    // a reply when multiple people may have access to the same thread
+    // (review §4.2).
+    sentBy?: string;
   },
 ): Promise<{ instantlyEmailId: string; threadId: string | null }> {
   const sent = await replyToInstantlyEmail({
@@ -241,6 +256,7 @@ export async function sendThreadReply(
     replyEventId: opts.replyEventId ?? undefined,
     masterCampaignId: opts.campaignId ?? undefined,
     campaignLeadId: opts.campaignLeadId ?? undefined,
+    sentBy: opts.sentBy ?? null,
   });
 
   const now = new Date().toISOString();
@@ -726,6 +742,15 @@ export async function getThreadMessages(db: Db, threadId: string): Promise<{
     campaign = c;
   }
 
+  // Resolve sender names for accountability (review §4.2) — only messages we
+  // sent ourselves carry sent_by; everything else stays anonymous/null.
+  const senderIds = [...new Set(msgs.map((m) => m.sent_by).filter(Boolean))] as string[];
+  const senderNames = new Map<string, string>();
+  if (senderIds.length > 0) {
+    const { data: senders } = await db.from("profiles").select("id, full_name, email").in("id", senderIds);
+    for (const s of senders ?? []) senderNames.set(s.id, s.full_name || s.email);
+  }
+
   let interest_status: number | null = null;
   let lead_temperature: string | null = null;
   if (campaignLeadId) {
@@ -755,6 +780,8 @@ export async function getThreadMessages(db: Db, threadId: string): Promise<{
       is_unread: m.is_unread,
       attachments: m.attachment_json,
       reply_event_id: m.reply_event_id as string | null,
+      sent_by: (m.sent_by as string | null) ?? null,
+      sent_by_name: m.sent_by ? (senderNames.get(m.sent_by as string) ?? null) : null,
     })),
     reply_drafts,
     lead,

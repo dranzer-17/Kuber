@@ -887,6 +887,10 @@ export type UniboxMessage = {
   is_unread: boolean;
   attachments: unknown;
   reply_event_id: string | null;
+  // Who sent this, when known (review §4.2) — only set for replies sent
+  // through our own reply endpoints, not messages synced from Instantly.
+  sent_by: string | null;
+  sent_by_name: string | null;
 };
 
 export async function fetchUniboxThreads(
