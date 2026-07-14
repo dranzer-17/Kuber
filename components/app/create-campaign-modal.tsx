@@ -17,8 +17,9 @@ import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads";
 import { isCampaignEligible, CAMPAIGN_ACTION_HELP, getMostCommonCountry } from "@/lib/leads";
 import { COUNTRY_TO_TIMEZONE } from "@/lib/constants";
-import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchMySettings, uploadCampaignAttachment } from "@/lib/api-client";
+import { createCampaign, addLeadsToCampaign, triggerDraftGeneration, mapDbCampaign, fetchMySettings, uploadCampaignAttachment, assignCampaign, fetchUsers, type Profile } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
+import { useApp } from "@/lib/app-context";
 
 export type Campaign = {
   id: string;
@@ -105,6 +106,7 @@ export function CreateCampaignModal({
   onCreated: (c: Campaign) => void;
   leads: Lead[];
 }) {
+  const { role } = useApp();
   const [name, setName] = useState("");
   const [humanInLoop, setHumanInLoop] = useState(true);
   const [dailyLimit] = useState(30);
@@ -126,6 +128,17 @@ export function CreateCampaignModal({
   ]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  const [employees, setEmployees] = useState<Profile[]>([]);
+  const [assignTo, setAssignTo] = useState("");
+
+  // If every selected lead already belongs to the same one employee, the
+  // campaign (and its leads) should just go to them — no need to ask. A
+  // manager mixing leads from multiple employees (or the pool) must pick
+  // who this campaign belongs to before it can be created.
+  const distinctOwners = new Set(leads.map((l) => l.assignedTo).filter((id): id is string => !!id));
+  const singleOwner = distinctOwners.size === 1 && leads.every((l) => l.assignedTo) ? [...distinctOwners][0] : null;
+  const needsAssignmentChoice = role === "manager" && !singleOwner;
 
   const [attachment, setAttachment] = useState<{
     attachment_path: string;
@@ -179,10 +192,14 @@ export function CreateCampaignModal({
         // Default "From" name: the creator's personal sender name, else the company default.
         const s = await fetchMySettings(token);
         setSenderName(s.sender_name ?? s.defaults.sender_name ?? "");
+        if (role === "manager") {
+          const users = await fetchUsers(token);
+          setEmployees(users.filter((u) => u.role === "employee" && u.is_active));
+        }
       } catch { /* use empty default */ }
     }
     void loadSettings();
-  }, [open, leads]);
+  }, [open, leads, role]);
 
   function reset() {
     setName(""); setHumanInLoop(true);
@@ -193,6 +210,7 @@ export function CreateCampaignModal({
     setFollowupSteps([{ delay: 30, delay_unit: "days" }, { delay: 90, delay_unit: "days" }]);
     setCreating(false); setError("");
     setAttachment(null); setUploading(false); setUploadError("");
+    setAssignTo("");
   }
 
   function handleClose() { reset(); onClose(); }
@@ -202,6 +220,10 @@ export function CreateCampaignModal({
     const eligibleLeads = leads.filter(isCampaignEligible);
     if (eligibleLeads.length === 0) {
       setError("None of the selected leads are ready for a campaign. Add leads that are Enriched, or Input Required (they'll use the generic template). New leads are still being enriched — wait for them to finish.");
+      return;
+    }
+    if (needsAssignmentChoice && !assignTo) {
+      setError("These leads belong to more than one employee (or the pool) — pick who this campaign should be assigned to.");
       return;
     }
     setCreating(true);
@@ -239,10 +261,21 @@ export function CreateCampaignModal({
       });
 
       await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
+
+      // Manager-created campaigns always resolve to exactly one employee
+      // owner — auto-detected when every selected lead is already theirs,
+      // otherwise whoever the manager just picked — and its leads are
+      // synced to match. created_by stays the manager; this only sets
+      // who the campaign (and its leads) belong to going forward.
+      const owner = role === "manager" ? (singleOwner ?? assignTo) : null;
+      if (owner) {
+        await assignCampaign(token, dbCampaign.id, owner, true);
+      }
+
       // fire-and-forget — drafts generate in background, don't block the redirect
       void triggerDraftGeneration(token, dbCampaign.id);
 
-      const campaign = mapDbCampaign({ ...dbCampaign, total_leads: eligibleLeads.length });
+      const campaign = { ...mapDbCampaign({ ...dbCampaign, total_leads: eligibleLeads.length }), assignedTo: owner };
       onCreated(campaign);
       handleClose();
     } catch (e) {
@@ -269,6 +302,31 @@ export function CreateCampaignModal({
             </Label>
             <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Plastics Outreach" />
           </div>
+
+          {role === "manager" && (
+            singleOwner ? (
+              <p className="text-xs text-muted-foreground">
+                All selected leads belong to one employee — this campaign will be assigned to them automatically.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Assign campaign to <span className="text-destructive">*</span>
+                </Label>
+                <Select value={assignTo} onValueChange={setAssignTo}>
+                  <SelectTrigger className="bg-card"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
+                  <SelectContent>
+                    {employees.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  These leads belong to more than one employee (or the unassigned pool) — pick who this campaign, and all its leads, should belong to.
+                </p>
+              </div>
+            )
+          )}
 
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">Sender name</Label>
@@ -516,7 +574,7 @@ export function CreateCampaignModal({
         </div>
 
         <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
-          <Button disabled={!name.trim() || creating || uploading || leads.length === 0} onClick={handleCreate} className="gap-1.5">
+          <Button disabled={!name.trim() || creating || uploading || leads.length === 0 || (needsAssignmentChoice && !assignTo)} onClick={handleCreate} className="gap-1.5">
             {creating ? (
               <><Loader2 className="size-3.5 animate-spin" /> Creating…</>
             ) : (
