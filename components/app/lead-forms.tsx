@@ -224,7 +224,7 @@ function AssignStrategyPicker({
               "w-full px-2.5 py-1.5 rounded-lg text-xs font-medium border text-left transition-colors",
               mode === opt.value
                 ? "bg-primary text-primary-foreground border-primary"
-                : "bg-transparent text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
+                : "bg-card text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
             )}
           >
             {opt.label}
