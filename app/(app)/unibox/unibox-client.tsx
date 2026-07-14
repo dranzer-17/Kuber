@@ -195,6 +195,10 @@ export function UniboxClient() {
 
   const leadTemperature = threadDetail?.lead_temperature ?? selectedSummary?.lead_temperature ?? null;
   const showDetail = view === "detail" && !!selectedSummary;
+  // A deleted lead's thread stays fully functional by design (planning.md
+  // §3.6/§5.6) — history and reply rights are unaffected — but the viewer
+  // should know the underlying lead record no longer exists.
+  const leadIsDeleted = !!(threadDetail?.lead as { is_deleted?: boolean } | null)?.is_deleted;
 
   return (
     <div className="flex flex-col h-full">
@@ -231,7 +235,17 @@ export function UniboxClient() {
                 </button>
                 <Avatar name={leadName} size="sm" />
                 <div className="min-w-0">
-                  <p className="font-medium truncate">{leadName}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-medium truncate">{leadName}</p>
+                    {leadIsDeleted && (
+                      <span
+                        title="This lead's record has been deleted. Thread history and reply rights are unaffected."
+                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-secondary px-1.5 py-0.5 rounded-full border border-border"
+                      >
+                        Lead deleted
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground truncate">{selectedSummary.lead_email}</p>
                 </div>
                 {selectedSummary.campaign && (

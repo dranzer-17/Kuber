@@ -1,5 +1,11 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
+// Territory is consulted only AT ASSIGNMENT TIME (review §5.4) — deliberately.
+// If an employee's territory changes after leads were already routed to them,
+// those existing leads are left alone; only future auto-assignments honor the
+// new territory. Retroactively re-territorying an employee's whole book on
+// every territory edit would silently move leads out from under whoever is
+// actively working them, which is worse than the status quo.
 type Db = ReturnType<typeof createAdminClient>;
 export type Territory = "india" | "foreign";
 export type AssignmentStrategy = "manual" | "round_robin" | "territory";
