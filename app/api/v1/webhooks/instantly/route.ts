@@ -103,7 +103,27 @@ export async function POST(req: NextRequest) {
         .eq("campaign_id", masterId)
         .eq("lead_id", leadId)
         .maybeSingle();
-      if (cl) campaignLeadId = cl.id;
+      if (cl) {
+        campaignLeadId = cl.id;
+      } else if (p.event_type === "reply_received") {
+        // We resolved the exact master campaign AND the lead, but they're no
+        // longer linked in campaign_leads — the lead was removed from this
+        // campaign (or the sub-campaign reference is stale) since the message
+        // was sent. The reply_events row below still keeps the raw event, but
+        // this specific "we knew the campaign, still couldn't attribute it"
+        // case is worth a visible signal rather than vanishing silently into
+        // an unmapped row nobody looks at (review §4.3).
+        console.error(
+          `[webhook] reply_received: campaign+lead resolved but no active campaign_leads link — ` +
+          `master_campaign=${masterId} lead_id=${leadId} lead_email=${p.lead_email}`,
+        );
+        await db.from("audit_log").insert({
+          action: "reply_unmapped_stale_campaign_link",
+          entity_type: "reply_event",
+          diff: { master_campaign_id: masterId, lead_id: leadId, lead_email: p.lead_email, instantly_sub_campaign: p.campaign_id ?? null },
+          created_at: new Date().toISOString(),
+        });
+      }
     }
   }
 

@@ -65,6 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       replyEventId: claimed.reply_event_id,
       source: "campaign_replies",
       replyDraftId: claimed.id,
+      sentBy: user.id,
     });
     return ok({ sent: true });
   } catch (err) {

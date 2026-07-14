@@ -71,7 +71,11 @@ function MessageRow({
   onToggle: () => void;
 }) {
   const isOutbound = m.direction !== "received";
-  const senderName = isOutbound ? "You" : leadName;
+  // Show WHO actually sent it (review §4.2) — a thread can be visible to more
+  // than one teammate (campaign access + lead-assignment fallback), so
+  // hardcoding "You" was misleading for anyone but the original sender.
+  // Falls back to "Team" for auto-sent/cold-outreach messages with no known sender.
+  const senderName = isOutbound ? (m.sent_by_name ?? "Team") : leadName;
   const toLabel = isOutbound ? leadName : "me";
   const { main, quoted } = useMemo(
     () => splitQuotedBody(m.body_html, m.body_text),

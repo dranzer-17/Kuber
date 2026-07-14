@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
     campaignId: (thread.campaign as { id?: string } | null)?.id ?? null,
     source: "unibox",
     replyDraftId: body.reply_draft_id,
+    sentBy: user.id,
   });
 
   return ok(result);

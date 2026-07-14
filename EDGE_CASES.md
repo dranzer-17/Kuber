@@ -41,45 +41,23 @@ Anyone who is the campaign's `assigned_to` (not just the original `created_by`) 
 
 ---
 
-## 3. Leads
+## 3. Leads — all items resolved
 
-### 3.1 Employees see only leads directly assigned to them — not campaign-based access (Med — inconsistent with Unibox)
-`GET /api/v1/leads` filters employees strictly to `assigned_to = me`; there's no "leads in a campaign I'm part of" visibility, unlike Unibox threads (§4.1) which do combine campaign access with lead-assignment. An employee who's the assignee of a campaign built from someone else's leads can work those leads' *reply threads* in Unibox but can't see the underlying **lead record** itself in the Leads page. That's a real, user-facing inconsistency.
-
-### 3.2 Lead reassignment isn't possible via the lead edit endpoint at all (Low, but worth confirming intentional)
-`PATCH /api/v1/leads/[id]`'s schema has no `assigned_to` field — the only way to move a lead between owners is bulk-assign (manager-only) or campaign-assign-with-reassign (manager-only, as a side effect). There's no single-lead "reassign this one lead" action for a manager who just wants to hand off one lead — they have to go through bulk-assign.
-
-### 3.3 Duplicate import always favors the earliest-created row, silently (Med)
-When two different users import the same email (via Apollo search or Excel), the second import is just skipped as a duplicate — the **original assignee wins**, with no prompt telling the second importer "this lead already exists and is owned by someone else." If User B imports a lead thinking they now own it, they don't, and nothing tells them.
-
-### 3.4 Org-level enrichment fans out to every lead under that org, regardless of owner (High — directly answers a scenario named in the prompt)
-Enrichment (`company_description`, `sells_to`, scrape status) is written once per `organization_id` and then applied to **every lead under that org**, even leads owned by completely different employees who never triggered the enrichment. So: if Employee A's lead and Employee B's lead belong to the same organization, and Employee A enriches it, **Employee B's lead's org data changes too**, with no notification to B that their lead's data just changed underneath them.
-
-### 3.5 Concurrent enrichment of the same org can double-fire external calls (Med)
-The self-chaining `scrape-orgs` route selects queued orgs, then marks them `scraping` — but the select-then-update isn't atomic. Two concurrent invocations can both pick up the same org before either marks it `scraping`, causing duplicate Firecrawl/LLM spend and duplicate log rows (last write wins, no row lock). Low-probability but real, and gets worse under load/retry storms.
-
-### 3.6 Lead delete cascades are asymmetric (pre-send vs. post-send) (Low — seems intentionally designed, but note the asymmetry)
-Deleting a lead hard-deletes pre-send `campaign_leads`/unsent drafts, but only "closes" (keeps history for) post-send memberships and explicitly deletes the corresponding Instantly-side lead to stop follow-ups. Reply/Unibox rows referencing the deleted lead are left in place — harmless today since scope checks key off `is_deleted`, but worth flagging if any future UI surfaces raw thread history without checking that flag.
-
-### 3.7 Bulk-assign to a territory only "splits" leads if strategy = territory/round_robin — "manual" mode sends the whole batch to one person (Med — directly answers a scenario named in the prompt)
-`bulkAssignByStrategy` (`lib/services/assignment.ts:90-138`) behaves completely differently depending on which mode the manager picks for the bulk action:
-- **`manual`** (a specific assignee chosen): **all** selected leads go to that one person — a manager selecting 30 India leads and picking "Employee A" gives all 30 to A, none to B, regardless of territory.
-- **`territory`** (or `round_robin`): leads are distributed **one at a time**, each going to whichever eligible candidate currently has the **lower total assigned-lead count** (`LoadBalancedPicker.pick`, lines 71-80), with a round-robin cursor breaking exact ties. So 30 India leads with two active India reps *do* split — roughly 15/15 if both reps started with equal loads, but skewed toward whichever rep had fewer leads *in total* (not just India leads) beforehand, since the load signal is a global per-employee lead count, not a territory-scoped one.
-- Auto-assignment of newly-enriched leads (`autoAssignEnrichedLeads`/`resolveAssignee`, lines 141-186) uses the exact same least-loaded-first logic per lead as they trickle in one at a time — so freshly-enriched India leads landing over time will also alternate between the two India reps rather than piling onto whichever rep happened to be assigned the first one.
-- There is no "split evenly N-ways regardless of current load" option and no preview before committing — the manager finds out the split after clicking Assign, not before.
+- **3.1** Employees now see (read-only) leads in a campaign they have access to, not just leads directly assigned to them — matches Unibox's model. Fixed in `app/api/v1/leads/route.ts`, `app/api/v1/leads/[id]/route.ts`, `app/api/v1/organizations/[id]/route.ts` via `getCampaignAccessibleLeadIds` (`lib/auth/scope.ts`).
+- **3.2** Managers can now reassign a single lead directly (`PATCH /api/v1/leads/[id]` accepts `assigned_to`, manager-only) — surfaced as an "Owner" control in the lead drawer.
+- **3.3** Apollo/Excel imports now return `duplicate_owners` (who already owns each skipped duplicate) and the import UI shows it via a toast.
+- **3.4** Org-level enrichment fan-out (by design — one profile per org, shared by all its leads) now leaves an `audit_log` entry when it touches leads across multiple owners, and the lead drawer shows "this profile is shared with N other leads" so the current viewer isn't blindsided.
+- **3.5** `scrape-orgs` claims its batch atomically via a new `claim_queued_orgs` RPC (`FOR UPDATE SKIP LOCKED`) instead of select-then-update, closing the concurrent-pickup race.
+- **3.6** Documented as intentional in `lib/services/lead-removal.ts` — pre-send data is hard-deleted, post-send history (reply_events/unibox_emails/reply_drafts) is left in place and relies on existing `is_deleted` scoping.
+- **3.7** Territory-based load balancing (`lib/services/assignment.ts`) is now scoped to the region being routed, not an employee's total lead count — a rep's unrelated cross-territory assignments no longer skew how many new regional leads they get next.
 
 ---
 
-## 4. Unibox
+## 4. Unibox — all items resolved
 
-### 4.1 Thread visibility combines campaign access OR lead-assignment fallback (Med — the flip side of §3.1)
-An employee sees a reply thread if they either have campaign access **or** the underlying lead is assigned to them — whichever is broader. Combined with §3.1, this means an employee can have full reply-thread visibility/reply rights on a lead they cannot see or edit as a Lead record. That's confusing for the employee ("I can talk to this person but can't see their lead card") and worth resolving toward one consistent rule.
-
-### 4.2 No "who sent it" attribution on outbound replies (Med — audit/accountability gap)
-`sendThreadReply` records no sender user id — only the sending mailbox (`eaccount`). If two people have access to the same thread (via the OR-fallback above) and one sends a reply, there's no way to later determine which teammate actually sent it, which matters if a customer complains about a reply's content or tone.
-
-### 4.3 Stale sub-campaign webhook data could drop a reply silently (Low/Med)
-If a lead is removed from Campaign A and re-enrolled in Campaign B under the same email, inbound replies are matched by `(campaign_id, lead_id)` against the *current* Instantly sub-campaign. If old webhook data still references the stale sub-campaign, the match can resolve to "no campaign_lead found" and the reply is effectively dropped rather than mis-filed against the wrong lead (safer failure mode, but still a silent loss worth logging/alerting on).
+- **4.1** Resolved as a side effect of §3.1 — lead visibility now matches thread visibility, so an employee who can reply to a thread can also see the underlying Lead record.
+- **4.2** Outbound replies now record `sent_by` (`unibox_emails.sent_by`, new column) — set only for replies sent through our own reply endpoints, never overwritten by resync. The thread view shows the actual sender's name instead of a hardcoded "You" for every outbound message.
+- **4.3** The webhook now distinguishes "resolved the campaign + lead but no active `campaign_leads` link" (the stale-sub-campaign case) from a generic unmapped reply, logging it to `audit_log` (action `reply_unmapped_stale_campaign_link`) plus a `console.error` for visibility — the `reply_events` row was already kept either way.
 
 ---
 
