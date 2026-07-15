@@ -18,23 +18,35 @@ type Db = ReturnType<typeof createAdminClient>;
 //   prevents an employee from seeing a co-worker's leads inside a shared
 //   campaign.
 
-/** Campaign ids an employee may access: contains a lead assigned to them, OR (back-compat) created by / assigned to them. */
-export async function getAccessibleCampaignIds(db: Db, user: AuthedUser): Promise<string[]> {
-  if (user.role !== "employee") {
-    const { data } = await db.from("campaigns").select("id").eq("is_deleted", false);
-    return (data ?? []).map((c) => c.id as string);
-  }
-
+/**
+ * The single source of truth for "which live campaigns can this employee see":
+ * any campaign they created, OR that's assigned to them, OR that contains at
+ * least one lead currently assigned to them (spec §5/§7). Every employee-facing
+ * campaign surface (list page, dashboard, detail page, API) must go through
+ * this — previously the server list/detail pages used narrower ad-hoc rules
+ * (created_by only), so an employee with a lead inside a manager-created
+ * campaign never saw that campaign even though the detail/API allowed it.
+ */
+export async function employeeCampaignIds(db: Db, userId: string): Promise<string[]> {
   const [{ data: owned }, { data: viaLeads }] = await Promise.all([
-    db.from("campaigns").select("id").eq("is_deleted", false).or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`),
+    db.from("campaigns").select("id").eq("is_deleted", false).or(`created_by.eq.${userId},assigned_to.eq.${userId}`),
     db.from("campaign_leads").select("campaign_id, leads!inner(assigned_to, is_deleted)")
-      .eq("leads.assigned_to", user.id).eq("leads.is_deleted", false),
+      .eq("leads.assigned_to", userId).eq("leads.is_deleted", false),
   ]);
 
   const ids = new Set<string>();
   for (const c of owned ?? []) ids.add(c.id as string);
   for (const cl of viaLeads ?? []) if (cl.campaign_id) ids.add(cl.campaign_id as string);
   return [...ids];
+}
+
+/** Campaign ids an employee may access: contains a lead assigned to them, OR (back-compat) created by / assigned to them. */
+export async function getAccessibleCampaignIds(db: Db, user: AuthedUser): Promise<string[]> {
+  if (user.role !== "employee") {
+    const { data } = await db.from("campaigns").select("id").eq("is_deleted", false);
+    return (data ?? []).map((c) => c.id as string);
+  }
+  return employeeCampaignIds(db, user.id);
 }
 
 /** Throws a 404 unless the campaign exists and (for employees) is accessible per the model above. */

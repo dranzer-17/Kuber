@@ -210,6 +210,20 @@ export async function fetchLead(token: string, id: string): Promise<Lead> {
   return mapDbLead(data);
 }
 
+export type ServiceIssue = { service: string; kind: "credits" | "auth"; message: string };
+
+export async function fetchServiceHealth(token: string): Promise<ServiceIssue[]> {
+  const data = await apiFetch<{ issues: ServiceIssue[] }>(`/api/v1/service-health`, {}, token);
+  return data.issues;
+}
+
+export type LeadActivityEvent = { event: string; detail: string | null; actor_name: string | null; created_at: string };
+
+export async function fetchLeadActivity(token: string, id: string): Promise<LeadActivityEvent[]> {
+  const data = await apiFetch<{ events: LeadActivityEvent[] }>(`/api/v1/leads/${id}/activity`, {}, token);
+  return data.events;
+}
+
 export async function patchLead(token: string, id: string, body: {
   first_name?: string; last_name?: string; email?: string; phone?: string;
   title?: string; headline?: string; linkedin_url?: string;
@@ -237,6 +251,7 @@ export type AssignmentSummary = {
   newly_assigned: number;
   reassigned: number;
   skipped_already_assigned: number;
+  skipped_not_ready: number;
   unmatched: number;
   eligible_employee_count: number;
   excluded_offline: number;
@@ -769,6 +784,7 @@ export async function fetchCampaignLeads(token: string, campaignId: string): Pro
 
 export async function addLeadsToCampaign(token: string, campaignId: string, leadIds: string[]): Promise<{
   added: string[]; not_found: string[]; blocked_unsubscribed: string[]; skipped_existing: string[];
+  also_in_other_campaigns?: Array<{ lead_id: string; campaign_id: string; campaign_name: string }>;
 }> {
   return apiFetch(`/api/v1/campaigns/${campaignId}/leads`, {
     method: "POST",

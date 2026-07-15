@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ChevronRight, Loader2, Clock, Calendar as CalendarIcon, Globe, Calendar, Paperclip, Upload, FileText, X, Check } from "lucide-react";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -256,7 +257,18 @@ export function CreateCampaignModal({
         } : {}),
       });
 
-      await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
+      const addResult = await addLeadsToCampaign(token, dbCampaign.id, eligibleLeads.map((l) => l.id));
+
+      // Problem 6: some of these people are already in another live campaign —
+      // allowed, but warn so the manager knows they'll get more than one sequence.
+      const alsoIn = addResult.also_in_other_campaigns ?? [];
+      if (alsoIn.length > 0) {
+        const uniqueLeads = new Set(alsoIn.map((a) => a.lead_id)).size;
+        toast.warning(
+          `${uniqueLeads} lead${uniqueLeads === 1 ? " is" : "s are"} already in another active campaign — they'll receive more than one sequence.`,
+          { duration: 8000 },
+        );
+      }
 
       // Container by default (spec §5): leads keep their existing owners. Only
       // if the manager explicitly picked "assign entire campaign to X" do we

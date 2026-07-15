@@ -324,6 +324,15 @@ export async function sendCampaign(
             ),
           );
 
+          // Clean per-lead activity line for the send.
+          if (sentSlice.length > 0) {
+            const { logLeadEvents } = await import("@/lib/services/lead-events");
+            await logLeadEvents(db, sentSlice.map((p) => ({
+              leadId: p.leadId, event: "draft_sent" as const, detail: "Outreach email sent",
+              metadata: { campaign_id: campaignId },
+            })));
+          }
+
           // Rejected → mark failed and still link the sub, so they are visible as
           // needing attention and are NOT silently re-picked as "eligible" forever.
           await Promise.all(

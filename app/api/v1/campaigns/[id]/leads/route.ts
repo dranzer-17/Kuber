@@ -146,6 +146,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     added.push(leadId);
   }
 
+  // Warn (don't block — planning: a lead may legitimately be in >1 campaign)
+  // when a lead we're adding is ALREADY in another live campaign, so the
+  // manager knows this person will receive more than one sequence. Ownership
+  // can't split across employees here: lead visibility is lead-based, so every
+  // campaign containing this lead is only workable by its single assignee.
+  const alsoInOtherCampaigns: Array<{ lead_id: string; campaign_id: string; campaign_name: string }> = [];
+  if (added.length > 0) {
+    const { data: otherCls } = await db
+      .from("campaign_leads")
+      .select("lead_id, campaign_id, campaigns!inner(id, name, status, is_deleted)")
+      .in("lead_id", added)
+      .neq("campaign_id", id);
+    for (const cl of otherCls ?? []) {
+      const camp = (Array.isArray(cl.campaigns) ? cl.campaigns[0] : cl.campaigns) as { id: string; name: string; status: string; is_deleted: boolean } | null;
+      if (!camp || camp.is_deleted || TERMINAL_STATUSES.has(camp.status)) continue;
+      alsoInOtherCampaigns.push({ lead_id: cl.lead_id as string, campaign_id: camp.id, campaign_name: camp.name });
+    }
+  }
+
   if (toInsert.length > 0) {
     const { error } = await db.from("campaign_leads").insert(toInsert);
     if (error) return fail(500, "INTERNAL", error.message);
@@ -155,6 +174,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .select("id", { count: "exact", head: true })
       .eq("campaign_id", id);
     await db.from("campaigns").update({ total_leads: count ?? 0 }).eq("id", id);
+
+    // Clean per-lead activity line.
+    const { logLeadEvents } = await import("@/lib/services/lead-events");
+    const campName = (await db.from("campaigns").select("name").eq("id", id).maybeSingle()).data?.name ?? "a campaign";
+    await logLeadEvents(db, added.map((leadId) => ({
+      leadId, event: "added_to_campaign" as const, detail: `Added to campaign "${campName}"`,
+      actorId: user.id, metadata: { campaign_id: id },
+    })));
   }
 
   return ok({
@@ -163,6 +190,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     blocked_unsubscribed: blockedUnsubscribed,
     blocked_not_enriched: blockedNotEnriched,
     skipped_existing: skippedExisting,
+    also_in_other_campaigns: alsoInOtherCampaigns,
   });
 }
 

@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getUserRole } from "@/lib/auth/roles";
 import { getCampaign } from "@/lib/server/campaigns";
+import { employeeCampaignIds } from "@/lib/auth/scope";
 import { CampaignDetailClient } from "./campaign-detail-client";
 
 export default async function CampaignDetailPage({
@@ -16,10 +17,15 @@ export default async function CampaignDetailPage({
 
   let initialCampaign = null;
   try {
-    const campaign = await getCampaign(createAdminClient(), id);
-    const isOwner = campaign.createdBy === user?.id;
-    if (role === "employee" && !isOwner) {
-      initialCampaign = null;
+    const db = createAdminClient();
+    const campaign = await getCampaign(db, id);
+    // Employees may open a campaign they created, that's assigned to them, OR
+    // that contains a lead assigned to them (same rule as the list + API — not
+    // created_by only, which used to hide campaigns holding their own leads).
+    // The detail's leads query further filters to only their own leads within.
+    if (role === "employee" && user?.id) {
+      const ids = await employeeCampaignIds(db, user.id);
+      initialCampaign = ids.includes(id) ? campaign : null;
     } else {
       initialCampaign = campaign;
     }

@@ -203,8 +203,10 @@ async function processRows(
       lead_source: "excel",
       created_by: userId,
       import_id: importId ?? null,
-      assigned_to: assignedTo ?? null,
-      assigned_at: assignedTo ? new Date().toISOString() : null,
+      // Deferred assignment: land unassigned; the import's stored choice is
+      // applied by autoAssignEnrichedLeads once each lead is workable.
+      assigned_to: null,
+      assigned_at: null,
       created_at: new Date().toISOString(),
     };
   }).filter(Boolean) as object[];
@@ -218,20 +220,28 @@ async function processRows(
     } else if (error.code === "23505") skippedDuplicateInDb += leadRows.slice(i, i + CHUNK).length;
   }
 
-  // Strategy-based distribution at import time (planning.md Phase 4 / Q5).
-  let assignmentSkipped = 0;
-  if (assignmentStrategy && insertedIds.length > 0) {
-    const { bulkAssignByStrategy } = await import("@/lib/services/assignment");
-    const res = await bulkAssignByStrategy(db, insertedIds, assignmentStrategy, null);
-    // Fresh imports are never pre-assigned, so "skipped" here means unmatched
-    // (no eligible rep / no country under territory routing).
-    assignmentSkipped = res.unmatched;
+  // Assignment is deferred to autoAssignEnrichedLeads (post-enrichment).
+  void assignedTo; void assignmentStrategy;
+
+  if (insertedIds.length > 0) {
+    const { logLeadEvents } = await import("@/lib/services/lead-events");
+    await logLeadEvents(db, insertedIds.map((id) => ({
+      leadId: id, event: "created" as const, detail: "Imported from Excel/CSV", actorId: userId,
+    })));
   }
 
   return {
     inserted: insertedCount, skipped_blank_email: skippedBlankEmail, skipped_invalid_email: skippedInvalidEmail,
     skipped_duplicate_in_file: skippedDuplicateInFile, skipped_duplicate_in_db: skippedDuplicateInDb,
-    assignment_skipped: assignmentSkipped, duplicate_owners: duplicateOwners,
+    assignment_skipped: 0, duplicate_owners: duplicateOwners,
+  };
+}
+
+/** import-time assignment choice → columns stored on the import row (deferred). */
+function importAssignmentFields(assignedTo?: string | null, strategy?: "round_robin" | "territory" | null) {
+  return {
+    assignment_strategy: assignedTo ? "manual" : (strategy ?? null),
+    assignment_target: assignedTo ?? null,
   };
 }
 
@@ -267,7 +277,7 @@ export async function POST(req: NextRequest) {
     const { rows, mapping, batch_name, color, assigned_to, assignment_strategy } = parsed.data;
     if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
     const { data: importRow } = await db.from("imports")
-      .insert({ label: batch_name, source: "excel", created_by: user.id, lead_count: 0, color: color ?? "violet" })
+      .insert({ label: batch_name, source: "excel", created_by: user.id, lead_count: 0, color: color ?? "violet", ...importAssignmentFields(assigned_to, assignment_strategy) })
       .select("id").single();
     const importId = importRow?.id ?? null;
     const result = await processRows(rows, mapping, user.id, db, importId, assigned_to, assignment_strategy);
@@ -301,7 +311,7 @@ export async function POST(req: NextRequest) {
     parsed.data as { mapping: Record<string, string>; batch_name: string; color: string; assigned_to?: string | null; assignment_strategy?: "round_robin" | "territory" };
   if (!mapping["email"]) return fail(400, "VALIDATION_ERROR", "Mapping must include an 'email' column");
   const { data: importRow2 } = await db.from("imports")
-    .insert({ label: importBatchName, source: "excel", created_by: user.id, lead_count: 0, color: importColor ?? "violet" })
+    .insert({ label: importBatchName, source: "excel", created_by: user.id, lead_count: 0, color: importColor ?? "violet", ...importAssignmentFields(importAssignedTo, importStrategy) })
     .select("id").single();
   const importId2 = importRow2?.id ?? null;
   const result = await processRows(parsed_excel.rows, mapping, user.id, db, importId2, importAssignedTo, importStrategy);
