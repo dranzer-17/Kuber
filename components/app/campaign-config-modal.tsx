@@ -34,27 +34,30 @@ export function CampaignConfigModal({ campaign, open }: { campaign: Campaign; op
   const activeDays = DAY_ORDER.filter((k) => campaign.sendDays?.[k]).map((k) => DAY_LABELS[k]);
 
   return (
-    <div className="absolute bottom-full right-0 mb-2 z-50 w-80 overflow-hidden rounded-xl border border-border bg-card text-sm shadow-xl divide-y divide-border max-h-[70vh] overflow-y-auto">
+    <div className="enter swatch-bar-top absolute bottom-full right-0 mb-2 z-50 w-80 overflow-hidden rounded-xl border border-border bg-card text-sm shadow-xl divide-y divide-border max-h-[70vh] overflow-y-auto">
+      <div className="px-4 pt-3 pb-2">
+        <p className="eyebrow">Campaign · config</p>
+      </div>
       <div className="flex items-center justify-between px-4 py-2.5">
         <span className="text-muted-foreground flex items-center gap-2"><User className="size-3.5" /> Sender name</span>
-        <span className="font-medium">{campaign.senderName || "—"}</span>
+        <span className="font-mono text-xs font-medium">{campaign.senderName || "—"}</span>
       </div>
       <div className="flex items-center justify-between px-4 py-2.5">
         <span className="text-muted-foreground flex items-center gap-2"><Gauge className="size-3.5" /> Daily limit</span>
-        <span className="font-medium">{campaign.dailyLimit ?? 30}/day</span>
+        <span className="font-mono text-xs font-medium tabular-nums">{campaign.dailyLimit ?? 30}/day</span>
       </div>
       <div className="flex items-center justify-between px-4 py-2.5">
         <span className="text-muted-foreground flex items-center gap-2"><Clock className="size-3.5" /> Window</span>
-        <span className="font-medium">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
+        <span className="font-mono text-xs font-medium tabular-nums">{campaign.windowFrom ?? "08:00"} – {campaign.windowTo ?? "18:00"}</span>
       </div>
       <div className="flex items-center justify-between px-4 py-2.5">
         <span className="text-muted-foreground flex items-center gap-2"><Globe className="size-3.5" /> Timezone</span>
-        <span className="font-medium">{campaign.timezone ?? "—"}</span>
+        <span className="font-mono text-xs font-medium">{campaign.timezone ?? "—"}</span>
       </div>
       {activeDays.length > 0 && (
         <div className="flex items-center justify-between px-4 py-2.5">
           <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-3.5" /> Days</span>
-          <span className="font-medium">{activeDays.join(", ")}</span>
+          <span className="font-medium text-xs">{activeDays.join(", ")}</span>
         </div>
       )}
       {campaign.aiPromptContext && (
@@ -77,7 +80,7 @@ export function CampaignConfigModal({ campaign, open }: { campaign: Campaign; op
             return (
               <div key={s.step_order} className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">{formatOrdinal(s.step_order - 1)} follow-up</span>
-                <span className="font-medium">
+                <span className="font-mono font-medium tabular-nums">
                   {waitStep ? `${waitStep.delay} ${waitStep.delay_unit} after previous` : "—"}
                 </span>
               </div>
@@ -87,7 +90,7 @@ export function CampaignConfigModal({ campaign, open }: { campaign: Campaign; op
       </div>
       <div className="flex items-center justify-between px-4 py-2.5">
         <span className="text-muted-foreground flex items-center gap-2"><Paperclip className="size-3.5" /> Attachment</span>
-        <span className="font-medium">{campaign.attachmentName || "None"}</span>
+        <span className="font-medium text-xs">{campaign.attachmentName || "None"}</span>
       </div>
     </div>
   );
