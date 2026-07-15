@@ -5,6 +5,7 @@ import { scrapePage } from "@/lib/services/firecrawl";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { deriveDomainFromEmail } from "@/lib/utils/domain";
 import { autoAssignEnrichedLeads } from "@/lib/services/assignment";
+import { logLeadEvents } from "@/lib/services/lead-events";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -102,11 +103,17 @@ async function markFailed(db: Db, orgId: string, status: string, errorMessage: s
   // Only conclude leads to Input Required once we've actually stopped trying —
   // while retrying, the org is back in the "queued" pipeline so leads stay New.
   if (!shouldRetry) {
-    await db.from("leads")
+    const { data: nowInputRequired } = await db.from("leads")
       .update({ status: "input_required", updated_at: new Date().toISOString() })
       .eq("organization_id", orgId)
       .eq("is_deleted", false)
-      .not("status", "in", '("open","closed")');
+      .not("status", "in", '("open","closed")')
+      .select("id");
+    // Clean, non-technical timeline line (the raw error stays in enrichment_logs).
+    await logLeadEvents(db, (nowInputRequired ?? []).map((l) => ({
+      leadId: l.id as string, event: "enrichment_failed" as const,
+      detail: "No company profile — can still be contacted with the generic template",
+    })));
   }
 
   await insertLog(db, {
@@ -231,9 +238,14 @@ async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<DomainI
   return { type: "resolved", domain: topDomain };
 }
 
+// Reuse a cached scrape only if it's recent — company sites change, and a
+// stale profile is worse than a fresh one. 7 days is well past the retry
+// window we care about (the LLM-402 loop happens within minutes/hours).
+const SCRAPE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 async function processOneOrg(
   db: Db,
-  org: { id: string; domain: string | null; name: string },
+  org: { id: string; domain: string | null; name: string; scraped_markdown: string | null; scraped_at: string | null },
 ): Promise<"merged" | void> {
   const orgStart = Date.now();
 
@@ -281,15 +293,33 @@ async function processOneOrg(
   }
 
   // ── C: Firecrawl scrape ────────────────────────────────────────────────────
-  // Goes through lib/services/firecrawl.ts's scrapePage(), which wraps the
-  // call in fetchWithRetry("firecrawl", ...) — a 60s AbortController timeout
-  // plus retry on 429/5xx (lib/http.ts). The previous raw fetch() here had
-  // neither: a hung Firecrawl response could stall this whole batch of up to
-  // 10 orgs until the platform killed the entire function.
+  // Reuse a recent cached scrape when present: the common failure that lands
+  // an org back here is the LLM extraction step 402-ing (low OpenRouter
+  // balance) AFTER a perfectly good scrape — re-paying Firecrawl to fetch the
+  // identical page on every such retry is pure waste (this exact loop is in
+  // the logs). If we already have fresh markdown, skip straight to extraction.
   const scrapeStart = Date.now();
   let markdown: string | null = null;
 
-  try {
+  const cacheFresh = !!org.scraped_markdown
+    && !!org.scraped_at
+    && (Date.now() - new Date(org.scraped_at).getTime()) < SCRAPE_CACHE_TTL_MS;
+
+  if (cacheFresh) {
+    markdown = org.scraped_markdown;
+    await insertLog(db, {
+      org_id: org.id,
+      source: "firecrawl",
+      event: "SCRAPE_CACHE_HIT",
+      payload: { chars: markdown?.length ?? 0, domain: org.domain },
+    });
+    await db.from("organizations").update({
+      enrichment_status: "SCRAPE_SUCCESS",
+      updated_at: new Date().toISOString(),
+    }).eq("id", org.id);
+  }
+
+  if (!markdown) try {
     const result = await scrapePage(`https://${org.domain}`);
     const scrapeDuration = Date.now() - scrapeStart;
 
@@ -330,8 +360,11 @@ async function processOneOrg(
       payload: { chars: charCount, domain: org.domain },
     });
 
+    // Cache the raw markdown so a later LLM-only retry doesn't re-scrape.
     await db.from("organizations").update({
       enrichment_status: "SCRAPE_SUCCESS",
+      scraped_markdown: markdown,
+      scraped_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("id", org.id);
 
@@ -376,6 +409,7 @@ Rules:
 - sells_to: who their end customers or industries are in plain terms (e.g. "automotive OEMs", "food packaging brands", "retail chains"). Return null if unclear.
 - If you cannot find real evidence for a field in the provided content, return null for that field. Never invent facts. Never describe yourself or any third party — only describe the company whose website you are reading.`,
       user: `Company name: ${org.name}\nWebsite domain: ${org.domain ?? "unknown"}\n\nWebsite content:\n${markdown.slice(0, 8000)}`,
+      maxTokens: 1024, // output is a tiny JSON object; keeps cost + credit floor low
     });
 
     const llmDuration = Date.now() - llmStart;
@@ -417,11 +451,17 @@ Rules:
     }).eq("id", org.id);
 
     // Fix A: sync leads.status → enriched for all non-terminal leads under this org
-    await db.from("leads")
+    const { data: nowEnriched } = await db.from("leads")
       .update({ status: "enriched", updated_at: new Date().toISOString() })
       .eq("organization_id", org.id)
       .eq("is_deleted", false)
-      .not("status", "in", '("open","closed")');
+      .not("status", "in", '("open","closed")')
+      .select("id");
+
+    // Clean per-lead activity entry (drawer timeline) — one line, no raw dumps.
+    await logLeadEvents(db, (nowEnriched ?? []).map((l) => ({
+      leadId: l.id as string, event: "enriched" as const, detail: "Company profile ready",
+    })));
 
     // Only enriched leads are eligible for employee assignment.
     await autoAssignEnrichedLeads(db, org.id);
@@ -509,8 +549,8 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: claimError.message }, { status: 500 });
   }
 
-  const orgs = ((claimedOrgs ?? []) as Array<{ id: string; domain: string | null; name: string }>)
-    .map((o) => ({ id: o.id, domain: o.domain, name: o.name }));
+  const orgs = ((claimedOrgs ?? []) as Array<{ id: string; domain: string | null; name: string; scraped_markdown: string | null; scraped_at: string | null }>)
+    .map((o) => ({ id: o.id, domain: o.domain, name: o.name, scraped_markdown: o.scraped_markdown, scraped_at: o.scraped_at }));
 
   if (orgs.length === 0) {
     await insertLog(db, {

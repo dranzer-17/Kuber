@@ -33,13 +33,20 @@ export async function GET(req: NextRequest) {
     assignedLeadCounts.set(row.assigned_to, (assignedLeadCounts.get(row.assigned_to) ?? 0) + 1);
   }
 
-  // Campaigns: M = number of DISTINCT campaigns that contain at least one lead
-  // assigned to the employee (spec §6) — NOT the campaigns they created. An
-  // employee with leads but none in any campaign correctly reports 0.
+  // Only LIVE campaigns count — the `campaigns` query above is already filtered
+  // to is_deleted=false, so any membership whose campaign isn't in this set is
+  // a deleted campaign and must be excluded (previously it wasn't, so deleting
+  // a campaign left it inflating an employee's count forever).
+  const liveCampaignIds = new Set((campaigns ?? []).map((c) => c.id as string));
+
+  // Campaigns: M = number of DISTINCT LIVE campaigns that contain at least one
+  // lead assigned to the employee (spec §6) — matches what the employee's own
+  // campaigns list now shows (employeeCampaignIds). An employee with leads but
+  // none in any live campaign correctly reports 0.
   const campaignsByEmployee = new Map<string, Set<string>>();
   for (const m of memberships ?? []) {
     const owner = (m.leads as { assigned_to?: string | null } | null)?.assigned_to;
-    if (!owner || !m.campaign_id) continue;
+    if (!owner || !m.campaign_id || !liveCampaignIds.has(m.campaign_id as string)) continue;
     if (!campaignsByEmployee.has(owner)) campaignsByEmployee.set(owner, new Set());
     campaignsByEmployee.get(owner)!.add(m.campaign_id as string);
   }

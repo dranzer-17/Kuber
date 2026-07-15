@@ -25,6 +25,7 @@ import {
 import { useApp } from "@/lib/app-context";
 import { Avatar, StatusBadge } from "@/components/leads/lead-ui";
 import { KanbanBoard } from "@/components/app/kanban-board";
+import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
@@ -828,6 +829,9 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* Upstream credit/API-key failures (OpenRouter/Firecrawl/Apollo). */}
+      <ServiceHealthBanner />
+
       {/* ── Search + Columns toolbar ── */}
       {leadsEntityMode === "individual" && leadsViewMode === "list" && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-border shrink-0">
@@ -1046,7 +1050,16 @@ export default function LeadsPage() {
                           isChecked && "bg-secondary/30",
                         )}
                       >
-                        <TableCell className="pl-4" onClick={(e) => toggleOne(lead.id, e)}>
+                        <TableCell
+                          className="pl-4"
+                          onClick={(e) => {
+                            // Ineligible (still-enriching) leads must not be
+                            // selectable — the disabled checkbox alone left the
+                            // cell click as a loophole to select them.
+                            e.stopPropagation();
+                            if (eligible) toggleOne(lead.id, e);
+                          }}
+                        >
                           <AppCheckbox
                             checked={isChecked && eligible}
                             disabled={!eligible}
@@ -1314,8 +1327,12 @@ export default function LeadsPage() {
                     if (summary.newly_assigned) parts.push(`${summary.newly_assigned} assigned`);
                     if (summary.reassigned) parts.push(`${summary.reassigned} reassigned`);
                     if (summary.skipped_already_assigned) parts.push(`${summary.skipped_already_assigned} skipped (already owned)`);
+                    if (summary.skipped_not_ready) parts.push(`${summary.skipped_not_ready} skipped (still enriching)`);
                     if (summary.unmatched) parts.push(`${summary.unmatched} left unassigned (no eligible employee)`);
                     toast.success(parts.length ? parts.join(" · ") : "No changes");
+                    if (summary.skipped_not_ready) {
+                      toast.warning(`${summary.skipped_not_ready} lead${summary.skipped_not_ready === 1 ? "" : "s"} still being enriched — they'll be assignable once ready.`);
+                    }
                     if (summary.manual_target_offline) {
                       toast.warning("Heads up: that employee is currently marked offline (away).");
                     }

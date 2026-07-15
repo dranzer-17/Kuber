@@ -59,8 +59,20 @@ export async function POST(req: NextRequest) {
     if (!employee || !employee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
   }
 
+  // Deferred assignment (planning.md Phase 4 / Q5): DON'T assign at import time,
+  // when leads are raw "New" shells with no confirmed email. Remember the
+  // manager's choice on the import; autoAssignEnrichedLeads applies it per-lead
+  // the moment each lead becomes workable (enriched / input_required-with-email)
+  // — after the paid Apollo email-reveal, never before it.
+  const importAssignmentStrategy = assigned_to ? "manual" : (assignment_strategy ?? null);
+  const importAssignmentTarget = assigned_to ?? null;
+
   const { data: importRow } = await db.from("imports")
-    .insert({ label: batch_name, source: "apollo", created_by: user.id, lead_count: 0, color })
+    .insert({
+      label: batch_name, source: "apollo", created_by: user.id, lead_count: 0, color,
+      assignment_strategy: importAssignmentStrategy,
+      assignment_target: importAssignmentTarget,
+    })
     .select("id").single();
   const importId = importRow?.id ?? null;
 
@@ -196,8 +208,11 @@ export async function POST(req: NextRequest) {
           lead_source: "apollo",
           created_by: user.id,
           import_id: importId,
-          assigned_to: assigned_to ?? null,
-          assigned_at: assigned_to ? new Date().toISOString() : null,
+          // Deferred assignment: leads land unassigned. The import's stored
+          // choice is applied by autoAssignEnrichedLeads once each lead is
+          // workable — never here, while it's still a raw "New" shell.
+          assigned_to: null,
+          assigned_at: null,
           created_at: new Date().toISOString(),
         }];
       });
@@ -232,16 +247,16 @@ export async function POST(req: NextRequest) {
     await db.from("imports").update({ lead_count: inserted }).eq("id", importId);
   }
 
-  // Strategy-based distribution at import time (planning.md Phase 4 / Q5).
-  // Leads Apollo returned without a country stay in the pool (surfaced below);
-  // territory auto-assignment can still pick them up after enrichment.
-  let assignmentSkipped = 0;
-  if (assignment_strategy && newLeadTargets.length > 0) {
-    const { bulkAssignByStrategy } = await import("@/lib/services/assignment");
-    const res = await bulkAssignByStrategy(db, newLeadTargets.map((t) => t.id), assignment_strategy, null);
-    // Fresh imports are never pre-assigned, so "skipped" here means unmatched
-    // (no eligible rep / no country under territory routing).
-    assignmentSkipped = res.unmatched;
+  // Assignment is deferred to autoAssignEnrichedLeads (runs per-lead once each
+  // is workable, after email-reveal) — nothing is assigned at import time.
+  const assignmentSkipped = 0;
+
+  // Seed the activity timeline for every new lead.
+  if (newLeadTargets.length > 0) {
+    const { logLeadEvents } = await import("@/lib/services/lead-events");
+    await logLeadEvents(db, newLeadTargets.map((t) => ({
+      leadId: t.id, event: "created" as const, detail: "Imported from Apollo", actorId: user.id,
+    })));
   }
 
   // Phase 1 complete — leads are now in the DB. Fire-and-forget Phase 2A

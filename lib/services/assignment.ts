@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 // Territory is consulted only AT ASSIGNMENT TIME (review §5.4) — deliberately.
 // If an employee's territory changes after leads were already routed to them,
@@ -137,12 +138,25 @@ export type AssignmentSummary = {
   newly_assigned: number;           // were unassigned (pool), now assigned
   reassigned: number;               // were assigned to someone else, now moved
   skipped_already_assigned: number; // left untouched because they were already assigned
+  skipped_not_ready: number;        // still enriching (New) → can't be worked yet, left alone
   unmatched: number;                // territory/RR: no eligible employee (or no country) → left in pool
   eligible_employee_count: number;  // distinct eligible employees available for this run
   excluded_offline: number;         // active employees skipped for being offline
   excluded_deactivated: number;     // deactivated employees (never eligible)
   manual_target_offline: boolean;   // manual: chosen target is offline (allowed, but warned)
 };
+
+/**
+ * A lead is workable — and therefore assignable to an employee — only once it
+ * has an email AND enrichment has concluded (enriched, or input_required with a
+ * usable email via the generic template). "New"/"enriching" leads are still in
+ * the pipeline and must NOT be handed to an employee (they may still be
+ * archived out entirely if Apollo never returns an email). Unassigning (moving
+ * back to the pool) is always allowed regardless of readiness.
+ */
+function leadIsAssignable(row: { email: string | null; status: string | null }): boolean {
+  return !!row.email && (row.status === "enriched" || row.status === "input_required");
+}
 
 /**
  * Assigns a specific set of leads under an explicitly-chosen strategy (the
@@ -171,7 +185,7 @@ export async function bulkAssignByStrategy(
 ): Promise<AssignmentSummary> {
   const now = new Date().toISOString();
 
-  const { data: leads } = await db.from("leads").select("id, country, assigned_to").in("id", leadIds);
+  const { data: leads } = await db.from("leads").select("id, country, assigned_to, email, status").in("id", leadIds);
   const rows = leads ?? [];
   const exclusions = await getExclusionCounts(db);
 
@@ -180,6 +194,7 @@ export async function bulkAssignByStrategy(
     newly_assigned: 0,
     reassigned: 0,
     skipped_already_assigned: 0,
+    skipped_not_ready: 0,
     unmatched: 0,
     eligible_employee_count: 0,
     excluded_offline: exclusions.excluded_offline,
@@ -187,11 +202,27 @@ export async function bulkAssignByStrategy(
     manual_target_offline: false,
   };
 
+  // Guard used by every strategy: block assigning a not-ready lead TO an
+  // employee. `target` null (manual → pool) is always allowed.
+  function blockedNotReady(row: { email: string | null; status: string | null }, target: string | null): boolean {
+    if (!target) return false;
+    if (leadIsAssignable(row)) return false;
+    summary.skipped_not_ready++;
+    return true;
+  }
+
   // Records one lead move and updates the summary tallies.
   async function applyAssignment(leadId: string, prior: string | null, next: string | null) {
     await db.from("leads").update({ assigned_to: next, assigned_at: next ? now : null }).eq("id", leadId);
-    if (next && !prior) summary.newly_assigned++;
-    else if (next && prior && prior !== next) summary.reassigned++;
+    if (next && !prior) {
+      summary.newly_assigned++;
+      await logLeadEvent(db, leadId, "assigned", "Assigned to an employee", { metadata: { assignee_id: next } });
+    } else if (next && prior && prior !== next) {
+      summary.reassigned++;
+      await logLeadEvent(db, leadId, "reassigned", "Reassigned to a different employee", { metadata: { from: prior, to: next } });
+    } else if (!next && prior) {
+      await logLeadEvent(db, leadId, "unassigned", "Returned to the pool", { metadata: { from: prior } });
+    }
   }
 
   if (strategy === "manual") {
@@ -209,6 +240,7 @@ export async function bulkAssignByStrategy(
       const prior = (lead.assigned_to as string | null) ?? null;
       if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
       if (prior === assignedTo) { summary.skipped_already_assigned++; continue; } // already theirs
+      if (blockedNotReady(lead, assignedTo)) continue;
       await applyAssignment(lead.id, prior, assignedTo);
     }
     return summary;
@@ -222,6 +254,8 @@ export async function bulkAssignByStrategy(
     for (const lead of rows) {
       const prior = (lead.assigned_to as string | null) ?? null;
       if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
+
+      if (blockedNotReady(lead, "pending")) continue;
 
       const region = normalizeTerritory(lead.country as string | null);
       if (!region) { summary.unmatched++; continue; }
@@ -249,6 +283,7 @@ export async function bulkAssignByStrategy(
   for (const lead of rows) {
     const prior = (lead.assigned_to as string | null) ?? null;
     if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
+    if (blockedNotReady(lead, "pending")) continue;
     const assigneeId = picker.pick(candidates);
     if (!assigneeId) { summary.unmatched++; continue; }
     await applyAssignment(lead.id, prior, assigneeId);
@@ -256,17 +291,39 @@ export async function bulkAssignByStrategy(
   return summary;
 }
 
-/** Resolves who a newly-enriched lead should auto-assign to, or null to leave it in the Manager's pool. */
-export async function resolveAssignee(db: Db, leadCountry: string | null | undefined): Promise<string | null> {
-  const { data: settings } = await db
-    .from("assignment_settings")
-    .select("strategy")
-    .limit(1)
-    .maybeSingle();
+/**
+ * Resolves who a ready lead should auto-assign to, or null to leave it in the
+ * Manager's pool. Strategy comes from `strategyOverride` when supplied (the
+ * lead's import-time choice — deferred assignment), otherwise the workspace
+ * `assignment_settings` default. `manualTarget` is only consulted for the
+ * "manual" strategy.
+ */
+export async function resolveAssignee(
+  db: Db,
+  leadCountry: string | null | undefined,
+  strategyOverride?: AssignmentStrategy,
+  manualTarget?: string | null,
+): Promise<string | null> {
+  let strategy = strategyOverride;
+  if (!strategy) {
+    const { data: settings } = await db
+      .from("assignment_settings")
+      .select("strategy")
+      .limit(1)
+      .maybeSingle();
+    strategy = (settings?.strategy as AssignmentStrategy) ?? "manual";
+  }
 
-  if (!settings || settings.strategy === "manual") return null;
+  if (strategy === "manual") {
+    // Global manual = leave in pool. Import-time manual = the chosen employee
+    // (validated active; a since-deactivated target falls back to the pool).
+    if (!manualTarget) return null;
+    const { data: target } = await db
+      .from("profiles").select("id, is_active").eq("id", manualTarget).maybeSingle();
+    return target?.is_active ? manualTarget : null;
+  }
 
-  if (settings.strategy === "territory") {
+  if (strategy === "territory") {
     const region = normalizeTerritory(leadCountry);
     if (!region) return null;
     const candidates = await candidatesForRegion(db, region);
@@ -283,27 +340,60 @@ export async function resolveAssignee(db: Db, leadCountry: string | null | undef
   return new LoadBalancedPicker(loads).pick(candidates);
 }
 
+/** The deferred import choice for a lead, or null when it has no import / no stored choice. */
+async function importChoiceFor(
+  db: Db,
+  importId: string | null,
+): Promise<{ strategy: AssignmentStrategy; target: string | null } | null> {
+  if (!importId) return null;
+  const { data } = await db
+    .from("imports")
+    .select("assignment_strategy, assignment_target")
+    .eq("id", importId)
+    .maybeSingle();
+  if (!data?.assignment_strategy) return null;
+  return {
+    strategy: data.assignment_strategy as AssignmentStrategy,
+    target: (data.assignment_target as string | null) ?? null,
+  };
+}
+
 /**
  * Auto-assigns still-unassigned leads under an org once they are ready to work —
  * that is, either fully enriched OR input_required (the company had no usable
  * website / enrichment failed, but the lead has an email and can be worked with
  * the generic template). New/enriching leads are intentionally left in the pool.
+ *
+ * Each lead is routed by its own import's stored choice (deferred assignment,
+ * planning.md Phase 4 / Q5) — this is the ONLY place an Apollo/Excel import's
+ * assignment actually takes effect, so an employee never receives a raw "New"
+ * shell that might still get archived. Falls back to the workspace default for
+ * leads with no import-time choice.
  */
 export async function autoAssignEnrichedLeads(db: Db, orgId: string): Promise<void> {
   const { data: leads } = await db
     .from("leads")
-    .select("id, country")
+    .select("id, country, import_id")
     .eq("organization_id", orgId)
     .eq("is_deleted", false)
     .in("status", ["enriched", "input_required"])
     .is("assigned_to", null);
 
   for (const lead of leads ?? []) {
-    const assigneeId = await resolveAssignee(db, lead.country as string | null);
+    const choice = await importChoiceFor(db, lead.import_id as string | null);
+    const assigneeId = await resolveAssignee(
+      db,
+      lead.country as string | null,
+      choice?.strategy,
+      choice?.target,
+    );
     if (!assigneeId) continue;
     await db
       .from("leads")
       .update({ assigned_to: assigneeId, assigned_at: new Date().toISOString() })
       .eq("id", lead.id);
+    await logLeadEvent(db, lead.id as string, "assigned", "Assigned to an employee", {
+      metadata: { assignee_id: assigneeId, via: choice ? `import_${choice.strategy}` : "auto" },
+    });
   }
 }

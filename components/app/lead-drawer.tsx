@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
 import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
-import { fetchLead, fetchUsers, patchLead, rescrapeOrg, type Profile } from "@/lib/api-client";
+import { fetchLead, fetchLeadActivity, fetchUsers, patchLead, rescrapeOrg, type Profile, type LeadActivityEvent } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,6 +148,62 @@ function TimelineItem({ log, isLast }: { log: EnrichLog; isLast: boolean }) {
   );
 }
 
+// ── Clean lead activity item (Problem 8) ───────────────────────────────────────
+
+const ACTIVITY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  created: Zap,
+  enriched: CheckCircle2,
+  enrichment_failed: AlertCircle,
+  assigned: UserCog,
+  reassigned: UserCog,
+  unassigned: UserCog,
+  added_to_campaign: Megaphone,
+  removed_from_campaign: Megaphone,
+  draft_created: Pencil,
+  draft_approved: CheckCircle2,
+  draft_sent: Mail,
+  reply_received: Mail,
+  status_changed: RefreshCw,
+};
+
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diff = Date.now() - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function ActivityItem({ event, isLast }: { event: LeadActivityEvent; isLast: boolean }) {
+  const Icon = ACTIVITY_ICONS[event.event] ?? Clock;
+  const isBad = event.event === "enrichment_failed";
+  return (
+    <div className="flex gap-2.5 text-xs">
+      <div className="flex flex-col items-center shrink-0">
+        <div className={cn(
+          "size-5 rounded-full flex items-center justify-center border shrink-0",
+          isBad ? "bg-amber-500/10 border-amber-500/20 text-amber-400" : "bg-secondary border-border text-muted-foreground",
+        )}>
+          <Icon className="size-2.5" />
+        </div>
+        {!isLast && <div className="w-px flex-1 bg-border/60 mt-1 min-h-[12px]" />}
+      </div>
+      <div className={cn("min-w-0", !isLast && "pb-3")}>
+        <p className="font-medium leading-snug text-foreground">{event.detail ?? event.event}</p>
+        <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
+          <span>{relativeTime(event.created_at)}</span>
+          {event.actor_name && <span>· by {event.actor_name}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main drawer ───────────────────────────────────────────────────────────────
 
 type EditForm = {
@@ -166,6 +222,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   const [freshLead,   setFreshLead  ] = useState<Lead | null>(null);
   const [loadingLead, setLoadingLead] = useState(false);
   const [enrichData,  setEnrichData ] = useState<EnrichStatus | null>(null);
+  const [activity,    setActivity   ] = useState<LeadActivityEvent[]>([]);
   const [retrying,    setRetrying   ] = useState(false);
   const [editing,     setEditing    ] = useState(false);
   const [saving,      setSaving     ] = useState(false);
@@ -215,6 +272,16 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       const json = await res.json() as { success: boolean; data?: EnrichStatus };
       if (activeLeadIdRef.current == null) return;
       if (json.success && json.data) setEnrichData(json.data);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const fetchActivity = useCallback(async (leadId: string) => {
+    try {
+      const tok = await getToken();
+      if (!tok) return;
+      const events = await fetchLeadActivity(tok, leadId);
+      if (activeLeadIdRef.current !== leadId) return;
+      setActivity(events);
     } catch { /* non-fatal */ }
   }, []);
 
@@ -287,13 +354,15 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   }
 
   useEffect(() => {
-    if (!lead) { setFreshLead(null); setEnrichData(null); setEditing(false); return; }
+    if (!lead) { setFreshLead(null); setEnrichData(null); setActivity([]); setEditing(false); return; }
     setFreshLead(null);
     setEnrichData(null);
+    setActivity([]);
     setEditing(false);
     setSaveError("");
     populateForm(lead);
     void fetchFresh(lead);
+    void fetchActivity(lead.id);
     if (lead.orgId) void fetchEnrichStatus(lead.orgId);
   }, [lead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -626,19 +695,23 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                       )}
                     </>
                   )}
-                  {currentStage === "failed" && enrichData?.last_error && (
-                    <div className="flex items-start gap-2 text-xs text-red-400 bg-red-500/5 rounded-lg p-3">
-                      <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
-                      <span>{enrichData.last_error}</span>
+                  {/* Friendly, non-technical status — the raw upstream error
+                      (HTTP 402 dumps etc.) stays server-side in enrichment_logs
+                      and is surfaced app-wide via the API-key banner, not here. */}
+                  {currentStage === "failed" && (
+                    <div className="flex items-start gap-2 text-xs text-muted-foreground bg-secondary/40 rounded-lg p-3">
+                      <AlertCircle className="size-3.5 shrink-0 mt-0.5 text-amber-400" />
+                      <span>
+                        Couldn&apos;t build a company profile (its website couldn&apos;t be read).
+                        This lead can still be emailed using the generic template.
+                        {attempts >= 3 ? " Automatic retries exhausted — use Refresh to try again." : ""}
+                      </span>
                     </div>
                   )}
-                  {currentStage === "failed" && attempts >= 3 && (
-                    <p className="text-[11px] text-muted-foreground text-center">Maximum retry attempts reached.</p>
-                  )}
-                  {(currentStage === "queued" || currentStage === "scraping") && !enrichData?.logs?.length && (
+                  {(currentStage === "queued" || currentStage === "scraping") && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground py-2 justify-center">
                       <Loader2 className="size-3.5 animate-spin" />
-                      {currentStage === "scraping" ? "Scraping website..." : "Waiting to start..."}
+                      {currentStage === "scraping" ? "Reading company website..." : "Waiting to start..."}
                     </div>
                   )}
                   {!display.orgId && (
@@ -646,19 +719,23 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                       No organization linked to this lead.
                     </p>
                   )}
-                  {enrichData?.logs && enrichData.logs.length > 0 && (
-                    <Section icon={Clock} label="Enrichment Log">
-                      <div>
-                        {enrichData.logs.map((log, i) => (
-                          <TimelineItem
-                            key={i}
-                            log={log}
-                            isLast={i === enrichData.logs.length - 1}
-                          />
-                        ))}
-                      </div>
+                </div>
+
+                {/* ── Clean lead activity timeline (Problem 8) ── */}
+                <div className="border-t border-border">
+                  <div className="px-4 pt-4">
+                    <Section icon={Clock} label="Activity">
+                      {activity.length === 0 ? (
+                        <p className="text-xs text-muted-foreground py-1">No activity yet.</p>
+                      ) : (
+                        <div>
+                          {activity.map((ev, i) => (
+                            <ActivityItem key={i} event={ev} isLast={i === activity.length - 1} />
+                          ))}
+                        </div>
+                      )}
                     </Section>
-                  )}
+                  </div>
                 </div>
               </div>
 

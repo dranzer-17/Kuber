@@ -6,7 +6,15 @@ const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 interface CompletionOpts {
   system: string;
   user: string;
+  // Cap the response size. Without this, OpenRouter defaults to the model's
+  // full context (e.g. 65536) and, on low balance, rejects the request with a
+  // 402 "requires more credits, or fewer max_tokens" even though the actual
+  // output is tiny — the exact failure seen in enrichment logs. Extraction
+  // needs a small JSON object; drafting needs a bit more.
+  maxTokens?: number;
 }
+
+const DEFAULT_MAX_TOKENS = 2048;
 
 export interface LlmResult<T> {
   json: T;
@@ -71,6 +79,7 @@ async function callOpenRouter(opts: CompletionOpts): Promise<object> {
   const model = process.env.LLM_PRIMARY_MODEL ?? "anthropic/claude-sonnet-4-6";
   const payload: Record<string, unknown> = {
     model,
+    max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
     messages: [
       { role: "system", content: opts.system },
       { role: "user", content: opts.user },
@@ -108,6 +117,7 @@ async function callOpenAI(opts: CompletionOpts): Promise<object> {
     },
     body: JSON.stringify({
       model,
+      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: opts.system },
