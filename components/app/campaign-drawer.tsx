@@ -236,7 +236,7 @@ function DraftStatusBadge({
   return (
     <span
       className={cn(
-        "text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0",
+        "font-mono text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md shrink-0",
         "inline-flex items-center justify-center gap-1",
         styleClass,
       )}
@@ -282,7 +282,7 @@ function OutboxMessageRow({
           {snippet || "(empty message)"}
         </span>
         {timestamp && (
-          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
             {format(new Date(timestamp), "MMM d")}
           </span>
         )}
@@ -303,7 +303,7 @@ function OutboxMessageRow({
           <p className="text-xs text-muted-foreground truncate">to {toLabel}</p>
         </div>
         {timestamp && (
-          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
             {format(new Date(timestamp), "MMM d, h:mm a")}
           </span>
         )}
@@ -1261,7 +1261,7 @@ export function CampaignDetail({
             </div>
           ) : (
             <div className="flex items-center gap-1.5 min-w-0 group/name">
-              <h1 className="text-sm font-semibold text-foreground truncate min-w-0">{campaignName}</h1>
+              <h1 className="font-display text-sm font-semibold text-foreground truncate min-w-0">{campaignName}</h1>
               <button
                 type="button"
                 onClick={() => { setNameDraft(campaignName); setEditingName(true); }}
@@ -1354,8 +1354,8 @@ export function CampaignDetail({
               {/* Chart grid */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* Pipeline donut + legend */}
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Pipeline</p>
+                <div className="swatch-bar-top rounded-xl border border-border bg-card p-4">
+                  <p className="eyebrow mb-2">Pipeline</p>
                   <div className="flex items-center gap-3">
                     <ResponsiveContainer width="45%" height={140}>
                       <PieChart>
@@ -1381,7 +1381,7 @@ export function CampaignDetail({
                             <span className="size-2 rounded-full shrink-0" style={{ background: s.fill, opacity: s.opacity }} />
                             <span className="truncate">{s.name}</span>
                           </span>
-                          <span className="font-semibold tabular-nums shrink-0">{s.value}</span>
+                          <span className="font-mono font-semibold tabular-nums shrink-0">{s.value}</span>
                         </div>
                       ))}
                     </div>
@@ -1389,8 +1389,8 @@ export function CampaignDetail({
                 </div>
 
                 {/* Draft funnel bar chart */}
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Draft funnel</p>
+                <div className="swatch-bar-top rounded-xl border border-border bg-card p-4">
+                  <p className="eyebrow mb-2">Draft funnel</p>
                   {report ? (
                     <ResponsiveContainer width="100%" height={140}>
                       <BarChart data={funnelData} margin={{ top: 8, right: 4, left: -28, bottom: 0 }}>
@@ -1421,8 +1421,8 @@ export function CampaignDetail({
                 </div>
 
                 {/* Lead temperature donut + legend */}
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Lead temperature</p>
+                <div className="swatch-bar-top rounded-xl border border-border bg-card p-4">
+                  <p className="eyebrow mb-2">Lead temperature</p>
                   <div className="flex items-center gap-3">
                     <ResponsiveContainer width="45%" height={140}>
                       <PieChart>
@@ -1448,7 +1448,7 @@ export function CampaignDetail({
                             <span className="size-2 rounded-full shrink-0" style={{ background: s.fill, opacity: s.opacity }} />
                             <span className="truncate">{s.name}</span>
                           </span>
-                          <span className="font-semibold tabular-nums shrink-0">{s.value}</span>
+                          <span className="font-mono font-semibold tabular-nums shrink-0">{s.value}</span>
                         </div>
                       ))}
                     </div>
@@ -1594,12 +1594,12 @@ export function CampaignDetail({
                 <table className="w-full text-sm border-collapse">
                   <thead className="sticky top-0 z-10 bg-secondary/60 backdrop-blur-sm">
                     <tr className="border-b border-border">
-                      <th className="w-8 px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">#</th>
-                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Name</th>
-                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Email</th>
-                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Job Title</th>
-                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold border-r border-border">Status</th>
-                      <th className="px-6 py-2.5 text-left text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Company</th>
+                      <th className="w-8 px-6 py-2.5 text-left eyebrow border-r border-border">#</th>
+                      <th className="px-6 py-2.5 text-left eyebrow border-r border-border">Name</th>
+                      <th className="px-6 py-2.5 text-left eyebrow border-r border-border">Email</th>
+                      <th className="px-6 py-2.5 text-left eyebrow border-r border-border">Job Title</th>
+                      <th className="px-6 py-2.5 text-left eyebrow border-r border-border">Status</th>
+                      <th className="px-6 py-2.5 text-left eyebrow">Company</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1612,14 +1612,14 @@ export function CampaignDetail({
                           onClick={() => handleOpenInOutbox(cl.id)}
                           className="group cursor-pointer transition-colors hover:bg-secondary/40"
                         >
-                          <td className="w-8 px-6 py-3 text-xs text-muted-foreground tabular-nums border-r border-border">{index + 1}</td>
+                          <td className="w-8 px-6 py-3 font-mono text-xs text-muted-foreground tabular-nums border-r border-border">{index + 1}</td>
                           <td className="px-6 py-3 border-r border-border">
                             <div className="flex items-center gap-2">
                               <Avatar name={name} size="sm" />
                               <span className="font-medium truncate max-w-[140px]">{name}</span>
                             </div>
                           </td>
-                          <td className="px-6 py-3 text-xs text-muted-foreground border-r border-border">
+                          <td className="px-6 py-3 font-mono text-xs text-muted-foreground border-r border-border">
                             <span className="whitespace-nowrap">{lead?.email}</span>
                           </td>
                           <td className="px-6 py-3 text-xs text-muted-foreground border-r border-border">
@@ -1664,7 +1664,7 @@ export function CampaignDetail({
                                 }
 
                                 return pills.map(({ label, cls }) => (
-                                  <span key={label} className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap", cls)}>
+                                  <span key={label} className={cn("inline-flex items-center px-2 py-0.5 rounded-md font-mono text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap", cls)}>
                                     {label}
                                   </span>
                                 ));
@@ -1932,8 +1932,8 @@ export function CampaignDetail({
                   <div className="flex items-center gap-3 min-w-0">
                     <Avatar name={[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "?"} size="sm" />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">{[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "Unknown"}</p>
-                      <p className="text-xs text-muted-foreground truncate">{selected.leads?.email}</p>
+                      <p className="font-display text-sm font-semibold text-foreground truncate">{[selected.leads?.first_name, selected.leads?.last_name].filter(Boolean).join(" ") || "Unknown"}</p>
+                      <p className="font-mono text-xs text-muted-foreground truncate">{selected.leads?.email}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -1947,7 +1947,7 @@ export function CampaignDetail({
                       const temp = selectedThread.latest_temperature ?? "neutral";
                       const badge = TEMP_BADGE[temp] ?? TEMP_BADGE.neutral;
                       return (
-                        <span className={cn("text-xs font-semibold uppercase px-2.5 py-1 rounded-full border inline-flex items-center gap-1", badge.cls)}>
+                        <span className={cn("font-mono text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md border inline-flex items-center gap-1", badge.cls)}>
                           {badge.icon}{badge.label}
                         </span>
                       );
@@ -1964,7 +1964,7 @@ export function CampaignDetail({
                 ) : selected.email_drafts && selected.email_drafts.status !== "sent" ? (
                   <div className="max-w-2xl mx-auto rounded-xl border border-border bg-card p-5 space-y-4">
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
+                      <Label className="eyebrow">Subject</Label>
                       <Input
                         value={editSubject}
                         onChange={(e) => setEditSubject(e.target.value)}
@@ -1973,7 +1973,7 @@ export function CampaignDetail({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Body</Label>
+                      <Label className="eyebrow">Body</Label>
                       <RichTextEditor
                         value={editBody}
                         onChange={setEditBody}
@@ -2096,7 +2096,7 @@ export function CampaignDetail({
                               type="button"
                               onClick={() => loadVersionPreview(v)}
                               className={cn(
-                                "text-xs rounded-lg border px-2.5 py-1.5 transition-colors",
+                                "font-mono text-xs rounded-md border px-2.5 py-1.5 transition-colors",
                                 (previewVersionId === v.id || (!previewVersionId && v.id === selected.email_drafts?.id))
                                   ? "border-primary bg-primary/10 text-primary"
                                   : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
@@ -2261,18 +2261,18 @@ export function CampaignDetail({
                     className={cn(
                       "border rounded-lg p-4 text-left cursor-pointer transition-all w-full",
                       isActive
-                        ? "border-primary bg-primary/10"
+                        ? "swatch-bar border-primary bg-primary/10"
                         : "border-border bg-card hover:bg-secondary/40 hover:border-primary/40",
                     )}
                   >
-                    <p className={cn("text-sm font-semibold mb-0.5", isActive ? "text-primary" : "text-foreground")}>
+                    <p className={cn("font-display text-sm font-semibold mb-0.5", isActive ? "text-primary" : "text-foreground")}>
                       Step {displayStep}
                     </p>
                     {subtitle && (
                       <p className={cn("text-xs truncate mb-1", isActive ? "text-primary/80" : "text-muted-foreground")}>{subtitle}</p>
                     )}
                     {prevStep && prevStep.delay > 0 && (
-                      <p className={cn("text-[11px]", isActive ? "text-primary/60" : "text-muted-foreground/70")}>
+                      <p className={cn("font-mono text-[11px] tabular-nums", isActive ? "text-primary/60" : "text-muted-foreground/70")}>
                         Send {prevStep.delay} {prevStep.delay_unit} after previous
                       </p>
                     )}
@@ -2293,13 +2293,13 @@ export function CampaignDetail({
                 {/* Header */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-foreground">
+                    <span className="font-display text-sm font-semibold text-foreground">
                       Step {sequenceDisplayStep(activeSeqStep.step_order)}
                     </span>
                     {(() => {
                       const prev = campaignSteps.find((p) => p.step_order === activeSeqStep.step_order - 1);
                       return prev && prev.delay > 0 ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                        <span className="font-mono text-[10px] tabular-nums px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
                           Sends {prev.delay} {prev.delay_unit} after previous
                         </span>
                       ) : null;
@@ -2342,7 +2342,7 @@ export function CampaignDetail({
                     ) : (
                       <>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subject</Label>
+                      <Label className="eyebrow">Subject</Label>
                       <Input
                         value={seqSubjectEdit}
                         onChange={(e) => setSeqSubjectEdit(e.target.value)}
@@ -2351,7 +2351,7 @@ export function CampaignDetail({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Body</Label>
+                      <Label className="eyebrow">Body</Label>
                       <RichTextEditor
                         value={seqBodyEdit}
                         onChange={setSeqBodyEdit}
