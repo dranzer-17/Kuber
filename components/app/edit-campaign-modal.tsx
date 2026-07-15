@@ -172,7 +172,7 @@ export function EditCampaignForm({
           className={cn("flex items-center shrink-0", isPage ? "gap-2" : "w-full")}
         >
           {isPage ? (
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary tabular-nums">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-xs font-semibold text-primary tabular-nums">
               {idx + 1}
             </span>
           ) : null}
@@ -194,7 +194,7 @@ export function EditCampaignForm({
                 const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
                 setFollowupSteps((prev) => prev.map((s, i) => i === idx ? { ...s, delay: v } : s));
               }}
-              className="h-7 w-12 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+              className="h-7 w-12 text-center border-0 bg-transparent p-0 text-sm font-mono font-medium tabular-nums focus-visible:ring-0"
             />
             <Select
               value={step.delay_unit}
@@ -255,6 +255,7 @@ export function EditCampaignForm({
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left: identity & AI */}
           <div className="space-y-6 lg:col-span-2">
+            <p className="eyebrow -mb-3">Identity &amp; AI</p>
             <div className={fieldBlock}>
               <Label className="text-sm font-medium">Sender name</Label>
               <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
@@ -274,7 +275,9 @@ export function EditCampaignForm({
           </div>
 
           {/* Right: schedule & limits — one compact card, no dead space */}
-          <div className="flex flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden lg:col-span-3">
+          <div className="lg:col-span-3">
+          <p className="eyebrow mb-2">Schedule &amp; limits</p>
+          <div className="flex flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0 border-b border-border">
               <div className="flex flex-col justify-center gap-3 px-5 py-4 sm:border-r border-border">
                 <div className="flex items-center gap-2.5">
@@ -290,7 +293,7 @@ export function EditCampaignForm({
                   max={500}
                   value={dailyLimit}
                   onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                  className="h-9 w-24 text-center"
+                  className="h-9 w-24 text-center font-mono tabular-nums"
                 />
               </div>
 
@@ -330,18 +333,22 @@ export function EditCampaignForm({
               </div>
             </div>
           </div>
+          </div>
         </div>
 
         {/* Full width: follow-up schedule */}
-        <div className={cn(fieldBlock, "space-y-3")}>
-          <div>
-            <div className="flex items-center gap-2">
-              <Clock className="size-4 text-muted-foreground shrink-0" />
-              <Label className="text-sm font-medium">Follow-up schedule</Label>
+        <div>
+          <p className="eyebrow mb-2">Follow-up schedule</p>
+          <div className={cn(fieldBlock, "space-y-3")}>
+            <div>
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-muted-foreground shrink-0" />
+                <Label className="text-sm font-medium">Follow-up schedule</Label>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Wait time after the previous email before each follow-up sends</p>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">Wait time after the previous email before each follow-up sends</p>
+            {followupList}
           </div>
-          {followupList}
         </div>
 
         <div className="flex justify-end">
@@ -392,7 +399,7 @@ export function EditCampaignForm({
               max={500}
               value={dailyLimit}
               onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-              className="h-9 w-24 text-center"
+              className="h-9 w-24 text-center font-mono tabular-nums"
             />
           </div>
 
@@ -419,12 +426,12 @@ export function EditCampaignForm({
               <p className="text-sm font-medium leading-none">Timezone</p>
             </div>
             <Select value={timezone} onValueChange={setTimezone}>
-              <SelectTrigger className="h-9 w-full sm:w-45">
+              <SelectTrigger className="h-9 w-full sm:w-45 font-mono">
                 <SelectValue placeholder="Select timezone" />
               </SelectTrigger>
               <SelectContent align="start" className="min-w-45">
                 {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((tz) => (
-                  <SelectItem key={tz} value={tz}>{tz}</SelectItem>
+                  <SelectItem key={tz} value={tz} className="font-mono">{tz}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -492,9 +499,9 @@ export function EditCampaignModal({
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-3xl overflow-hidden p-0">
-        <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
-          <p className="text-xs text-muted-foreground mb-1">Editing · {campaign.name}</p>
-          <DialogTitle className="text-xl">Edit campaign</DialogTitle>
+        <DialogHeader className="swatch-bar-top border-b border-border px-6 pt-6 pb-4 text-left">
+          <p className="eyebrow mb-1">Editing · {campaign.name}</p>
+          <DialogTitle className="font-display text-xl">Edit campaign</DialogTitle>
         </DialogHeader>
 
         <div className="max-h-[68vh] overflow-y-auto px-6 py-5">
