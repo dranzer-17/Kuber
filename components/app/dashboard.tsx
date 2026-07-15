@@ -13,7 +13,11 @@ import { cn } from "@/lib/utils";
 import { getBatchColor } from "@/lib/constants";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import type { ImportBatch } from "@/lib/api-client";
+import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Card } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
+import { Button } from "@/components/ui/button";
 
 // ─── Chart helpers ────────────────────────────────────────────────────────────
 
@@ -33,47 +37,25 @@ function ChartTooltip({ active, payload, label }: {
         <div key={p.name} className="flex items-center gap-2">
           <span className="size-1.5 rounded-full shrink-0 bg-primary" />
           <span className="text-muted-foreground">{p.name}:</span>
-          <span className="font-semibold text-foreground tabular-nums">{p.value}</span>
+          <span className="font-mono font-semibold text-foreground tabular-nums">{p.value}</span>
         </div>
       ))}
     </div>
   );
 }
 
-function StatCard({
-  title, value, icon: Icon, trend, highlight = false, loading = false,
-}: {
-  title: string; value: string | number;
-  icon: React.ElementType; trend: string;
-  highlight?: boolean; loading?: boolean;
-}) {
+/** Eyebrow + font-display title + hairline divider — the standard section header. */
+function SectionHeader({
+  eyebrow, title, sub, icon: Icon,
+}: { eyebrow: string; title: string; sub?: string; icon?: React.ElementType }) {
   return (
-    <div className={cn(
-      "rounded-xl border p-5 transition-all hover:border-primary/30",
-      highlight ? "bg-primary border-primary" : "bg-card border-border",
-    )}>
-      <div className={cn(
-        "w-fit p-2 rounded-lg mb-4 border",
-        highlight ? "bg-primary-foreground/20 border-primary-foreground/20" : "bg-secondary border-border",
-      )}>
-        <Icon className={cn("size-4", highlight ? "text-primary-foreground" : "text-muted-foreground")} />
+    <div className="flex items-center justify-between gap-3 pb-3 mb-4 border-b border-border">
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <h3 className="font-display text-base font-semibold mt-0.5">{title}</h3>
+        {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
       </div>
-      {loading ? (
-        <div className={cn(
-          "h-9 w-16 rounded mb-1 animate-pulse",
-          highlight ? "bg-primary-foreground/20" : "bg-secondary/60",
-        )} />
-      ) : (
-        <div className={cn("text-3xl font-bold mb-1 tabular-nums", highlight ? "text-primary-foreground" : "text-foreground")}>
-          {value}
-        </div>
-      )}
-      <div className={cn("text-sm font-medium mb-0.5", highlight ? "text-primary-foreground/80" : "text-foreground/80")}>
-        {title}
-      </div>
-      <div className={cn("text-xs", highlight ? "text-primary-foreground/50" : "text-muted-foreground")}>
-        {trend}
-      </div>
+      {Icon && <Icon className="size-4 text-muted-foreground/60 shrink-0" />}
     </div>
   );
 }
@@ -115,44 +97,37 @@ export function DashboardView({
   const totalReplied  = campaigns.reduce((a, c) => a + c.replied, 0);
   const replyRate     = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0;
 
-  return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto">
+  const pulse = (w: string) => <span className={cn("inline-block h-6 rounded bg-secondary/60 animate-pulse", w)} />;
 
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Overview</p>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-card border border-border rounded-lg px-3 py-2">
+  return (
+    <div className="enter p-8 space-y-6 max-w-7xl mx-auto">
+
+      {/* Upstream credit/API-key failures (OpenRouter/Firecrawl/Apollo). */}
+      <ServiceHealthBanner />
+
+      {/* ── Compact identity strip (section title already lives in the shell top bar) ── */}
+      <div className="flex items-center justify-between pb-3 border-b border-border">
+        <p className="eyebrow">Overview · Pipeline console</p>
+        <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
           <Calendar className="size-3.5" />
           {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
         </div>
       </div>
 
-      {/* ── Stat cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatCard title="Total Leads"    value={totalLeads}      icon={Users}     trend={`${totalLeads} in pipeline`}                                        highlight loading={loading} />
-        <StatCard title="Hot Leads"      value={hotLeads}        icon={TrendingUp} trend={`${Math.round(hotLeads / Math.max(totalLeads,1) * 100)}% of total`} loading={loading} />
-        <StatCard title="Emails Sent"    value={totalSent}       icon={Mail}      trend={`${campaigns.length} campaigns`}                                     loading={loading} />
-        <StatCard title="Reply Rate"     value={`${replyRate}%`} icon={Activity}  trend={`${totalReplied} replies total`}                                     loading={loading} />
-        <StatCard title="Live Campaigns" value={liveCampaigns}   icon={Megaphone} trend={`${campaigns.length} total created`}                                 loading={loading} />
-        <StatCard title="Enriched"       value={enrichedLeads}   icon={Zap}       trend={`${Math.round(enrichedLeads / Math.max(totalLeads,1) * 100)}% done`} loading={loading} />
-      </div>
+      {/* ── Hero panel + secondary-stats rail (asymmetric 2/3 · 1/3) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-      {/* ── Charts row ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-
-        {/* Pipeline Growth */}
-        <div className="bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-5">
+        {/* Hero: pipeline growth is the primary metric — headline number + trend chart */}
+        <Card swatch="left" className="lg:col-span-2 p-6">
+          <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b border-border">
             <div>
-              <h3 className="text-sm font-semibold">Pipeline Growth</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Cumulative leads over 6 months</p>
+              <p className="eyebrow">Pipeline · 6mo trend</p>
+              <p className="font-mono text-4xl font-bold tabular-nums mt-1 leading-none">
+                {loading ? pulse("w-20 h-9") : totalLeads}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1.5">Total leads in pipeline, cumulative over 6 months</p>
             </div>
-            <div className="p-2 rounded-lg border border-border bg-secondary">
-              <TrendingUp className="size-3.5 text-muted-foreground" />
-            </div>
+            <TrendingUp className="size-4 text-muted-foreground/60 shrink-0 mt-1" />
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={pipelineGrowth} margin={{ left: -10, right: 4, top: 4, bottom: 0 }}>
@@ -174,19 +149,44 @@ export function DashboardView({
               />
             </AreaChart>
           </ResponsiveContainer>
+        </Card>
+
+        {/* Secondary-stats rail: compact stacked tiles, 1/3 width */}
+        <div className="flex flex-col gap-3">
+          <StatTile
+            layout="row" label="Hot Leads" icon={TrendingUp} tone="red"
+            value={loading ? pulse("w-10") : hotLeads}
+            sub={`${Math.round(hotLeads / Math.max(totalLeads, 1) * 100)}% of total`}
+          />
+          <StatTile
+            layout="row" label="Emails Sent" icon={Mail} tone="sky"
+            value={loading ? pulse("w-12") : totalSent}
+            sub={`${campaigns.length} campaigns`}
+          />
+          <StatTile
+            layout="row" label="Reply Rate" icon={Activity} tone="amber"
+            value={loading ? pulse("w-10") : `${replyRate}%`}
+            sub={`${totalReplied} replies total`}
+          />
+          <StatTile
+            layout="row" label="Live Campaigns" icon={Megaphone} tone="neutral"
+            value={loading ? pulse("w-8") : liveCampaigns}
+            sub={`${campaigns.length} total created`}
+          />
+          <StatTile
+            layout="row" label="Enriched" icon={Zap} tone="zinc"
+            value={loading ? pulse("w-12") : enrichedLeads}
+            sub={`${Math.round(enrichedLeads / Math.max(totalLeads, 1) * 100)}% done`}
+          />
         </div>
+      </div>
+
+      {/* ── Secondary charts row ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
         {/* Stage distribution */}
-        <div className="bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-sm font-semibold">Stage Distribution</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Leads across pipeline stages</p>
-            </div>
-            <div className="p-2 rounded-lg border border-border bg-secondary">
-              <PieIcon className="size-3.5 text-muted-foreground" />
-            </div>
-          </div>
+        <Card className="p-6">
+          <SectionHeader eyebrow="Breakdown" title="Stage Distribution" sub="Leads across pipeline stages" icon={PieIcon} />
           {stageDonutData.length === 0 ? (
             <EmptyState
               boxed={false}
@@ -215,31 +215,19 @@ export function DashboardView({
                     <div key={d.name} className="flex items-center gap-2">
                       <span className="size-2 rounded-full shrink-0" style={{ background: d.color }} />
                       <span className="text-xs text-muted-foreground flex-1 truncate">{d.name}</span>
-                      <span className="text-xs font-semibold tabular-nums">{d.value}</span>
-                      <span className="text-[10px] text-muted-foreground/50 w-6 text-right tabular-nums">{pct}%</span>
+                      <span className="font-mono text-xs font-semibold tabular-nums">{d.value}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground/50 w-6 text-right tabular-nums">{pct}%</span>
                     </div>
                   );
                 })}
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* ── Reply activity row ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        </Card>
 
         {/* Reply Temperature */}
-        <div className="bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-sm font-semibold">Reply Temperature</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">How prospects who replied were classified</p>
-            </div>
-            <div className="p-2 rounded-lg border border-border bg-secondary">
-              <PieIcon className="size-3.5 text-muted-foreground" />
-            </div>
-          </div>
+        <Card className="p-6">
+          <SectionHeader eyebrow="Classification" title="Reply Temperature" sub="How prospects who replied were classified" icon={PieIcon} />
           {!temperatureBreakdown || Object.values(temperatureBreakdown).every((v) => v === 0) ? (
             <div className="h-[140px] flex items-center justify-center text-xs text-muted-foreground">
               No replies classified yet
@@ -270,8 +258,8 @@ export function DashboardView({
                       <div key={d.name} className="flex items-center gap-2">
                         <span className="size-2 rounded-full shrink-0" style={{ background: d.color }} />
                         <span className="text-xs text-muted-foreground flex-1 truncate">{d.name}</span>
-                        <span className="text-xs font-semibold tabular-nums">{d.value}</span>
-                        <span className="text-[10px] text-muted-foreground/50 w-8 text-right tabular-nums">
+                        <span className="font-mono text-xs font-semibold tabular-nums">{d.value}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground/50 w-8 text-right tabular-nums">
                           {Math.round((d.value / Math.max(total, 1)) * 100)}%
                         </span>
                       </div>
@@ -281,57 +269,43 @@ export function DashboardView({
               );
             })()
           )}
-        </div>
+        </Card>
+      </div>
 
-        {/* Needs Your Review */}
-        <div className="bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-sm font-semibold">Needs Your Review</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Reply drafts waiting for approval, across all campaigns</p>
-            </div>
-            <div className="p-2 rounded-lg border border-border bg-secondary">
-              <Mail className="size-3.5 text-muted-foreground" />
-            </div>
-          </div>
-          {pendingReplies.length === 0 ? (
-            <div className="h-[140px] flex items-center justify-center text-xs text-muted-foreground">
-              No replies waiting for review
-            </div>
-          ) : (
-            <div className="space-y-1 max-h-[220px] overflow-y-auto">
-              {pendingReplies.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => onNavigate("campaigns")}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-secondary/50 transition-colors"
-                >
+      {/* ── Needs Your Review — full-width list section, distinct from the chart cards above ── */}
+      <div>
+        <SectionHeader eyebrow="Approvals" title="Needs Your Review" sub="Reply drafts waiting for approval, across all campaigns" icon={Mail} />
+        {pendingReplies.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4">No replies waiting for review</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {pendingReplies.map((r) => (
+              <Button
+                key={r.id}
+                type="button"
+                variant="ghost"
+                onClick={() => onNavigate("campaigns")}
+                className="w-full h-auto justify-start text-left px-3 py-2.5 rounded-md font-normal"
+              >
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-medium truncate">{r.leadEmail ?? "Unknown lead"}</p>
+                    <p className="font-mono text-xs font-medium truncate">{r.leadEmail ?? "Unknown lead"}</p>
                     <span className="text-[10px] text-muted-foreground shrink-0">{r.campaignName}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground truncate">{r.preview}</p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+                </div>
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Bottom row ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
         {/* Batches */}
-        <div className="lg:col-span-2 bg-card border border-border rounded-xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-sm font-semibold">Batches</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Click a batch to view its leads</p>
-            </div>
-            <div className="p-2 rounded-lg border border-border bg-secondary">
-              <Tags className="size-3.5 text-muted-foreground" />
-            </div>
-          </div>
+        <Card swatch="left" className="lg:col-span-2 p-6">
+          <SectionHeader eyebrow="Imports" title="Batches" sub="Click a batch to view its leads" icon={Tags} />
           {imports.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">
               No batches yet. Import leads from Apollo, Excel, or manual entry to create one.
@@ -341,41 +315,44 @@ export function DashboardView({
               {imports.map((b) => {
                 const bc = getBatchColor(b.color);
                 return (
-                  <button
+                  <Button
                     key={b.id}
                     type="button"
+                    variant="ghost"
                     onClick={() => onSelectBatch(b.label)}
-                    className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-secondary/50 transition-colors text-left"
+                    className="w-full h-auto justify-start gap-3 p-3 rounded-lg font-normal"
                   >
                     <span className={cn("size-2.5 rounded-full shrink-0", bc.bg)} />
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 text-left">
                       <p className="text-sm font-medium truncate">{b.label}</p>
                       <p className="text-xs text-muted-foreground truncate capitalize">{b.source}</p>
                     </div>
-                    <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-medium whitespace-nowrap shrink-0", bc.pill)}>
+                    <span className={cn("inline-flex items-center px-2.5 py-1 rounded-full border font-mono text-xs font-medium whitespace-nowrap shrink-0 tabular-nums", bc.pill)}>
                       {b.lead_count} lead{b.lead_count !== 1 ? "s" : ""}
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Right column */}
         <div className="space-y-4">
 
-          <div className="bg-primary border border-primary rounded-xl p-5">
+          <div className="swatch-bar-top overflow-hidden bg-primary border border-primary rounded-xl p-5">
             <Award className="size-7 text-primary-foreground/80 mb-3" />
-            <h3 className="text-sm font-semibold text-primary-foreground mb-1">Pipeline overview</h3>
+            <p className="eyebrow text-primary-foreground/60">Summary</p>
+            <h3 className="font-display text-sm font-semibold text-primary-foreground mb-1 mt-0.5">Pipeline overview</h3>
             <p className="text-xs text-primary-foreground/60 leading-relaxed">
-              {hotLeads} hot leads · {totalSent} emails sent · {replyRate}% reply rate.
+              <span className="font-mono tabular-nums">{hotLeads}</span> hot leads · <span className="font-mono tabular-nums">{totalSent}</span> emails sent · <span className="font-mono tabular-nums">{replyRate}%</span> reply rate.
               Keep enriching and following up to close your pipeline.
             </p>
           </div>
 
-          <div className="bg-card border border-border rounded-xl p-5 space-y-4">
-            <h3 className="text-sm font-semibold">Monthly Goals</h3>
+          <Card className="p-5 space-y-4">
+            <p className="eyebrow">Targets</p>
+            <h3 className="font-display text-sm font-semibold -mt-2.5">Monthly Goals</h3>
             {[
               { label: "Leads Added", current: totalLeads,   goal: 50  },
               { label: "Emails Sent", current: totalSent,    goal: 100 },
@@ -384,7 +361,7 @@ export function DashboardView({
               <div key={item.label}>
                 <div className="flex justify-between text-xs mb-1.5">
                   <span className="text-muted-foreground">{item.label}</span>
-                  <span className="text-muted-foreground font-medium tabular-nums">{item.current}/{item.goal}</span>
+                  <span className="text-muted-foreground font-mono font-medium tabular-nums">{item.current}/{item.goal}</span>
                 </div>
                 <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div
@@ -394,12 +371,15 @@ export function DashboardView({
                 </div>
               </div>
             ))}
-          </div>
+          </Card>
 
-          <div className="bg-card border border-border rounded-xl p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <BarChart2 className="size-3.5 text-muted-foreground" />
-              <h3 className="text-sm font-semibold">Suggested Actions</h3>
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="eyebrow">Next up</p>
+                <h3 className="font-display text-sm font-semibold mt-0.5">Suggested Actions</h3>
+              </div>
+              <BarChart2 className="size-3.5 text-muted-foreground/60 shrink-0" />
             </div>
             <ul className="space-y-2.5 text-xs text-muted-foreground">
               {[
@@ -418,7 +398,7 @@ export function DashboardView({
                 </li>
               ))}
             </ul>
-          </div>
+          </Card>
         </div>
       </div>
     </div>

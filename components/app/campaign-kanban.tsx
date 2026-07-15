@@ -40,8 +40,8 @@ export function CampaignKanban({
   retryingId?: string | null;
 }) {
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <p className="text-[11px] text-muted-foreground px-4 pt-2 shrink-0">
+    <div className="enter flex flex-col flex-1 min-h-0">
+      <p className="eyebrow px-4 pt-2 shrink-0">
         Click a lead to open in Leads view for review and certification.
       </p>
       <div className="flex gap-2 overflow-x-auto pb-4 min-h-0 flex-1 p-2">
@@ -56,10 +56,10 @@ export function CampaignKanban({
                 minWidth: "180px",
               }}
             >
-              <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
+              <div className={cn("swatch-bar overflow-hidden flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)}>
                 <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
-                <span className="text-xs font-semibold truncate">{col.label}</span>
-                <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0">
+                <span className="eyebrow truncate text-foreground/80!">{col.label}</span>
+                <span className="ml-auto font-mono text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0">
                   {colLeads.length}
                 </span>
               </div>
@@ -74,9 +74,9 @@ export function CampaignKanban({
                     <div
                       key={cl.id}
                       className={cn(
-                        "rounded-lg border bg-card p-2.5 cursor-pointer transition-colors",
+                        "rounded-lg border bg-card p-2.5 cursor-pointer transition-colors overflow-hidden",
                         isFailed ? "border-red-500/50" : "border-border",
-                        isSelected ? "ring-1 ring-primary/50 bg-primary/5" : "hover:bg-secondary/40",
+                        isSelected ? "swatch-bar ring-1 ring-primary/50 bg-primary/5" : "hover:bg-secondary/40",
                       )}
                       onClick={() => onSelect(cl.id)}
                       onKeyDown={(e) => {
@@ -92,7 +92,7 @@ export function CampaignKanban({
                         <Avatar name={name} size="sm" />
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-medium truncate">{name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">
+                          <p className="font-mono text-[10px] text-muted-foreground truncate">
                             {lead?.title || lead?.email}
                           </p>
                         </div>

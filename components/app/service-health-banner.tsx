@@ -5,9 +5,9 @@ import { AlertTriangle } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { fetchServiceHealth, type ServiceIssue } from "@/lib/api-client";
 
-// Red banner shown on Leads/Kanban when a paid upstream (OpenRouter, Firecrawl,
-// Apollo, OpenAI) is failing on credits/auth — so a dead API key surfaces as a
-// clear, actionable message instead of a raw HTTP 402 buried in a lead's log.
+// Red banner for the dashboard — surfaces paid upstream failures (OpenRouter,
+// Firecrawl, Apollo, OpenAI) so dead API keys / empty credit balances show as
+// clear, actionable messages instead of raw HTTP 402s buried in lead logs.
 export function ServiceHealthBanner() {
   const { session } = useApp();
   const [issues, setIssues] = useState<ServiceIssue[]>([]);
@@ -28,7 +28,7 @@ export function ServiceHealthBanner() {
   if (issues.length === 0) return null;
 
   return (
-    <div className="px-8 pt-3 space-y-2">
+    <div className="space-y-2">
       {issues.map((issue) => (
         <div
           key={issue.service}

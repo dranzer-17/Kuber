@@ -138,24 +138,24 @@ function RichTextEditor({
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center gap-1 border-b border-border bg-secondary/20 p-1.5">
-          <span className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground">
-            <Type className="size-3.5" /> Compose
+      <div className="overflow-hidden rounded-md border border-border bg-card">
+        <div className="flex flex-wrap items-center gap-1 border-b border-border bg-secondary/30 px-2 py-1">
+          <span className="eyebrow inline-flex h-7 items-center gap-1.5 px-1">
+            <Type className="size-3" /> Compose
           </span>
-          <div className="mx-1 h-5 w-px bg-border" />
+          <div className="mx-1 h-4 w-px bg-border" />
           {toolbar.map(({ label: lbl, icon: Icon, command }) => (
-            <button key={command} type="button" aria-label={lbl} title={lbl}
+            <Button key={command} type="button" variant="ghost" size="icon-sm" aria-label={lbl} title={lbl}
               onMouseDown={(e) => e.preventDefault()} onClick={() => runCommand(command)}
-              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-              <Icon className="size-4" />
-            </button>
+              className="text-muted-foreground hover:text-foreground">
+              <Icon className="size-3.5" />
+            </Button>
           ))}
-          <button type="button" aria-label="Add link" title="Add link"
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Add link" title="Add link"
             onMouseDown={(e) => e.preventDefault()} onClick={addLink}
-            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-            <Link2 className="size-4" />
-          </button>
+            className="text-muted-foreground hover:text-foreground">
+            <Link2 className="size-3.5" />
+          </Button>
         </div>
         <div ref={editorRef} role="textbox" aria-label={label} aria-multiline="true"
           contentEditable suppressContentEditableWarning data-placeholder={placeholder}
@@ -164,6 +164,28 @@ function RichTextEditor({
           style={{ minHeight }} />
       </div>
       {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
+    </div>
+  );
+}
+
+// A single settings field laid out as label+description on the left and the
+// actual control on the right, instead of label-above-control stacked in one
+// column. Used throughout Profile / Knowledge Sources / Appearance / Account
+// for compact fields; large canvases (rich-text prompts, textareas) stay
+// full-width below their own header since cramming them into a narrow right
+// column would hurt usability.
+function SettingsRow({
+  label, description, children, htmlFor,
+}: {
+  label: string; description?: React.ReactNode; children: React.ReactNode; htmlFor?: string;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-2 py-5 border-b border-border last:border-0 sm:grid-cols-3 sm:gap-6">
+      <div className="sm:col-span-1">
+        <Label htmlFor={htmlFor} className="text-sm font-medium text-foreground">{label}</Label>
+        {description && <p className="text-xs text-muted-foreground mt-1">{description}</p>}
+      </div>
+      <div className="sm:col-span-2 min-w-0">{children}</div>
     </div>
   );
 }
@@ -204,9 +226,10 @@ function AvailabilityCard() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-between gap-4">
+    <div className="border-t border-border pt-6 flex items-center justify-between gap-4">
       <div className="min-w-0">
-        <p className="text-sm font-medium flex items-center gap-2">
+        <p className="eyebrow">Assignment</p>
+        <p className="text-sm font-medium flex items-center gap-2 mt-1">
           Availability
           {status && (
             <span
@@ -239,6 +262,7 @@ export function SettingsView() {
   const isManager = role === "manager";
   const navItems = isManager ? MANAGER_NAV_ITEMS : NAV_ITEMS;
   const aiNavItems = isManager ? [...PERSONAL_AI_NAV_ITEMS, ...COMPANY_AI_NAV_ITEMS] : PERSONAL_AI_NAV_ITEMS;
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const [section, setSection] = useState<Section>("profile");
   const [aiSection, setAiSection] = useState<AiSection>("my-writing");
   const [knowledgeSection, setKnowledgeSection] = useState<KnowledgeSection>("company");
@@ -501,48 +525,48 @@ export function SettingsView() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Breadcrumb + page title */}
       <div className="px-8 py-5 border-b border-border shrink-0">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="eyebrow flex items-center gap-1.5">
           <span>Settings</span>
           {sectionLabel !== pageTitle && (
             <><ChevronRight className="size-3" /><span>{sectionLabel}</span></>
           )}
         </div>
-        <h1 className="text-2xl font-bold mt-1">{pageTitle}</h1>
+        <h1 className="font-display text-2xl font-semibold mt-1">{pageTitle}</h1>
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Primary sidebar */}
         <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">General</p>
+          <p className="eyebrow px-2 mb-1">General</p>
           {navItems.map(({ id, label }) => (
-            <button key={id} type="button" onClick={() => setSection(id)}
-              className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full",
-                section === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
+            <Button key={id} type="button" variant="ghost" onClick={() => setSection(id)}
+              className={cn("h-auto w-full justify-start px-3 py-2.5 rounded-md text-sm font-medium",
+                section === id ? "bg-primary text-primary-foreground font-semibold hover:bg-primary hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
               {label}
-            </button>
+            </Button>
           ))}
         </aside>
 
         {/* AI secondary sidebar */}
         {section === "ai" && (
           <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">Personal</p>
+            <p className="eyebrow px-2 mb-1">Personal</p>
             {PERSONAL_AI_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-              <button key={id} type="button" onClick={() => setAiSection(id)}
-                className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
-                  aiSection === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
+              <Button key={id} type="button" variant="ghost" onClick={() => setAiSection(id)}
+                className={cn("h-auto w-full justify-start gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium",
+                  aiSection === id ? "bg-primary text-primary-foreground font-semibold hover:bg-primary hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
                 <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
-              </button>
+              </Button>
             ))}
             {isManager && (
               <>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1 mt-4">Company defaults</p>
+                <p className="eyebrow px-2 mb-1 mt-4">Company defaults</p>
                 {COMPANY_AI_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-                  <button key={id} type="button" onClick={() => setAiSection(id)}
-                    className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
-                      aiSection === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
+                  <Button key={id} type="button" variant="ghost" onClick={() => setAiSection(id)}
+                    className={cn("h-auto w-full justify-start gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium",
+                      aiSection === id ? "bg-primary text-primary-foreground font-semibold hover:bg-primary hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
                     <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
-                  </button>
+                  </Button>
                 ))}
               </>
             )}
@@ -552,13 +576,13 @@ export function SettingsView() {
         {/* Knowledge secondary sidebar (managers only) */}
         {section === "knowledge" && isManager && (
           <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-2 mb-1">Knowledge Sources</p>
+            <p className="eyebrow px-2 mb-1">Knowledge Sources</p>
             {KNOWLEDGE_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-              <button key={id} type="button" onClick={() => setKnowledgeSection(id)}
-                className={cn("px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left w-full flex items-center gap-2.5",
-                  knowledgeSection === id ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
+              <Button key={id} type="button" variant="ghost" onClick={() => setKnowledgeSection(id)}
+                className={cn("h-auto w-full justify-start gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium",
+                  knowledgeSection === id ? "bg-primary text-primary-foreground font-semibold hover:bg-primary hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
                 <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
-              </button>
+              </Button>
             ))}
           </aside>
         )}
@@ -572,56 +596,57 @@ export function SettingsView() {
 
               {/* ── Profile ── */}
               {section === "profile" && (
-                <>
-                  <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-                    <div className="flex items-center gap-4">
-                      <div className="size-14 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0">
-                        <User className="size-6 text-muted-foreground" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">{userName || "Admin"}</p>
-                        <p className="text-xs text-muted-foreground">{userEmail}</p>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label>Display name</Label>
-                        <Input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="Admin" disabled />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Email address</Label>
-                        <Input value={userEmail} disabled />
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Profile details are managed through your Supabase auth account.</p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-between">
+                <div className="enter">
+                  <div className="flex items-center justify-between border-b border-border pb-4">
                     <div>
-                      <p className="text-sm font-medium">Role</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Your access level in this workspace.</p>
+                      <p className="eyebrow">Account</p>
+                      <h2 className="font-display text-lg font-semibold mt-0.5">My Profile</h2>
                     </div>
                     <span className="text-[11px] font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
                       {isSuperAdmin ? "Super Admin" : role === "manager" ? "Manager" : role === "employee" ? "Employee" : "—"}
                     </span>
                   </div>
+
+                  <div className="flex items-center gap-4 py-6 border-b border-border swatch-bar pl-4">
+                    <div className="size-12 rounded-md bg-secondary border border-border flex items-center justify-center shrink-0">
+                      <User className="size-5 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm">{userName || "Admin"}</p>
+                      <p className="text-xs font-mono text-muted-foreground truncate">{userEmail}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <SettingsRow label="Display name" description="Managed through your Supabase auth account.">
+                      <Input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="Admin" disabled className="max-w-sm" />
+                    </SettingsRow>
+                    <SettingsRow label="Email address" description="Managed through your Supabase auth account.">
+                      <Input value={userEmail} disabled className="max-w-sm font-mono text-xs" />
+                    </SettingsRow>
+                  </div>
+
                   {/* Employees can mark themselves away (spec §2B). */}
                   {role === "employee" && <AvailabilityCard />}
-                </>
+                </div>
               )}
 
               {/* ── AI & Outreach ── */}
               {section === "ai" && (
-                <div className="space-y-6">
+                <div className="space-y-8 enter">
                   {aiSection === "my-writing" && (
                     <>
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                      <section className="space-y-4 border-b border-border pb-8">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <PenLine className="size-4 text-muted-foreground" />
-                            <h3 className="text-sm font-semibold">My cold-email writing style</h3>
+                            <div>
+                              <p className="eyebrow">Writing style</p>
+                              <h3 className="font-display text-base font-semibold mt-0.5">My cold-email writing style</h3>
+                            </div>
                           </div>
                           <span className={cn(
-                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium shrink-0",
                             myDraftPrompt.trim()
                               ? "border-primary/20 bg-primary/10 text-primary"
                               : "border-border bg-secondary text-muted-foreground",
@@ -641,21 +666,24 @@ export function SettingsView() {
                           helper="Product library, campaign context and safety rules are appended automatically."
                         />
                         {!myDraftPrompt.trim() && myDefaults.draft_prompt && (
-                          <details className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                          <details className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
                             <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
                             <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap font-sans">{myDefaults.draft_prompt}</pre>
                           </details>
                         )}
                       </section>
 
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                      <section className="space-y-4">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <Bot className="size-4 text-muted-foreground" />
-                            <h3 className="text-sm font-semibold">My reply writing style</h3>
+                            <div>
+                              <p className="eyebrow">Writing style</p>
+                              <h3 className="font-display text-base font-semibold mt-0.5">My reply writing style</h3>
+                            </div>
                           </div>
                           <span className={cn(
-                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium shrink-0",
                             myReplyPrompt.trim()
                               ? "border-primary/20 bg-primary/10 text-primary"
                               : "border-border bg-secondary text-muted-foreground",
@@ -675,7 +703,7 @@ export function SettingsView() {
                           helper="Must return JSON with subject and body. Safety rules are appended automatically."
                         />
                         {!myReplyPrompt.trim() && myDefaults.reply_prompt && (
-                          <details className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                          <details className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
                             <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
                             <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap font-sans">{myDefaults.reply_prompt}</pre>
                           </details>
@@ -686,14 +714,17 @@ export function SettingsView() {
 
                   {aiSection === "my-signature" && (
                     <>
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
+                      <section className="space-y-4 border-b border-border pb-8">
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <Type className="size-4 text-muted-foreground" />
-                            <h3 className="text-sm font-semibold">My signature</h3>
+                            <div>
+                              <p className="eyebrow">Signature</p>
+                              <h3 className="font-display text-base font-semibold mt-0.5">My signature</h3>
+                            </div>
                           </div>
                           <span className={cn(
-                            "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium shrink-0",
                             mySignature.trim()
                               ? "border-primary/20 bg-primary/10 text-primary"
                               : "border-border bg-secondary text-muted-foreground",
@@ -712,36 +743,41 @@ export function SettingsView() {
                           placeholder={"Your Name\nYour Title\nKuber Polyplast\n+91-XXXXXXXXXX"}
                         />
                         {!mySignature.trim() && myDefaults.signature && (
-                          <details className="rounded-lg border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
+                          <details className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
                             <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
                             <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap font-sans">{myDefaults.signature}</pre>
                           </details>
                         )}
                       </section>
 
-                      <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                        <div className="flex items-center gap-2">
+                      <section>
+                        <div className="flex items-center gap-2 pb-1">
                           <User className="size-4 text-muted-foreground" />
-                          <h3 className="text-sm font-semibold">My sender name</h3>
+                          <div>
+                            <p className="eyebrow">Sender</p>
+                            <h3 className="font-display text-base font-semibold mt-0.5">My sender name</h3>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground -mt-2">
-                          Pre-filled as the &quot;From&quot; name when you create a campaign. Empty = company default{myDefaults.sender_name ? ` (“${myDefaults.sender_name}”)` : ""}.
-                        </p>
-                        <div className="max-w-sm space-y-1.5">
-                          <Label>Sender name</Label>
-                          <Input value={mySenderName} onChange={(e) => setMySenderName(e.target.value)} placeholder={myDefaults.sender_name || "Kuber Polyplast"} maxLength={200} />
-                        </div>
+                        <SettingsRow
+                          label="Sender name"
+                          description={<>Pre-filled as the &quot;From&quot; name when you create a campaign. Empty = company default{myDefaults.sender_name ? ` (“${myDefaults.sender_name}”)` : ""}.</>}
+                        >
+                          <Input value={mySenderName} onChange={(e) => setMySenderName(e.target.value)} placeholder={myDefaults.sender_name || "Kuber Polyplast"} maxLength={200} className="max-w-sm" />
+                        </SettingsRow>
                       </section>
                     </>
                   )}
 
                   {isManager && aiSection === "template" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                      <div className="flex items-center gap-2">
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-2 border-b border-border pb-4">
                         <Bot className="size-4 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">AI Writing Instructions</h3>
+                        <div>
+                          <p className="eyebrow">Company default</p>
+                          <h3 className="font-display text-base font-semibold mt-0.5">AI Writing Instructions</h3>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground -mt-2">
+                      <p className="text-xs text-muted-foreground">
                         The <strong>company default</strong> prompt for outreach emails — used by every campaign whose owner hasn&apos;t set a personal writing style. Put subject-line patterns, opening/closing options, offerings, key strengths, and tone here.
                       </p>
                       <RichTextEditor
@@ -756,29 +792,32 @@ export function SettingsView() {
                   )}
 
                   {isManager && aiSection === "default" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                      <div className="flex items-center gap-2">
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-2 border-b border-border pb-4">
                         <FileText className="size-4 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">Default draft</h3>
+                        <div>
+                          <p className="eyebrow">Fallback</p>
+                          <h3 className="font-display text-base font-semibold mt-0.5">Default draft</h3>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground -mt-2">
+                      <p className="text-xs text-muted-foreground">
                         Exact subject and body sent to unenriched / Input Required leads (no company profile to personalise). Enriched leads still use AI Writing Instructions. Placeholders are filled per lead:{" "}
-                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{"{{first_name}}"}</code>
+                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px] font-mono">{"{{first_name}}"}</code>
                         {", "}
-                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{"{{name}}"}</code>
+                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px] font-mono">{"{{name}}"}</code>
                         {", "}
-                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">{"{{company}}"}</code>
+                        <code className="rounded bg-secondary px-1 py-0.5 text-[11px] font-mono">{"{{company}}"}</code>
                         . A greeting and signature are added automatically.
                       </p>
-                      <div className="space-y-1.5">
-                        <Label>Subject</Label>
+                      <SettingsRow label="Subject">
                         <Input
                           value={genericSubject}
                           onChange={(e) => setGenericSubject(e.target.value)}
                           placeholder="Reliable masterbatch for {{company}}"
                           maxLength={300}
+                          className="max-w-md"
                         />
-                      </div>
+                      </SettingsRow>
                       <RichTextEditor
                         label="Body"
                         value={genericBody}
@@ -791,12 +830,15 @@ export function SettingsView() {
                   )}
 
                   {isManager && aiSection === "replies" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-5">
-                      <div className="flex items-center gap-2">
+                    <section className="space-y-5">
+                      <div className="flex items-center gap-2 border-b border-border pb-4">
                         <Bot className="size-4 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">Reply AI</h3>
+                        <div>
+                          <p className="eyebrow">Company default</p>
+                          <h3 className="font-display text-base font-semibold mt-0.5">Reply AI</h3>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground -mt-2">
+                      <p className="text-xs text-muted-foreground">
                         Controls how follow-up replies are drafted after a prospect responds.
                       </p>
 
@@ -806,12 +848,15 @@ export function SettingsView() {
                   )}
 
                   {isManager && aiSection === "footer" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-4">
-                      <div className="flex items-center gap-2">
+                    <section className="space-y-4">
+                      <div className="flex items-center gap-2 border-b border-border pb-4">
                         <PenLine className="size-4 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">Email Footer</h3>
+                        <div>
+                          <p className="eyebrow">Company default</p>
+                          <h3 className="font-display text-base font-semibold mt-0.5">Email Footer</h3>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground -mt-2">Contact lines appended at the end of every generated email.</p>
+                      <p className="text-xs text-muted-foreground">Contact lines appended at the end of every generated email.</p>
                       <RichTextEditor label="Contact footer" value={sigContact} onChange={setSigContact} minHeight={160}
                         placeholder={"Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"} />
                     </section>
@@ -823,52 +868,50 @@ export function SettingsView() {
 
               {/* ── Knowledge Sources (managers only) ── */}
               {section === "knowledge" && isManager && (
-                <div className="space-y-6">
+                <div className="space-y-8 enter">
 
                   {/* Company Details */}
                   {knowledgeSection === "company" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-5">
-                      <div className="flex items-center justify-between">
+                    <section className="space-y-5">
+                      <div className="flex items-center justify-between border-b border-border pb-4">
                         <div className="flex items-center gap-2">
                           <Building2 className="size-4 text-muted-foreground" />
-                          <h3 className="text-sm font-semibold">Company Details</h3>
+                          <div>
+                            <p className="eyebrow">Knowledge source</p>
+                            <h3 className="font-display text-base font-semibold mt-0.5">Company Details</h3>
+                          </div>
                         </div>
                         <span className="rounded-md bg-secondary px-2 py-1 text-[11px] font-medium text-muted-foreground">Context</span>
                       </div>
 
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <Label>Default sender name</Label>
-                          <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-                          <p className="text-xs text-muted-foreground">Used as the &quot;From&quot; name in outreach emails.</p>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Client industry</Label>
-                          <Input value={clientIndustry} onChange={(e) => setClientIndustry(e.target.value)} placeholder="Plastics & Polymer Manufacturing" />
-                        </div>
-                      </div>
-
-                      {/* Logo */}
-                      <div className="rounded-lg border border-border bg-secondary/30 p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold">Logo</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">PNG/JPG/WebP, up to 2 MB. Appears in the sidebar.</p>
+                      <div>
+                        <SettingsRow label="Default sender name" description={'Used as the "From" name in outreach emails.'}>
+                          <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" className="max-w-sm" />
+                        </SettingsRow>
+                        <SettingsRow label="Client industry">
+                          <Input value={clientIndustry} onChange={(e) => setClientIndustry(e.target.value)} placeholder="Plastics & Polymer Manufacturing" className="max-w-sm" />
+                        </SettingsRow>
+                        <SettingsRow label="Logo" description="PNG/JPG/WebP, up to 2 MB. Appears in the sidebar.">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {logoUrl
+                              ? <img src={logoUrl} alt="Brand logo" className="size-10 rounded-md border border-border bg-card object-contain shrink-0" />
+                              : <div className="size-10 rounded-md border border-border bg-card flex items-center justify-center shrink-0"><span className="text-xs font-bold font-mono text-muted-foreground">K</span></div>
+                            }
+                            <Input
+                              ref={logoInputRef}
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp"
+                              className="hidden"
+                              onChange={(e) => void handleLogoPick(e.target.files?.[0] ?? null)}
+                            />
+                            <Button type="button" disabled={logoUploading} onClick={() => logoInputRef.current?.click()}>
+                              {logoUploading ? "Uploading..." : (logoUrl ? "Replace logo" : "Upload logo")}
+                            </Button>
+                            {logoPath && (
+                              <Button type="button" variant="outline" disabled={logoUploading} onClick={() => void handleLogoRemove()}>Remove</Button>
+                            )}
                           </div>
-                          {logoUrl
-                            ? <img src={logoUrl} alt="Brand logo" className="size-10 rounded-lg border border-border bg-card object-contain shrink-0" />
-                            : <div className="size-10 rounded-lg border border-border bg-card flex items-center justify-center shrink-0"><span className="text-xs font-bold text-muted-foreground">K</span></div>
-                          }
-                        </div>
-                        <div className="mt-3 flex items-center gap-2 flex-wrap">
-                          <label className={cn("inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors cursor-pointer h-9 px-4 bg-primary text-primary-foreground hover:bg-primary/90", logoUploading && "opacity-60 pointer-events-none")}>
-                            {logoUploading ? "Uploading..." : (logoUrl ? "Replace logo" : "Upload logo")}
-                            <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => void handleLogoPick(e.target.files?.[0] ?? null)} />
-                          </label>
-                          {logoPath && (
-                            <Button type="button" variant="outline" className="h-9" disabled={logoUploading} onClick={() => void handleLogoRemove()}>Remove</Button>
-                          )}
-                        </div>
+                        </SettingsRow>
                       </div>
 
                       <div className="space-y-1.5">
@@ -889,38 +932,43 @@ export function SettingsView() {
                   {/* Product Offerings */}
                   {knowledgeSection === "products" && (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-sm font-semibold">Product Offerings</h3>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            The AI picks the best-matching product for each lead and uses its description as context.
-                          </p>
+                      <div className="flex items-center justify-between border-b border-border pb-4">
+                        <div className="flex items-center gap-2">
+                          <Package className="size-4 text-muted-foreground" />
+                          <div>
+                            <p className="eyebrow">Knowledge source</p>
+                            <h3 className="font-display text-base font-semibold mt-0.5">Product Offerings</h3>
+                          </div>
                         </div>
                         <Button type="button" size="sm" onClick={addProduct} className="gap-1.5 shrink-0">
                           <Plus className="size-3.5" /> Add product
                         </Button>
                       </div>
+                      <p className="text-xs text-muted-foreground -mt-2">
+                        The AI picks the best-matching product for each lead and uses its description as context.
+                      </p>
 
                       {productOfferings.length === 0 && (
-                        <div className="rounded-xl border border-dashed border-border bg-secondary/10 p-10 text-center text-sm text-muted-foreground">
+                        <div className="rounded-md border border-dashed border-border bg-secondary/10 p-10 text-center text-sm text-muted-foreground">
                           No products yet — click &quot;Add product&quot; to get started.
                         </div>
                       )}
 
-                      <div className="space-y-3">
+                      <div className="grid gap-3 lg:grid-cols-2">
                         {productOfferings.map((product, idx) => (
-                          <div key={idx} className="rounded-xl border border-border bg-card p-4 space-y-3">
+                          <div key={idx} className="swatch-bar rounded-md border border-border bg-card p-4 pl-5 space-y-3">
                             <div className="flex items-center gap-2">
+                              <span className="eyebrow shrink-0">{String(idx + 1).padStart(2, "0")}</span>
                               <Input
                                 value={product.name}
                                 onChange={(e) => updateProduct(idx, "name", e.target.value)}
                                 placeholder="Product name"
                                 className="h-9 text-sm font-medium flex-1"
                               />
-                              <button type="button" onClick={() => removeProduct(idx)}
-                                className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
+                              <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeProduct(idx)}
+                                className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
                                 <X className="size-3.5" />
-                              </button>
+                              </Button>
                             </div>
                             <Textarea
                               value={product.description}
@@ -936,12 +984,15 @@ export function SettingsView() {
 
                   {/* Extra Documents */}
                   {knowledgeSection === "documents" && (
-                    <section className="rounded-xl border border-border bg-card p-6 space-y-5">
-                      <div className="flex items-center gap-2">
+                    <section className="space-y-5">
+                      <div className="flex items-center gap-2 border-b border-border pb-4">
                         <FileText className="size-4 text-muted-foreground" />
-                        <h3 className="text-sm font-semibold">Extra Documents</h3>
+                        <div>
+                          <p className="eyebrow">Knowledge source</p>
+                          <h3 className="font-display text-base font-semibold mt-0.5">Extra Documents</h3>
+                        </div>
                       </div>
-                      <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-2">
+                      <div className="rounded-md border border-dashed border-border p-8 text-center space-y-2">
                         <FileText className="size-8 text-muted-foreground mx-auto" />
                         <p className="text-sm font-medium">Document upload — coming soon</p>
                         <p className="text-xs text-muted-foreground">
@@ -957,72 +1008,94 @@ export function SettingsView() {
 
               {/* ── Appearance ── */}
               {section === "appearance" && (
-                <>
-                  <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-                    <div className="flex items-center gap-2">
+                <div className="enter">
+                  <section>
+                    <div className="flex items-center gap-2 border-b border-border pb-4">
                       {mode === "light" ? <Sun className="size-4 text-muted-foreground" /> : <Moon className="size-4 text-muted-foreground" />}
-                      <h3 className="text-sm font-semibold">Appearance mode</h3>
+                      <div>
+                        <p className="eyebrow">Display</p>
+                        <h3 className="font-display text-base font-semibold mt-0.5">Appearance mode</h3>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground -mt-3">Switch between a dark or light workspace background.</p>
-                    <div className="grid grid-cols-2 gap-3 max-w-sm">
-                      {(["dark", "light"] as const).map((m) => {
-                        const active = mode === m;
-                        const Icon = m === "dark" ? Moon : Sun;
-                        return (
-                          <button key={m} type="button" onClick={() => void setMode(m)} disabled={savingTheme}
-                            className={cn("flex items-center gap-2.5 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-                              active ? "border-primary bg-primary/10" : "border-border hover:border-muted-foreground")}>
-                            <Icon className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="flex-1 text-sm font-medium capitalize">{m}</span>
-                            {active && <Check className="size-4 text-primary shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                    <SettingsRow label="Workspace mode" description="Switch between a dark or light workspace background.">
+                      <div className="grid grid-cols-2 gap-3 max-w-sm">
+                        {(["dark", "light"] as const).map((m) => {
+                          const active = mode === m;
+                          const Icon = m === "dark" ? Moon : Sun;
+                          return (
+                            <Button key={m} type="button" variant="outline" onClick={() => void setMode(m)} disabled={savingTheme}
+                              className={cn("h-auto justify-start gap-2.5 p-3 font-medium",
+                                active ? "border-primary bg-primary/10 hover:bg-primary/10" : "hover:border-muted-foreground")}>
+                              <Icon className="size-4 shrink-0 text-muted-foreground" />
+                              <span className="flex-1 text-sm font-medium capitalize">{m}</span>
+                              {active && <Check className="size-4 text-primary shrink-0" />}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </SettingsRow>
+                  </section>
 
-                  <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-                    <div className="flex items-center gap-2">
+                  {/* Color theme — the literal "masterbatch color chip" this whole
+                      design language is inspired by. The one place a larger, more
+                      expressive swatch presentation is warranted. Logic/COLORS list
+                      untouched — visual chrome only. */}
+                  <section className="mt-8">
+                    <div className="flex items-center gap-2 border-b border-border pb-4">
                       <Palette className="size-4 text-muted-foreground" />
-                      <h3 className="text-sm font-semibold">Color theme</h3>
+                      <div>
+                        <p className="eyebrow">Masterbatch reference</p>
+                        <h3 className="font-display text-base font-semibold mt-0.5">Color theme</h3>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground -mt-3">Choose an accent color for the workspace.</p>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {COLORS.map((t) => {
-                        const active = theme === t.id;
-                        return (
-                          <button key={t.id} type="button" onClick={() => void setTheme(t.id)} disabled={savingTheme}
-                            className={cn("flex items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
-                              active ? "border-primary bg-primary/10" : "border-border hover:border-muted-foreground")}>
-                            <span className="size-7 shrink-0 rounded-full border border-border" style={{ backgroundColor: t.swatch }} />
-                            <span className="flex-1 text-sm font-medium">{t.label}</span>
-                            {active && <Check className="size-4 text-primary shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </>
+                    <SettingsRow label="Accent color" description="Choose an accent color for the workspace — like picking a pellet reference chip.">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {COLORS.map((t) => {
+                          const active = theme === t.id;
+                          return (
+                            <Button key={t.id} type="button" variant="outline" onClick={() => void setTheme(t.id)} disabled={savingTheme}
+                              className={cn(
+                                "h-auto flex-col items-stretch gap-3 p-3 text-left overflow-hidden",
+                                active ? "border-primary swatch-bar-top hover:border-primary" : "hover:border-muted-foreground",
+                              )}>
+                              <span
+                                className="block h-12 w-full rounded shrink-0 border border-black/10"
+                                style={{ backgroundColor: t.swatch }}
+                                aria-hidden
+                              />
+                              <span className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-medium">{t.label}</span>
+                                {active && <Check className="size-4 text-primary shrink-0" />}
+                              </span>
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </SettingsRow>
+                  </section>
+                </div>
               )}
 
               {/* ── Account ── */}
               {section === "account" && (
-                <div className="space-y-6">
-                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                    <h3 className="text-sm font-semibold">Change password</h3>
-                    <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-1.5 sm:col-span-2">
-                        <Label>Current password</Label>
+                <div className="enter">
+                  <section>
+                    <div className="border-b border-border pb-4">
+                      <p className="eyebrow">Security</p>
+                      <h3 className="font-display text-base font-semibold mt-0.5">Change password</h3>
+                    </div>
+                    <form onSubmit={handleChangePassword}>
+                      <SettingsRow label="Current password">
                         <Input
                           type="password"
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
                           required
                           autoComplete="current-password"
+                          className="max-w-sm"
                         />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>New password</Label>
+                      </SettingsRow>
+                      <SettingsRow label="New password" description="At least 8 characters.">
                         <Input
                           type="password"
                           value={newPassword}
@@ -1030,10 +1103,10 @@ export function SettingsView() {
                           required
                           minLength={8}
                           autoComplete="new-password"
+                          className="max-w-sm"
                         />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label>Confirm password</Label>
+                      </SettingsRow>
+                      <SettingsRow label="Confirm password">
                         <Input
                           type="password"
                           value={confirmPassword}
@@ -1041,36 +1114,32 @@ export function SettingsView() {
                           required
                           minLength={8}
                           autoComplete="new-password"
+                          className="max-w-sm"
                         />
-                      </div>
-                      <div className="sm:col-span-2 flex justify-end">
+                      </SettingsRow>
+                      <div className="flex justify-end pt-5">
                         <Button type="submit" disabled={savingPassword}>
                           {savingPassword ? "Updating…" : "Update password"}
                         </Button>
                       </div>
                     </form>
-                  </div>
+                  </section>
 
-                  <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-                    <h3 className="text-sm font-semibold">Session</h3>
-                    <div className="flex items-center justify-between py-3 border-t border-border">
-                      <div>
-                        <p className="text-sm font-medium">Signed in as</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{userEmail}</p>
-                      </div>
+                  <section className="mt-8">
+                    <div className="border-b border-border pb-4">
+                      <p className="eyebrow">Account</p>
+                      <h3 className="font-display text-base font-semibold mt-0.5">Session</h3>
+                    </div>
+                    <SettingsRow label="Signed in as" description={<span className="font-mono">{userEmail}</span>}>
                       <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Active</span>
-                    </div>
-                    <div className="flex items-center justify-between py-3 border-t border-border">
-                      <div>
-                        <p className="text-sm font-medium">Sign out</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">End your current session on this device.</p>
-                      </div>
-                      <button type="button" onClick={() => supabase.auth.signOut()}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5 transition-colors">
+                    </SettingsRow>
+                    <SettingsRow label="Sign out" description="End your current session on this device.">
+                      <Button type="button" variant="outline" onClick={() => supabase.auth.signOut()}
+                        className="gap-2 text-muted-foreground hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/5">
                         <LogOut className="size-3.5" /> Sign out
-                      </button>
-                    </div>
-                  </div>
+                      </Button>
+                    </SettingsRow>
+                  </section>
                 </div>
               )}
 

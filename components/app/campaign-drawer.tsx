@@ -269,10 +269,11 @@ function OutboxMessageRow({
 
   if (!expanded) {
     return (
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left border-b border-border/60 last:border-b-0 hover:bg-secondary/40 transition-colors"
+        className="h-auto w-full justify-start gap-3 px-4 py-2.5 text-left font-normal rounded-none border-b border-border/60 last:border-b-0 hover:bg-secondary/40"
       >
         <Avatar name={senderName} size="sm" />
         <span className="shrink-0 max-w-[160px] truncate text-sm font-medium text-foreground/90">
@@ -286,16 +287,17 @@ function OutboxMessageRow({
             {format(new Date(timestamp), "MMM d")}
           </span>
         )}
-      </button>
+      </Button>
     );
   }
 
   return (
     <div className="border-b border-border/60 last:border-b-0">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={onToggle}
-        className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-secondary/30 transition-colors"
+        className="h-auto w-full justify-start items-start gap-3 px-4 py-3 text-left font-normal rounded-none hover:bg-secondary/30"
       >
         <Avatar name={senderName} size="sm" />
         <div className="flex-1 min-w-0">
@@ -307,7 +309,7 @@ function OutboxMessageRow({
             {format(new Date(timestamp), "MMM d, h:mm a")}
           </span>
         )}
-      </button>
+      </Button>
       <div className="px-4 pb-4 pl-[52px] text-sm">
         {bodyHtml ? (
           <div
@@ -1221,13 +1223,15 @@ export function CampaignDetail({
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <div className="shrink-0 bg-background border-b border-border flex items-center justify-between gap-4 px-6 h-14">
         <div className="flex items-center gap-3 min-w-0">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onBack}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-md hover:bg-muted shrink-0"
+            className="size-8 text-muted-foreground hover:text-foreground shrink-0"
           >
             <ArrowLeft className="size-4" />
-          </button>
+          </Button>
           {editingName ? (
             <div className="flex items-center gap-1.5 min-w-0">
               <Input
@@ -1240,36 +1244,42 @@ export function CampaignDetail({
                 }}
                 className="h-7 w-56 bg-background text-sm font-semibold"
               />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 disabled={savingName}
                 onClick={() => void handleSaveName()}
                 aria-label="Save campaign name"
-                className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                className="size-7 shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 {savingName ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 disabled={savingName}
                 onClick={() => { setEditingName(false); setNameDraft(campaignName); }}
                 aria-label="Cancel"
-                className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                className="size-7 shrink-0 text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 <X className="size-3.5" />
-              </button>
+              </Button>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 min-w-0 group/name">
               <h1 className="font-display text-sm font-semibold text-foreground truncate min-w-0">{campaignName}</h1>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={() => { setNameDraft(campaignName); setEditingName(true); }}
                 aria-label="Edit campaign name"
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
               >
                 <Pencil className="size-3.5" />
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1299,31 +1309,60 @@ export function CampaignDetail({
         )}
       </div>
 
-      {/* ── Tab navigation ──────────────────────────────────────────────── */}
-      <div className="shrink-0 border-b border-border px-6 py-3">
-        <SegmentedTabs
-          value={viewTab}
-          onValueChange={setViewTab}
-          options={campaignTabs}
-        />
-      </div>
+      {/* ── Section rail + content — two-pane layout replacing the old top tab bar ── */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {/* ── Section navigation rail ─────────────────────────────────────── */}
+        <nav className="w-44 shrink-0 border-r border-border bg-card/40 flex flex-col gap-0.5 p-2 overflow-y-auto">
+          {campaignTabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = viewTab === tab.value;
+            return (
+              <Button
+                key={tab.value}
+                type="button"
+                variant="ghost"
+                onClick={() => setViewTab(tab.value)}
+                className={cn(
+                  "h-auto w-full justify-start gap-2.5 rounded-lg px-3 py-2 text-sm font-medium",
+                  active
+                    ? "swatch-bar bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
+                    : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
+                )}
+              >
+                <Icon className="size-4 shrink-0" />
+                <span className="flex-1 text-left">{tab.label}</span>
+                {typeof tab.count === "number" && tab.count > 0 && (
+                  <span className={cn(
+                    "font-mono text-[10px] font-semibold tabular-nums rounded-full px-1.5 py-0.5 shrink-0",
+                    active ? "bg-primary/20 text-primary" : "bg-secondary text-muted-foreground",
+                  )}>
+                    {tab.count}
+                  </span>
+                )}
+              </Button>
+            );
+          })}
+        </nav>
 
-      {/* ── Tab content ──────────────────────────────────────────────────── */}
+        {/* ── Section content ──────────────────────────────────────────────── */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
 
       {/* ── Analytics ─────────────────────────────────────────────────────── */}
       {viewTab === "analytics" && (
         <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
           {progress && progress.failed > 0 && (
             <div className="px-6 pt-3 pb-2 flex items-center justify-end gap-2">
-              <button
+              <Button
                 type="button"
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-red-500/30 bg-background px-2.5 text-xs font-medium text-red-400 hover:text-red-300 transition-colors"
+                variant="outline"
+                size="sm"
+                className="gap-1.5 border-red-500/30 text-red-400 hover:text-red-300"
                 disabled={retryingAll}
                 onClick={() => void handleRetryAllFailed()}
               >
                 {retryingAll ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
                 Retry ({progress.failed})
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1713,8 +1752,10 @@ export function CampaignDetail({
                     <SelectItem value="newest" className="text-[11px]">Newest</SelectItem>
                   </SelectContent>
                 </Select>
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="icon"
                   disabled={syncingReplies}
                   title="Sync replies"
                   onClick={async () => {
@@ -1745,23 +1786,29 @@ export function CampaignDetail({
                       setSyncingReplies(false);
                     }
                   }}
-                  className="inline-flex items-center justify-center size-7 shrink-0 rounded-md border border-border bg-secondary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                  className="size-7 shrink-0 bg-secondary/30 text-muted-foreground hover:text-primary disabled:opacity-50"
                 >
                   <RefreshCw className={cn("size-3", syncingReplies && "animate-spin")} />
-                </button>
-                <a
-                  href={`/unibox?campaign_id=${campaign.id}`}
+                </Button>
+                <Button
+                  asChild
+                  variant="outline"
+                  size="icon"
                   title="Open in Unibox"
-                  className="inline-flex items-center justify-center size-7 shrink-0 rounded-md border border-border bg-secondary/30 text-muted-foreground hover:text-primary transition-colors"
+                  className="size-7 shrink-0 bg-secondary/30 text-muted-foreground hover:text-primary"
                 >
-                  <ExternalLink className="size-3" />
-                </a>
+                  <a href={`/unibox?campaign_id=${campaign.id}`}>
+                    <ExternalLink className="size-3" />
+                  </a>
+                </Button>
               </div>
               <div className="px-3 py-2 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   {outboxSelectableFilteredLeads.length > 0 && (
-                    <button
+                    <Button
                       type="button"
+                      variant="link"
+                      size="sm"
                       onClick={() => {
                         const selectableLeads = outboxSelectableFilteredLeads;
                         const ids = selectableLeads.map((cl) => cl.id);
@@ -1780,12 +1827,12 @@ export function CampaignDetail({
                           });
                         }
                       }}
-                      className="text-[11px] text-muted-foreground hover:text-primary transition-colors shrink-0"
+                      className="h-auto p-0 text-[11px] text-muted-foreground hover:text-primary shrink-0"
                     >
                       {outboxSelectableFilteredLeads.every((cl) => checkedIds.has(cl.id))
                         ? "Deselect all"
                         : `Select all (${outboxSelectableFilteredLeads.length})`}
-                    </button>
+                    </Button>
                   )}
                   {outboxCheckedCount > 0 && (
                     <span className="text-[11px] font-medium text-foreground truncate">
@@ -1832,13 +1879,14 @@ export function CampaignDetail({
                   };
                   const sc = replyDraftStatus ? statusConfig[replyDraftStatus] : null;
                   return (
-                    <button
+                    <Button
                       key={cl.id}
                       type="button"
+                      variant="ghost"
                       onClick={() => setSelectedId(cl.id)}
                       className={cn(
-                        "w-full text-left pl-12 pr-4 py-3 transition-colors",
-                        isActive ? "bg-primary/8 border-l-2 border-l-primary" : "hover:bg-secondary/40 border-l-2 border-l-transparent",
+                        "h-auto w-full block justify-start text-left font-normal rounded-none pl-12 pr-4 py-3",
+                        isActive ? "bg-primary/8 hover:bg-primary/8 border-l-2 border-l-primary" : "hover:bg-secondary/40 border-l-2 border-l-transparent",
                       )}
                     >
                       <div className="flex items-center gap-2">
@@ -1860,7 +1908,7 @@ export function CampaignDetail({
                           <span className="text-[10px] text-muted-foreground/70 shrink-0">({thread.messages.length})</span>
                         )}
                       </div>
-                    </button>
+                    </Button>
                   );
                 }
 
@@ -2005,15 +2053,17 @@ export function CampaignDetail({
                             ({selected.attachment.effective.source === "lead" ? "this lead" : "campaign default"} · sent as link)
                           </span>
                           {selected.attachment.effective.source === "lead" && (
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon"
                               disabled={attaching}
                               onClick={() => void handleLeadAttachmentRemove()}
-                              className="text-muted-foreground hover:text-red-400"
+                              className="size-5 text-muted-foreground hover:text-red-400"
                               title="Remove per-lead attachment"
                             >
                               <X className="size-3" />
-                            </button>
+                            </Button>
                           )}
                         </span>
                       ) : (
@@ -2091,19 +2141,21 @@ export function CampaignDetail({
                       <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
                         <div className="flex flex-wrap gap-2">
                           {versions.map((v) => (
-                            <button
+                            <Button
                               key={v.id}
                               type="button"
+                              variant="outline"
+                              size="sm"
                               onClick={() => loadVersionPreview(v)}
                               className={cn(
-                                "font-mono text-xs rounded-md border px-2.5 py-1.5 transition-colors",
+                                "font-mono text-xs h-auto px-2.5 py-1.5",
                                 (previewVersionId === v.id || (!previewVersionId && v.id === selected.email_drafts?.id))
-                                  ? "border-primary bg-primary/10 text-primary"
+                                  ? "border-primary bg-primary/10 text-primary hover:bg-primary/10"
                                   : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
                               )}
                             >
                               v{v.version} · {format(new Date(v.created_at), "MMM d")}
-                            </button>
+                            </Button>
                           ))}
                         </div>
                         {isPreviewingHistory && (
@@ -2254,14 +2306,15 @@ export function CampaignDetail({
                 const subtitle = sequenceStepSubtitle(s, campaignLeads);
                 const displayStep = sequenceDisplayStep(s.step_order);
                 return (
-                  <button
+                  <Button
                     key={s.step_order}
                     type="button"
+                    variant="ghost"
                     onClick={() => setSelectedSequenceStep(s.step_order)}
                     className={cn(
-                      "border rounded-lg p-4 text-left cursor-pointer transition-all w-full",
+                      "h-auto w-full block border rounded-lg p-4 text-left font-normal",
                       isActive
-                        ? "swatch-bar border-primary bg-primary/10"
+                        ? "swatch-bar border-primary bg-primary/10 hover:bg-primary/10"
                         : "border-border bg-card hover:bg-secondary/40 hover:border-primary/40",
                     )}
                   >
@@ -2276,7 +2329,7 @@ export function CampaignDetail({
                         Send {prevStep.delay} {prevStep.delay_unit} after previous
                       </p>
                     )}
-                  </button>
+                  </Button>
                 );
               })
             )}
@@ -2401,6 +2454,9 @@ export function CampaignDetail({
           />
         </div>
       )}
+
+        </div>
+      </div>
 
       {/* ── Shared modals ─────────────────────────────────────────────────── */}
 

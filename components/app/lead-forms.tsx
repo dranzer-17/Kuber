@@ -23,6 +23,7 @@ import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Pr
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 import { TagInput } from "@/components/app/tag-input";
+import { Stepper } from "@/components/ui/stepper";
 
 export { TagInput };
 
@@ -59,70 +60,68 @@ function BatchNameField({
   }, []);
 
   return (
-    <div className="space-y-3">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Batch</p>
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-end gap-3">
-          <div className="flex-1 min-w-0 space-y-1">
-            <div className="flex items-center gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
-              <span className="text-destructive text-xs">*</span>
-              <InfoTip
-                side="right"
-                text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch."
-              />
-              {value.trim() && (
-                <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
-                  <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />
-                  {value}
-                </span>
-              )}
-            </div>
-            <Input
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              placeholder="e.g. India Plastics Q3…"
-              className={cn("h-8 text-sm", error && "border-destructive focus-visible:ring-destructive")}
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-end gap-3">
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-medium text-muted-foreground">Batch Name</span>
+            <span className="text-destructive text-xs">*</span>
+            <InfoTip
+              side="right"
+              text="Name this import so you can recognise it later (e.g. 'India Plastics Q3'). The name becomes a coloured tag on every lead in this batch."
             />
-            {error && (
-              <p className="text-[10px] text-destructive flex items-center gap-1">
-                <AlertCircle className="size-3 shrink-0" /> Batch name is required
-              </p>
+            {value.trim() && (
+              <span className={cn("ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-medium", c.pill)}>
+                <span className={cn("size-1.5 rounded-full shrink-0", c.bg)} />
+                {value}
+              </span>
             )}
           </div>
-          <div ref={swatchRef} className="relative shrink-0 space-y-1">
-            <span className="text-xs font-medium text-muted-foreground block">Colour</span>
-            <button
-              type="button"
-              onClick={() => setSwatchOpen((o) => !o)}
-              className={cn(
-                "flex items-center gap-2 h-8 px-3 rounded-md border border-input bg-card text-sm transition-colors hover:bg-secondary",
-                swatchOpen && "ring-2 ring-ring border-transparent",
-              )}
-            >
-              <span className={cn("size-3.5 rounded-full shrink-0", c.bg)} />
-              <span className="capitalize text-xs">{color}</span>
-            </button>
-            {swatchOpen && (
-              <div className="absolute right-0 top-full mt-1.5 z-10 rounded-xl border border-border bg-popover shadow-xl p-3.5 grid grid-cols-4 gap-3.5 w-[188px]">
-                {BATCH_COLORS.map((bc) => (
-                  <button
-                    key={bc.name}
-                    type="button"
-                    title={bc.name}
-                    onClick={() => { onColorChange(bc.name); setSwatchOpen(false); }}
-                    className={cn(
-                      "size-8 rounded-full transition-all",
-                      bc.bg,
-                      color === bc.name
-                        ? "ring-2 ring-white ring-offset-2 ring-offset-popover scale-110"
-                        : "hover:scale-110 opacity-80 hover:opacity-100",
-                    )}
-                  />
-                ))}
-              </div>
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="e.g. India Plastics Q3…"
+            className={cn("h-8 text-sm", error && "border-destructive focus-visible:ring-destructive")}
+          />
+          {error && (
+            <p className="text-[10px] text-destructive flex items-center gap-1">
+              <AlertCircle className="size-3 shrink-0" /> Batch name is required
+            </p>
+          )}
+        </div>
+        <div ref={swatchRef} className="relative shrink-0 space-y-1">
+          <span className="text-xs font-medium text-muted-foreground block">Colour</span>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setSwatchOpen((o) => !o)}
+            className={cn(
+              "h-8 gap-2 rounded-md px-3 text-sm font-normal bg-card",
+              swatchOpen && "ring-2 ring-ring border-transparent",
             )}
-          </div>
+          >
+            <span className={cn("size-3.5 rounded-full shrink-0", c.bg)} />
+            <span className="capitalize text-xs">{color}</span>
+          </Button>
+          {swatchOpen && (
+            <div className="absolute right-0 top-full mt-1.5 z-10 rounded-xl border border-border bg-popover shadow-xl p-3.5 grid grid-cols-4 gap-3.5 w-[188px]">
+              {BATCH_COLORS.map((bc) => (
+                <button
+                  key={bc.name}
+                  type="button"
+                  title={bc.name}
+                  onClick={() => { onColorChange(bc.name); setSwatchOpen(false); }}
+                  className={cn(
+                    "size-8 rounded-full transition-all",
+                    bc.bg,
+                    color === bc.name
+                      ? "ring-2 ring-white ring-offset-2 ring-offset-popover scale-110"
+                      : "hover:scale-110 opacity-80 hover:opacity-100",
+                  )}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -214,20 +213,21 @@ function AssignStrategyPicker({
       <Label>Assign imported leads</Label>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {ASSIGN_MODE_OPTIONS.map((opt) => (
-          <button
+          <Button
             key={opt.value}
             type="button"
+            variant="outline"
             onClick={() => onModeChange(opt.value)}
             className={cn(
-              "rounded-lg border p-3 text-left transition-colors",
+              "h-auto flex-col items-start justify-start gap-0 rounded-lg p-3 text-left font-normal",
               mode === opt.value
-                ? "border-primary bg-primary/10"
+                ? "border-primary bg-primary/10 hover:bg-primary/10 hover:text-foreground"
                 : "border-border bg-card hover:border-muted-foreground/40",
             )}
           >
             <p className="text-sm font-medium">{opt.label}</p>
-            <p className="text-xs text-muted-foreground mt-1">{opt.hint}</p>
-          </button>
+            <p className="text-xs text-muted-foreground mt-1 whitespace-normal">{opt.hint}</p>
+          </Button>
         ))}
       </div>
       {mode === "manual" && (
@@ -330,23 +330,26 @@ function IndustryKeywordsDropdown({
           <InfoTip side="right" text="Keywords filter Apollo's database by industry. Use 'plastics', 'polymer', 'moulding' or 'packaging' to target the right segment. At least one is required." />
         </div>
         {selectedCount > 0 && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => onChange([])}
-            className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
           >
             Clear all ({selectedCount})
-          </button>
+          </Button>
         )}
       </div>
 
       <div ref={ref} className="relative">
         {/* Trigger */}
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => setOpen((o) => !o)}
           className={cn(
-            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left",
+            "w-full justify-between px-3 py-2 text-sm font-normal text-left",
             open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
             "bg-card",
           )}
@@ -359,23 +362,25 @@ function IndustryKeywordsDropdown({
           <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M6 9l6 6 6-6" />
           </svg>
-        </button>
+        </Button>
 
         {/* Panel */}
         {open && (
           <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <p className="eyebrow">
                 {selectedCount > 0 ? `${selectedCount} of ${ALL_INDUSTRY_KEYWORDS.length} selected` : "Select industry segments"}
               </p>
-              <button
+              <Button
                 type="button"
+                variant="link"
+                size="sm"
                 onClick={() => onChange([...ALL_INDUSTRY_KEYWORDS])}
-                className="text-[11px] text-primary hover:underline font-medium"
+                className="h-auto p-0 text-[11px]"
               >
                 Select all
-              </button>
+              </Button>
             </div>
 
             {/* 3-column grid of categories */}
@@ -394,10 +399,11 @@ function IndustryKeywordsDropdown({
                       return (
                         <div key={cat.id} className={cn("px-3 pt-3 pb-2", catIdx > 0 && "border-t border-border/60", isCustom && "bg-amber-500/5")}>
                           {/* Category header — centered, bold */}
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
                             onClick={() => toggleCategoryKws(catKws)}
-                            className="w-full flex flex-col items-center gap-1.5 mb-2 group"
+                            className="w-full h-auto flex-col items-center gap-1.5 mb-2 rounded-none p-0 font-normal group hover:bg-transparent"
                           >
                             <div className="flex items-center gap-2">
                               <AppCheckbox
@@ -412,7 +418,7 @@ function IndustryKeywordsDropdown({
                               </span>
                             </div>
                             <div className="w-full h-px bg-border/60" />
-                          </button>
+                          </Button>
                           {/* Keywords */}
                           <div className="space-y-0.5">
                             {cat.keywords.map((kw) => {
@@ -425,25 +431,28 @@ function IndustryKeywordsDropdown({
                                     checked ? "bg-primary/10" : "hover:bg-secondary/60",
                                   )}
                                 >
-                                  <button
+                                  <Button
                                     type="button"
+                                    variant="ghost"
                                     onClick={() => toggleKw(kw.label)}
-                                    className="flex items-center gap-2 flex-1 text-left min-w-0"
+                                    className="h-auto flex-1 justify-start gap-2 rounded-none p-0 text-left font-normal min-w-0 hover:bg-transparent"
                                   >
                                     <AppCheckbox size="sm" checked={checked} />
                                     <span className={cn("text-xs leading-tight truncate", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
                                       {kw.label}
                                     </span>
-                                  </button>
+                                  </Button>
                                   {isCustom && (
-                                    <button
+                                    <Button
                                       type="button"
+                                      variant="ghost"
+                                      size="icon"
                                       onClick={() => onChange(selected.filter((s) => s !== kw.label))}
-                                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                                      className="size-5 shrink-0 rounded text-muted-foreground hover:bg-transparent hover:text-destructive"
                                       title="Remove custom keyword"
                                     >
                                       <X className="size-3" />
-                                    </button>
+                                    </Button>
                                   )}
                                 </div>
                               );
@@ -459,9 +468,9 @@ function IndustryKeywordsDropdown({
 
             {/* Manual keyword input */}
             <div className="border-t border-border px-4 py-3 bg-secondary/20">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Add custom keyword</p>
+              <p className="eyebrow mb-2">Add custom keyword</p>
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   ref={customInputRef}
                   type="text"
                   value={customInput}
@@ -471,7 +480,7 @@ function IndustryKeywordsDropdown({
                     if (e.key === "Escape") setOpen(false);
                   }}
                   placeholder="e.g. masterbatch manufacturer…"
-                  className="flex-1 bg-card text-xs border border-input rounded-md px-3 py-1.5 outline-none focus:border-ring focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                  className="h-auto flex-1 rounded-md bg-card px-3 py-1.5 text-xs"
                 />
                 <Button
                   type="button"
@@ -487,13 +496,15 @@ function IndustryKeywordsDropdown({
 
             {/* Footer */}
             <div className="border-t border-border px-4 py-2 flex items-center justify-end bg-secondary/30">
-              <button
+              <Button
                 type="button"
+                variant="link"
+                size="sm"
                 onClick={() => setOpen(false)}
-                className="text-xs font-medium text-primary hover:underline"
+                className="h-auto p-0 text-xs"
               >
                 Done
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -559,19 +570,20 @@ function LocationsDropdown({
           <InfoTip side="right" text="No selection = worldwide search. Select specific countries to narrow results, or leave empty to search globally." />
         </div>
         {selectedCount > 0 && (
-          <button type="button" onClick={() => onChangeSelected([])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChangeSelected([])} className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground">
             Clear ({selectedCount})
-          </button>
+          </Button>
         )}
       </div>
 
       <div ref={ref} className="relative">
         {/* Trigger */}
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => setOpen((o) => !o)}
           className={cn(
-            "w-full flex items-center justify-between px-3 py-2 rounded-md border text-sm transition-colors text-left bg-card",
+            "w-full justify-between px-3 py-2 text-sm font-normal text-left bg-card",
             open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
           )}
         >
@@ -583,19 +595,19 @@ function LocationsDropdown({
           <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
             <path d="M6 9l6 6 6-6" />
           </svg>
-        </button>
+        </Button>
 
         {/* Panel */}
         {open && (
           <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <p className="eyebrow">
                 {selectedCount > 0 ? `${selectedCount} of ${totalCount} selected` : "Select countries by region"}
               </p>
-              <button type="button" onClick={() => onChangeSelected([...ALL_LOCATION_KEYS])} className="text-[11px] text-primary hover:underline font-medium">
+              <Button type="button" variant="link" size="sm" onClick={() => onChangeSelected([...ALL_LOCATION_KEYS])} className="h-auto p-0 text-[11px]">
                 Select all
-              </button>
+              </Button>
             </div>
 
             {/* 5-column grid of regions */}
@@ -611,10 +623,11 @@ function LocationsDropdown({
                       return (
                         <div key={region.id} className={cn("px-3 pt-3 pb-2", ri > 0 && "border-t border-border/60")}>
                           {/* Region header */}
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
                             onClick={() => toggleRegion(region.countries)}
-                            className="w-full flex flex-col items-center gap-1.5 mb-2 group"
+                            className="w-full h-auto flex-col items-center gap-1.5 mb-2 rounded-none p-0 font-normal group hover:bg-transparent"
                           >
                             <div className="flex items-center gap-2">
                               <AppCheckbox
@@ -626,26 +639,27 @@ function LocationsDropdown({
                               </span>
                             </div>
                             <div className="w-full h-px bg-border/60" />
-                          </button>
+                          </Button>
                           {/* Countries */}
                           <div className="space-y-0.5">
                             {region.countries.map((country) => {
                               const checked = selected.includes(country);
                               return (
-                                <button
+                                <Button
                                   key={country}
                                   type="button"
+                                  variant="ghost"
                                   onClick={() => toggleCountry(country)}
                                   className={cn(
-                                    "w-full flex items-center gap-2 px-2 py-1 rounded text-left transition-colors",
-                                    checked ? "bg-primary/10" : "hover:bg-secondary/60",
+                                    "w-full h-auto justify-start gap-2 rounded px-2 py-1 text-left font-normal",
+                                    checked ? "bg-primary/10 hover:bg-primary/10" : "hover:bg-secondary/60",
                                   )}
                                 >
                                   <AppCheckbox size="sm" checked={checked} />
                                   <span className={cn("text-xs leading-tight", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
                                     {country}
                                   </span>
-                                </button>
+                                </Button>
                               );
                             })}
                           </div>
@@ -659,9 +673,9 @@ function LocationsDropdown({
 
             {/* Footer */}
             <div className="border-t border-border px-4 py-2.5 flex items-center justify-end bg-secondary/20">
-              <button type="button" onClick={() => setOpen(false)} className="text-xs font-medium text-primary hover:underline">
+              <Button type="button" variant="link" size="sm" onClick={() => setOpen(false)} className="h-auto p-0 text-xs">
                 Done
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -701,9 +715,19 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [assignMode,    setAssignMode   ] = useState<ImportAssignMode>("manual");
   const employees = useAssignableEmployees(true);
 
+  const APOLLO_STEPS = ["Criteria", "Settings", "Batch", "Assign"];
+  const [step, setStep] = useState(0);
+
   function toggleSen(s: string) {
     setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
   }
+
+  function goNext() {
+    if (step === 0 && keywords.length === 0) { setError("Please select an industry keyword."); return; }
+    setError("");
+    setStep((s) => Math.min(s + 1, APOLLO_STEPS.length - 1));
+  }
+  function goBack() { setStep((s) => Math.max(s - 1, 0)); }
 
   const effectiveLocations = locations.map((l) => LOCATION_MAP[l] ?? l);
 
@@ -759,86 +783,106 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
     }
   }
 
+  function handleFormSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (step < APOLLO_STEPS.length - 1) { goNext(); return; }
+    void handleImport(e);
+  }
+
   return (
     <div className="space-y-5">
-      <p className="text-sm text-muted-foreground">
-        Search Apollo&apos;s database to find plastic &amp; polymer industry leads.
-      </p>
-      <form onSubmit={handleImport} className="space-y-4">
-        <IndustryKeywordsDropdown selected={keywords} onChange={setKeywords} />
-        <div className="space-y-1.5">
-          <Label>Pages to fetch (50 leads/page)</Label>
-          <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
-            <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {[1,2,3,5,10].map((n) => (
-                <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <TagInput
-          label="Positions / Job Titles"
-          pills={positions}
-          suggestions={APOLLO_TITLES}
-          onChange={setPositions}
-          placeholder="e.g. VP, Plant Manager…"
-          tip="Leave empty to use 40+ built-in titles. Add specific titles to narrow results to those roles only."
-        />
-
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1">
-            <Label>Seniority</Label>
-            <InfoTip side="right" text="Filters out junior contacts. Target decision-makers like VP, Director, or C-Suite. Leave unselected to include all levels." />
+      <Stepper steps={APOLLO_STEPS} current={step} className="pb-4 mb-6 border-b border-border" />
+      <form onSubmit={handleFormSubmit} className="space-y-4">
+        {step === 0 && (
+          <div className="space-y-4">
+            <IndustryKeywordsDropdown selected={keywords} onChange={setKeywords} />
+            <TagInput
+              label="Positions / Job Titles"
+              pills={positions}
+              suggestions={APOLLO_TITLES}
+              onChange={setPositions}
+              placeholder="e.g. VP, Plant Manager…"
+              tip="Leave empty to use 40+ built-in titles. Add specific titles to narrow results to those roles only."
+            />
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1">
+                <Label>Seniority</Label>
+                <InfoTip side="right" text="Filters out junior contacts. Target decision-makers like VP, Director, or C-Suite. Leave unselected to include all levels." />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {APOLLO_SENIORITIES.map((s) => (
+                  <button
+                    key={s} type="button" onClick={() => toggleSen(s)}
+                    className={cn(
+                      badgeVariants({ variant: seniorities.includes(s) ? "selected" : "unselected" }),
+                      "py-1",
+                    )}
+                  >
+                    {s.replace("_", " ")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <LocationsDropdown
+              selected={locations}
+              onChangeSelected={setLocations}
+            />
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {APOLLO_SENIORITIES.map((s) => (
-              <button
-                key={s} type="button" onClick={() => toggleSen(s)}
-                className={cn(
-                  badgeVariants({ variant: seniorities.includes(s) ? "selected" : "unselected" }),
-                  "py-1",
-                )}
-              >
-                {s.replace("_", " ")}
-              </button>
-            ))}
+        )}
+
+        {step === 1 && (
+          <div className="space-y-1.5 max-w-xs">
+            <Label>Pages to fetch (50 leads/page)</Label>
+            <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
+              <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {[1,2,3,5,10].map((n) => (
+                  <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">Higher page counts take longer but return more leads per search.</p>
           </div>
+        )}
+
+        {step === 2 && (
+          <BatchNameField
+            value={batchName}
+            onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+            color={color}
+            onColorChange={setColor}
+            error={batchNameError}
+          />
+        )}
+
+        {step === 3 && (
+          <AssignStrategyPicker
+            employees={employees}
+            mode={assignMode}
+            onModeChange={setAssignMode}
+            assignTo={assignTo}
+            onAssignToChange={setAssignTo}
+          />
+        )}
+
+        {error && (
+          <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
+            <AlertCircle className="size-3.5 shrink-0" /> {error}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between pt-2">
+          <Button type="button" variant="outline" className="bg-card" onClick={goBack} disabled={step === 0}>Back</Button>
+          {step < APOLLO_STEPS.length - 1 ? (
+            <Button type="submit">Continue</Button>
+          ) : (
+            <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
+              <Search className="size-3.5" />
+              {importing ? "Searching & saving leads…" : "Import leads"}
+            </Button>
+          )}
         </div>
-
-        <LocationsDropdown
-          selected={locations}
-          onChangeSelected={setLocations}
-        />
-
-        <BatchNameField
-          value={batchName}
-          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
-          color={color}
-          onColorChange={setColor}
-          error={batchNameError}
-        />
-
-        <AssignStrategyPicker
-          employees={employees}
-          mode={assignMode}
-          onModeChange={setAssignMode}
-          assignTo={assignTo}
-          onAssignToChange={setAssignTo}
-        />
-
-        <Button type="submit" disabled={importing || keywords.length === 0} className="gap-1.5" title={keywords.length === 0 ? "Add at least one keyword" : undefined}>
-          <Search className="size-3.5" />
-          {importing ? "Searching & saving leads…" : "Import leads"}
-        </Button>
       </form>
-
-      {error && (
-        <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
-          <AlertCircle className="size-3.5 shrink-0" /> {error}
-        </div>
-      )}
     </div>
   );
 }
@@ -862,9 +906,11 @@ type ParseResult = {
   skipped_duplicate_in_db: number;
 };
 
+const EXCEL_STEPS = ["Upload file", "Map columns", "Batch & assign", "Review & import"];
+
 export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  type Stage = "upload" | "map" | "result";
+  type Stage = "upload" | "map" | "batch" | "result";
   const [stage,       setStage      ] = useState<Stage>("upload");
   const [fileName,    setFileName   ] = useState("");
   const [headers,     setHeaders    ] = useState<string[]>([]);
@@ -961,182 +1007,209 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     jobTitle:  mapping.title                ? String(row[mapping.title]                ?? "") : "",
   }));
 
-  if (stage === "upload") {
+  if (stage === "result") {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Every spreadsheet has different headers — we detect your columns and let you map them to platform fields.
-        </p>
-        <div
-          onClick={() => fileRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-          className="border-2 border-dashed border-border hover:border-muted-foreground rounded-xl p-12 flex flex-col items-center gap-3 cursor-pointer transition-colors"
-        >
-          <Upload className="size-8 text-muted-foreground/50" />
-          <p className="font-medium text-sm">Click or drag to upload</p>
-          <p className="text-xs text-muted-foreground">.xlsx or .csv · any column layout supported</p>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-        </div>
-        {fileError && (
-          <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
-            <AlertCircle className="size-3.5 shrink-0" /> {fileError}
+        <div className="rounded-xl border border-green-500/20 bg-green-500/5 px-5 py-4 flex items-center gap-3">
+          <CheckCircle2 className="size-5 text-green-400 shrink-0" />
+          <div>
+            <p className="font-semibold text-green-400"><span className="font-mono tabular-nums">{result?.inserted}</span> leads imported</p>
+            <p className="text-xs text-muted-foreground mt-0.5">from <span className="font-mono">{fileName}</span></p>
           </div>
-        )}
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Duplicates removed",   value: (result?.skipped_duplicate_in_file ?? 0) + (result?.skipped_duplicate_in_db ?? 0), tone: "amber" as const },
+            { label: "Blank emails skipped", value: result?.skipped_blank_email,   tone: "zinc" as const },
+            { label: "Invalid format",       value: result?.skipped_invalid_email, tone: "red" as const },
+          ].map(({ label, value, tone }) => (
+            <StatTile key={label} label={label} value={value ?? 0} tone={tone} />
+          ))}
+        </div>
+        <Button variant="outline" className="bg-card" onClick={reset}>Upload another file</Button>
       </div>
     );
   }
 
-  if (stage === "map") {
-    const emailMapped     = !!mapping.email;
-    const firstNameMapped = !!mapping.first_name;
-    const domainMapped    = !!mapping.organization_domain;
+  const emailMapped     = !!mapping.email;
+  const firstNameMapped = !!mapping.first_name;
+  const domainMapped    = !!mapping.organization_domain;
+  const currentStepIndex = stage === "upload" ? 0 : stage === "map" ? 1 : showConfirm ? 3 : 2;
 
-    return (
-      <form
-        className="space-y-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!emailMapped || !firstNameMapped || !domainMapped || importing) return;
-          if (!batchName.trim()) { setBatchNameError(true); return; }
-          setBatchNameError(false);
-          setShowConfirm(true);
-        }}
-      >
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3">
-          <FileText className="size-4 text-muted-foreground shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{fileName}</p>
-            <p className="text-xs text-muted-foreground">{rows.length} rows · {headers.length} columns detected</p>
-          </div>
-          <Button type="button" variant="outline" size="sm" className="shrink-0 bg-card" onClick={() => setShowRawPreview(true)}>View</Button>
-          <Button type="button" variant="outline" size="sm" className="shrink-0 bg-card" onClick={reset}>Change</Button>
-        </div>
-
-        <div className="space-y-3">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Column mapping</p>
-          {PLATFORM_FIELDS.map((pf, i) => {
-            const mapped = mapping[pf.key];
-            return (
-              <div key={pf.key} className={cn("grid grid-cols-2 items-center gap-3", i > 0 && "border-t border-border pt-3")}>
-                <div>
-                  <span className="text-sm">{pf.label}{pf.required && <span className="text-destructive ml-1 text-xs">*</span>}</span>
-                  {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
-                </div>
-                <Select value={mapped || "__none"} onValueChange={(v) => setMapping((m) => { const next = { ...m }; if (v === "__none") delete next[pf.key]; else next[pf.key] = v; return next; })}>
-                  <SelectTrigger className="h-8 text-xs bg-card">
-                    <SelectValue placeholder="Not mapped" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none"><span className="text-muted-foreground">Not mapped</span></SelectItem>
-                    {headers.map((h) => <SelectItem key={h} value={h}>{h.length > 40 ? `${h.slice(0, 38)}…` : h}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="space-y-1.5">
-          {!emailMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Email column must be mapped before importing</div>}
-          {emailMapped && !firstNameMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />First Name must be mapped before importing</div>}
-          {emailMapped && firstNameMapped && !domainMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Company Domain must be mapped before importing</div>}
-          {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
-        </div>
-
-        <BatchNameField
-          value={batchName}
-          onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
-          color={color}
-          onColorChange={setColor}
-          error={batchNameError}
-        />
-
-        <AssignStrategyPicker
-          employees={employees}
-          mode={assignMode}
-          onModeChange={setAssignMode}
-          assignTo={assignTo}
-          onAssignToChange={setAssignTo}
-        />
-
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" className="bg-card" onClick={reset}>Back</Button>
-            <Button type="submit" disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}>
-              Preview & Import
-            </Button>
-          </div>
-        </div>
-
-        {showConfirm && (
-          <BatchConfirmModal
-            source="excel"
-            leads={previewLeads}
-            totalCount={rows.length}
-            confirming={importing}
-            onConfirm={() => { void handleConfirm(); }}
-            onCancel={() => setShowConfirm(false)}
-          />
-        )}
-
-        <Dialog open={showRawPreview} onOpenChange={setShowRawPreview}>
-          <DialogContent className="max-w-5xl w-full p-0 gap-0 flex flex-col max-h-[85vh]">
-            <DialogHeader className="px-5 py-4 border-b border-border shrink-0">
-              <DialogTitle className="text-sm font-semibold">{fileName}</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">{rows.length} rows · {headers.length} columns</p>
-            </DialogHeader>
-            <div className="flex-1 overflow-auto min-h-0">
-              <table className="text-xs border-collapse min-w-max w-full">
-                <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm z-10">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-semibold text-muted-foreground border-b border-border w-10">#</th>
-                    {headers.map((h) => (
-                      <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground border-b border-border whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, i) => (
-                    <tr key={i} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
-                      <td className="px-3 py-2 text-muted-foreground/60 tabular-nums">{i + 1}</td>
-                      {headers.map((h) => (
-                        <td key={h} className="px-3 py-2 text-foreground/80 max-w-[200px] truncate whitespace-nowrap" title={String(row[h] ?? "")}>
-                          {String(row[h] ?? "") || <span className="text-muted-foreground/40">—</span>}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </form>
-    );
+  function handleFormSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (stage === "map") {
+      if (!emailMapped || !firstNameMapped || !domainMapped) return;
+      setStage("batch");
+      return;
+    }
+    if (importing) return;
+    if (!batchName.trim()) { setBatchNameError(true); return; }
+    setBatchNameError(false);
+    setShowConfirm(true);
   }
 
-  // result stage
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-green-500/20 bg-green-500/5 px-5 py-4 flex items-center gap-3">
-        <CheckCircle2 className="size-5 text-green-400 shrink-0" />
-        <div>
-          <p className="font-semibold text-green-400">{result?.inserted} leads imported</p>
-          <p className="text-xs text-muted-foreground mt-0.5">from {fileName}</p>
+      <Stepper steps={EXCEL_STEPS} current={currentStepIndex} className="pb-4 mb-6 border-b border-border" />
+
+      {stage === "upload" && (
+        <div className="space-y-4">
+          <div
+            onClick={() => fileRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+            className="border-2 border-dashed border-border hover:border-muted-foreground rounded-xl p-12 flex flex-col items-center gap-3 cursor-pointer transition-colors"
+          >
+            <Upload className="size-8 text-muted-foreground/50" />
+            <p className="font-medium text-sm">Click or drag to upload</p>
+            <p className="text-xs text-muted-foreground">.xlsx or .csv · any column layout supported</p>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+          </div>
+          {fileError && (
+            <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
+              <AlertCircle className="size-3.5 shrink-0" /> {fileError}
+            </div>
+          )}
         </div>
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Duplicates removed",   value: (result?.skipped_duplicate_in_file ?? 0) + (result?.skipped_duplicate_in_db ?? 0), tone: "amber" as const },
-          { label: "Blank emails skipped", value: result?.skipped_blank_email,   tone: "zinc" as const },
-          { label: "Invalid format",       value: result?.skipped_invalid_email, tone: "red" as const },
-        ].map(({ label, value, tone }) => (
-          <StatTile key={label} label={label} value={value ?? 0} tone={tone} />
-        ))}
-      </div>
-      <Button variant="outline" className="bg-card" onClick={reset}>Upload another file</Button>
+      )}
+
+      {(stage === "map" || stage === "batch") && (
+        <form className="space-y-4" onSubmit={handleFormSubmit}>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3">
+            <FileText className="size-4 text-muted-foreground shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-mono text-sm font-medium truncate">{fileName}</p>
+              <p className="font-mono text-xs text-muted-foreground tabular-nums">{rows.length} rows · {headers.length} columns detected</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="shrink-0 bg-card" onClick={() => setShowRawPreview(true)}>View</Button>
+            <Button type="button" variant="outline" size="sm" className="shrink-0 bg-card" onClick={reset}>Change</Button>
+          </div>
+
+          {stage === "map" && (
+            <>
+              <div className="space-y-3">
+                <p className="eyebrow">Column mapping</p>
+                <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                  {PLATFORM_FIELDS.map((pf) => {
+                    const mapped = mapping[pf.key];
+                    return (
+                      <div key={pf.key} className="grid grid-cols-2 items-center gap-3 rounded-lg border border-border bg-card/60 px-3 py-2.5">
+                        <div>
+                          <span className="text-sm">{pf.label}{pf.required && <span className="text-destructive ml-1 text-xs">*</span>}</span>
+                          {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
+                        </div>
+                        <Select value={mapped || "__none"} onValueChange={(v) => setMapping((m) => { const next = { ...m }; if (v === "__none") delete next[pf.key]; else next[pf.key] = v; return next; })}>
+                          <SelectTrigger className="h-8 text-xs bg-card">
+                            <SelectValue placeholder="Not mapped" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none"><span className="text-muted-foreground">Not mapped</span></SelectItem>
+                            {headers.map((h) => <SelectItem key={h} value={h}>{h.length > 40 ? `${h.slice(0, 38)}…` : h}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                {!emailMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Email column must be mapped before importing</div>}
+                {emailMapped && !firstNameMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />First Name must be mapped before importing</div>}
+                {emailMapped && firstNameMapped && !domainMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Company Domain must be mapped before importing</div>}
+                {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <p className="text-xs text-muted-foreground">{rows.length} rows detected</p>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" className="bg-card" onClick={reset}>Back</Button>
+                  <Button type="submit" disabled={!emailMapped || !firstNameMapped || !domainMapped}>
+                    Continue
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {stage === "batch" && (
+            <>
+              <BatchNameField
+                value={batchName}
+                onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
+                color={color}
+                onColorChange={setColor}
+                error={batchNameError}
+              />
+
+              <AssignStrategyPicker
+                employees={employees}
+                mode={assignMode}
+                onModeChange={setAssignMode}
+                assignTo={assignTo}
+                onAssignToChange={setAssignTo}
+              />
+
+              {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" className="bg-card" onClick={() => setStage("map")}>Back</Button>
+                  <Button type="submit" disabled={importing}>
+                    Preview & Import
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </form>
+      )}
+
+      {showConfirm && (
+        <BatchConfirmModal
+          source="excel"
+          leads={previewLeads}
+          totalCount={rows.length}
+          confirming={importing}
+          onConfirm={() => { void handleConfirm(); }}
+          onCancel={() => setShowConfirm(false)}
+        />
+      )}
+
+      <Dialog open={showRawPreview} onOpenChange={setShowRawPreview}>
+        <DialogContent className="max-w-5xl w-full p-0 gap-0 flex flex-col max-h-[85vh]">
+          <DialogHeader className="px-5 py-4 border-b border-border shrink-0">
+            <DialogTitle className="font-mono text-sm font-semibold">{fileName}</DialogTitle>
+            <p className="font-mono text-xs text-muted-foreground mt-0.5 tabular-nums">{rows.length} rows · {headers.length} columns</p>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto min-h-0">
+            <table className="text-xs border-collapse min-w-max w-full">
+              <thead className="sticky top-0 bg-secondary/80 backdrop-blur-sm z-10">
+                <tr>
+                  <th className="px-3 py-2 text-left font-mono font-semibold uppercase tracking-wider text-muted-foreground border-b border-border w-10">#</th>
+                  {headers.map((h) => (
+                    <th key={h} className="px-3 py-2 text-left font-mono font-semibold uppercase tracking-wider text-muted-foreground border-b border-border whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => (
+                  <tr key={i} className="border-b border-border/50 hover:bg-secondary/30 transition-colors">
+                    <td className="px-3 py-2 font-mono text-muted-foreground/60 tabular-nums">{i + 1}</td>
+                    {headers.map((h) => (
+                      <td key={h} className="px-3 py-2 font-mono text-foreground/80 max-w-[200px] truncate whitespace-nowrap" title={String(row[h] ?? "")}>
+                        {String(row[h] ?? "") || <span className="text-muted-foreground/40">—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1172,9 +1245,32 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
   const [assignTo,    setAssignTo   ] = useState<string>("");
   const employees = useAssignableEmployees(!editMode);
 
+  const MANUAL_STEPS = editMode ? ["Organization", "People"] : ["Organization", "People", "Batch", "Assign"];
+  const [step, setStep] = useState(0);
+
   function addLead()                                        { setLeads((p) => [...p, BLANK_LEAD()]); }
   function removeLead(i: number)                            { if (leads.length > 1) setLeads((p) => p.filter((_, j) => j !== i)); }
   function updateLead(i: number, f: keyof LeadEntry, v: string) { setLeads((p) => p.map((l, j) => j === i ? { ...l, [f]: v } : l)); }
+
+  function goNext() {
+    if (step === 0) {
+      if (!org.name.trim())   { setError("Organization name is required."); return; }
+      if (!org.domain.trim()) { setError("Company website / domain is required."); return; }
+    }
+    if (step === 1) {
+      for (const l of leads) {
+        if (!l.firstName.trim()) { setError("Each lead needs a first name."); return; }
+        if (!l.email.trim())     { setError("Each lead needs an email."); return; }
+      }
+    }
+    if (step === 2 && !editMode) {
+      if (!batchName.trim()) { setBatchNameError(true); return; }
+      setBatchNameError(false);
+    }
+    setError("");
+    setStep((s) => Math.min(s + 1, MANUAL_STEPS.length - 1));
+  }
+  function goBack() { setStep((s) => Math.max(s - 1, 0)); }
 
   function handleOpenConfirm() {
     if (!org.name.trim())   { setError("Organization name is required."); return; }
@@ -1255,78 +1351,90 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
     email: l.email, company: org.name, domain: org.domain, jobTitle: l.jobTitle,
   }));
 
+  const isLastStep = step === MANUAL_STEPS.length - 1;
+
+  function handleFormSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!isLastStep) { goNext(); return; }
+    handleOpenConfirm();
+  }
+
   return (
     <form
       className="space-y-6"
-      onSubmit={(e) => { e.preventDefault(); handleOpenConfirm(); }}
+      onSubmit={handleFormSubmit}
     >
-      <p className="text-sm text-muted-foreground">
-        {editMode ? "Edit organization and linked leads." : "Add leads under one organization."}
-      </p>
+      <Stepper steps={MANUAL_STEPS} current={step} className="pb-4 mb-6 border-b border-border" />
 
-      {/* Org */}
-      <div className="space-y-4">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Organization</p>
-        <div className="space-y-1.5">
-          <Label>Organization name <span className="text-destructive">*</span></Label>
-          <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Industry</Label>
-          <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Company website / domain <span className="text-destructive">*</span></Label>
-          <Input value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
-          <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Country</Label>
-          <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
-        </div>
-      </div>
-
-      {/* People */}
-      <div className="space-y-4">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">People</p>
-        {leads.map((lead, index) => (
-          <div key={index} className={cn("space-y-3 relative", index > 0 && "border-t border-border pt-4")}>
-            {leads.length > 1 && (
-              <button
-                type="button"
-                onClick={() => removeLead(index)}
-                className="absolute top-0 right-0 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Remove lead"
-              >
-                <X className="size-4" />
-              </button>
-            )}
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>First name <span className="text-destructive">*</span></Label>
-                <Input value={lead.firstName} onChange={(e) => updateLead(index, "firstName", e.target.value)} placeholder="Raj" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Last name</Label>
-                <Input value={lead.lastName} onChange={(e) => updateLead(index, "lastName", e.target.value)} placeholder="Sharma" />
-              </div>
+      {step === 0 && (
+        <div className="space-y-4">
+          <p className="eyebrow">Organization</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Organization name <span className="text-destructive">*</span></Label>
+              <Input value={org.name} onChange={(e) => setOrg((o) => ({ ...o, name: e.target.value }))} placeholder="Acme Plastics Ltd." />
             </div>
             <div className="space-y-1.5">
-              <Label>Email <span className="text-destructive">*</span></Label>
-              <Input type="email" value={lead.email} onChange={(e) => updateLead(index, "email", e.target.value)} placeholder="raj@company.com" />
+              <Label>Company website / domain <span className="text-destructive">*</span></Label>
+              <Input className="font-mono" value={org.domain} onChange={(e) => setOrg((o) => ({ ...o, domain: e.target.value }))} placeholder="acmeplastics.com" />
+              <p className="text-[10px] text-muted-foreground/60">Used for Firecrawl enrichment</p>
             </div>
             <div className="space-y-1.5">
-              <Label>Job title</Label>
-              <Input value={lead.jobTitle} onChange={(e) => updateLead(index, "jobTitle", e.target.value)} placeholder="VP Procurement" />
+              <Label>Industry</Label>
+              <Input value={org.industry} onChange={(e) => setOrg((o) => ({ ...o, industry: e.target.value }))} placeholder="Plastics manufacturing" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Country</Label>
+              <Input value={org.country} onChange={(e) => setOrg((o) => ({ ...o, country: e.target.value }))} placeholder="India" />
             </div>
           </div>
-        ))}
-        <Button type="button" variant="outline" className="gap-1.5 w-full bg-card" onClick={addLead}>
-          <Plus className="size-3.5" /> Add lead
-        </Button>
-      </div>
+        </div>
+      )}
 
-      {!editMode && (
+      {step === 1 && (
+        <div className="space-y-4">
+          <p className="eyebrow">People</p>
+          {leads.map((lead, index) => (
+            <div key={index} className={cn("space-y-3 relative rounded-lg border border-border bg-card/60 p-4", index > 0 && "mt-3")}>
+              {leads.length > 1 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeLead(index)}
+                  className="absolute top-2 right-2 size-6 text-muted-foreground hover:bg-transparent hover:text-foreground"
+                  aria-label="Remove lead"
+                >
+                  <X className="size-4" />
+                </Button>
+              )}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label>First name <span className="text-destructive">*</span></Label>
+                  <Input value={lead.firstName} onChange={(e) => updateLead(index, "firstName", e.target.value)} placeholder="Raj" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Last name</Label>
+                  <Input value={lead.lastName} onChange={(e) => updateLead(index, "lastName", e.target.value)} placeholder="Sharma" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Email <span className="text-destructive">*</span></Label>
+                  <Input className="font-mono" type="email" value={lead.email} onChange={(e) => updateLead(index, "email", e.target.value)} placeholder="raj@company.com" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Job title</Label>
+                  <Input value={lead.jobTitle} onChange={(e) => updateLead(index, "jobTitle", e.target.value)} placeholder="VP Procurement" />
+                </div>
+              </div>
+            </div>
+          ))}
+          <Button type="button" variant="outline" className="gap-1.5 w-full bg-card" onClick={addLead}>
+            <Plus className="size-3.5" /> Add lead
+          </Button>
+        </div>
+      )}
+
+      {step === 2 && !editMode && (
         <BatchNameField
           value={batchName}
           onChange={(v) => { setBatchName(v); if (v.trim()) setBatchNameError(false); }}
@@ -1336,12 +1444,16 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
         />
       )}
 
-      {!editMode && <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />}
+      {step === 3 && !editMode && <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
-      <Button type="submit" disabled={saving}>
-        {saving ? "Saving…" : editMode ? "Save changes" : "Preview & Save"}
-      </Button>
+
+      <div className="flex items-center justify-between pt-2">
+        <Button type="button" variant="outline" className="bg-card" onClick={goBack} disabled={step === 0}>Back</Button>
+        <Button type="submit" disabled={saving}>
+          {isLastStep ? (saving ? "Saving…" : editMode ? "Save changes" : "Preview & Save") : "Continue"}
+        </Button>
+      </div>
       {saved && <p className="text-sm text-green-400">Saved successfully.</p>}
 
       {showConfirm && (

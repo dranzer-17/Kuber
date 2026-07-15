@@ -10,6 +10,7 @@ import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const TEMPLATE_VAR_TOOLTIPS: Record<string, string> = {
   firstName:  "Lead's first name · e.g. \"John\"",
@@ -100,21 +101,22 @@ function ToolbarButton({
   title?: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       title={title}
       disabled={disabled}
       onMouseDown={(e) => { e.preventDefault(); onClick(); }}
       className={cn(
-        "rounded p-1.5 transition-colors",
+        "transition-colors",
         active
-          ? "bg-secondary text-foreground"
-          : "text-muted-foreground hover:text-foreground hover:bg-secondary/60",
-        disabled && "opacity-40 pointer-events-none",
+          ? "bg-primary/15 text-primary hover:bg-primary/15 hover:text-primary"
+          : "text-muted-foreground hover:text-foreground hover:bg-secondary",
       )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -179,12 +181,17 @@ export function RichTextEditor({
   if (!editor) return null;
 
   return (
-    <div className={cn("rounded-lg border border-border bg-card overflow-hidden", className)}>
+    <div className={cn("rounded-md border border-border bg-card overflow-hidden", className)}>
       {/* Toolbar */}
       <div className={cn(
-        "flex items-center gap-0.5 border-b border-border px-2 py-1.5 flex-wrap",
+        "flex items-center gap-0.5 border-b border-border bg-secondary/30 px-2 py-1 flex-wrap",
         disabled && "opacity-50 pointer-events-none",
       )}>
+        <span className="eyebrow inline-flex h-7 items-center gap-1.5 px-1 mr-0.5">
+          <Bold className="size-3" /> Format
+        </span>
+        <div className="w-px h-4 bg-border mx-1" />
+
         <ToolbarButton
           title="Bold"
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -257,19 +264,21 @@ export function RichTextEditor({
             <div className="w-px h-4 bg-border mx-1" />
 
             <div className="relative group">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 disabled={disabled}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   editor.chain().focus().insertContent("{{firstName}}").run();
                 }}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[11px] font-semibold border border-primary/25 hover:bg-primary/25 transition-colors cursor-pointer disabled:opacity-40"
+                className="h-6 gap-1 rounded px-1.5 py-0.5 bg-primary/15 text-primary text-[11px] font-mono font-semibold border border-primary/25 hover:bg-primary/25 hover:text-primary"
               >
                 firstName
                 <Copy className="size-2.5 opacity-60" />
-              </button>
-              <div className="pointer-events-none absolute top-full left-0 mt-1.5 z-50 w-48 rounded-lg bg-popover border border-border shadow-lg px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              </Button>
+              <div className="pointer-events-none absolute top-full left-0 mt-1.5 z-50 w-48 rounded-md bg-popover border border-border shadow-lg px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <p className="text-xs font-semibold text-foreground">Lead&apos;s first name</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">e.g. &quot;John&quot;</p>
                 <p className="text-[11px] text-muted-foreground mt-1">Type <span className="font-mono bg-muted px-0.5 rounded">{"{{firstName}}"}</span> or click to insert</p>
@@ -297,7 +306,7 @@ export function RichTextEditor({
           "[&_.ProseMirror_.is-editor-empty:first-child::before]:float-left",
           "[&_.ProseMirror_.is-editor-empty:first-child::before]:pointer-events-none",
           "[&_.ProseMirror_.is-editor-empty:first-child::before]:h-0",
-          "[&_.tpl-var-chip]:bg-primary/15 [&_.tpl-var-chip]:text-primary [&_.tpl-var-chip]:rounded [&_.tpl-var-chip]:px-1.5 [&_.tpl-var-chip]:py-0.5 [&_.tpl-var-chip]:text-xs [&_.tpl-var-chip]:font-semibold [&_.tpl-var-chip]:border [&_.tpl-var-chip]:border-primary/25 [&_.tpl-var-chip]:cursor-help",
+          "[&_.tpl-var-chip]:bg-primary/15 [&_.tpl-var-chip]:text-primary [&_.tpl-var-chip]:rounded [&_.tpl-var-chip]:px-1.5 [&_.tpl-var-chip]:py-0.5 [&_.tpl-var-chip]:text-xs [&_.tpl-var-chip]:font-mono [&_.tpl-var-chip]:font-semibold [&_.tpl-var-chip]:border [&_.tpl-var-chip]:border-primary/25 [&_.tpl-var-chip]:cursor-help",
           disabled && "opacity-60",
         )}
       />

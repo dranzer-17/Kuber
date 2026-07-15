@@ -48,7 +48,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const {
-    session, loadingSession, role, leads, setLeads, leadsTotal, loadCampaigns, setCampaigns,
+    session, loadingSession, role, leads, setLeads, leadsTotal, loadCampaigns, setCampaigns, loadLeads,
     checkedIds, setCheckedIds, selectedLead, setSelectedLead, selectedOrgId, setSelectedOrgId,
     showAddLeads, setShowAddLeads, manualPrefill, setManualPrefill,
     showCreateCampaign, setShowCreateCampaign, deletingLead, setDeletingLead,
@@ -177,7 +177,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                     <span className="text-background text-sm font-black">{APP_LOGO_INITIAL}</span>
                   </div>
                 )}
-                <span className="font-bold truncate">{APP_NAME}</span>
+                <span className="font-display font-bold tracking-tight truncate">{APP_NAME}</span>
               </>
             )}
           </div>
@@ -200,7 +200,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                     "w-full flex items-center rounded-lg text-sm font-medium transition-colors relative",
                     sidebarCollapsed ? "justify-center px-0 py-2.5" : "gap-2.5 px-3 py-2",
                     active
-                      ? "bg-primary/15 text-primary font-semibold"
+                      ? "swatch-bar bg-primary/10 text-primary font-semibold"
                       : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
                   )}
                 >
@@ -210,7 +210,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
                     sidebarCollapsed ? (
                       <span className="absolute top-1 right-1.5 size-1.5 rounded-full bg-primary" />
                     ) : (
-                      <span className="text-[10px] font-semibold bg-secondary rounded-full px-1.5 py-0.5 tabular-nums">
+                      <span className="font-mono text-[10px] font-semibold bg-secondary rounded-full px-1.5 py-0.5 tabular-nums">
                         {badge}
                       </span>
                     )
@@ -272,7 +272,11 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <AddLeadsDrawer
         open={showAddLeads}
         onClose={() => { setShowAddLeads(false); setManualPrefill(null); }}
-        onImport={() => { if (session) void loadCampaigns(session.access_token); }}
+        onImport={() => {
+          if (!session) return;
+          void loadCampaigns(session.access_token);
+          void loadLeads(session.access_token);
+        }}
         defaultTab={manualPrefill ? "manual" : "apollo"}
         prefillOrg={manualPrefill?.prefillOrg}
         prefillLeads={manualPrefill?.prefillLeads}

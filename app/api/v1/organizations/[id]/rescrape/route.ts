@@ -24,15 +24,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (org.enrichment_stage === "scraping") {
     return fail(409, "IN_PROGRESS", "Enrichment is already running for this organization");
   }
-  if ((org.enrichment_attempts ?? 0) >= 3) {
-    return fail(409, "MAX_ATTEMPTS", "This organization has reached the maximum retry limit (3 attempts)");
-  }
 
   if (org.enrichment_stage !== "queued") {
+    // The 3-attempt cap only governs automatic retries (route.ts's own
+    // RETRYABLE_STATUSES loop). A manual rescrape is a deliberate human
+    // action — most commonly triggered right after topping up OpenRouter/
+    // Firecrawl credits — so it always gets a fresh attempt budget instead
+    // of staying permanently blocked by MAX_ATTEMPTS.
     await db.from("organizations").update({
       has_scraped: false,
       enrichment_stage: "queued",
       enrichment_status: "SCRAPE_QUEUED",
+      enrichment_attempts: 0,
       last_error: null,
       updated_at: new Date().toISOString(),
     }).eq("id", id);

@@ -40,21 +40,24 @@ function BatchConfirmModalInner({
       {/* backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
 
-      <div className="relative z-10 w-full max-w-4xl mx-4 rounded-2xl border border-border bg-card shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+      <div className="enter swatch-bar-top overflow-hidden relative z-10 w-full max-w-4xl mx-4 rounded-2xl border border-border bg-card shadow-2xl flex flex-col max-h-[90vh]">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
           <div>
-            <p className="text-sm font-bold">Preview & Confirm Import</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{sourceLabel} · review leads before confirming</p>
+            <p className="eyebrow">{sourceLabel}</p>
+            <h2 className="font-display text-base font-semibold mt-0.5">Preview &amp; Confirm Import</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Review leads before confirming</p>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onCancel}
-            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg hover:bg-secondary"
+            className="size-8 text-muted-foreground hover:text-foreground"
           >
             <X className="size-4" />
-          </button>
+          </Button>
         </div>
 
         {/* Lead count */}
@@ -62,7 +65,7 @@ function BatchConfirmModalInner({
           <div className="px-6 py-2.5 border-b border-border shrink-0 flex items-center gap-1.5 bg-secondary/10">
             <Users className="size-3.5 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">
-              {totalCount} lead{totalCount !== 1 ? "s" : ""} will be imported
+              <span className="font-mono tabular-nums">{totalCount}</span> lead{totalCount !== 1 ? "s" : ""} will be imported
               {source === "apollo" && " (emails enriched post-import)"}
             </span>
           </div>
@@ -91,7 +94,7 @@ function BatchConfirmModalInner({
               <thead className="sticky top-0 bg-card border-b border-border">
                 <tr>
                   {["Name", "Email", "Organisation", "Domain", "Job Title"].map((h) => (
-                    <th key={h} className="text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                    <th key={h} className="eyebrow text-left px-3 py-2.5 whitespace-nowrap">
                       {h}
                     </th>
                   ))}
@@ -103,9 +106,9 @@ function BatchConfirmModalInner({
                     <td className="px-3 py-2.5 font-medium leading-snug wrap-break-word">
                       {[l.firstName, l.lastName].filter(Boolean).join(" ") || "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground font-mono truncate max-w-0">{l.email || "—"}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-[11px] truncate max-w-0">{l.email || "—"}</td>
                     <td className="px-3 py-2.5 text-muted-foreground truncate max-w-0">{l.company || "—"}</td>
-                    <td className="px-3 py-2.5 text-muted-foreground truncate max-w-0">
+                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-[11px] truncate max-w-0">
                       {l.domain ? (
                         <a href={/^https?:\/\//i.test(l.domain) ? l.domain : `https://${l.domain}`} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{l.domain}</a>
                       ) : "—"}
@@ -117,7 +120,7 @@ function BatchConfirmModalInner({
             </table>
           )}
           {extra > 0 && (
-            <p className="px-4 py-2.5 text-[10px] text-muted-foreground border-t border-border">
+            <p className="px-4 py-2.5 font-mono text-[10px] text-muted-foreground border-t border-border">
               +{extra} more lead{extra !== 1 ? "s" : ""} will be imported
             </p>
           )}

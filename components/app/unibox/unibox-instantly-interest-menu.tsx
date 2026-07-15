@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, Zap } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { SearchInput } from "@/components/ui/search-input";
 import { cn } from "@/lib/utils";
 import { INTEREST_FILTER_OPTIONS } from "@/components/app/unibox/unibox-status-filter";
 
@@ -40,24 +42,25 @@ export function UniboxInstantlyInterestMenu({ interestStatus, onChange, disabled
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
+        <Button
           type="button"
+          variant="outline"
           disabled={disabled}
-          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border bg-card text-xs font-medium hover:bg-secondary/40 transition-colors disabled:opacity-50"
+          className="h-8 px-2.5 bg-card text-xs font-mono font-medium uppercase tracking-wide"
         >
           <Zap className={cn("size-3.5", current.color)} />
           <span>{current.label}</span>
           <ChevronDown className="size-3.5 text-muted-foreground" />
-        </button>
+        </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-52 p-0">
+      <PopoverContent align="end" className="w-52 p-0 overflow-hidden">
+        <p className="eyebrow px-3 pt-2.5">Instantly status</p>
         <div className="p-2 border-b border-border">
-          <input
-            type="search"
+          <SearchInput
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
             placeholder="Search…"
-            className="w-full h-7 px-2 rounded-md border border-border bg-card text-xs"
+            size="sm"
           />
         </div>
         <div className="max-h-56 overflow-y-auto p-1.5 space-y-0.5">
@@ -68,8 +71,8 @@ export function UniboxInstantlyInterestMenu({ interestStatus, onChange, disabled
                 key={o.label}
                 type="button"
                 className={cn(
-                  "w-full text-left px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 flex items-center gap-2",
-                  selected ? "font-semibold text-primary bg-primary/10" : "text-muted-foreground",
+                  "w-full text-left px-2 py-1.5 rounded-md text-xs hover:bg-secondary/60 flex items-center gap-2 border-l-2",
+                  selected ? "font-semibold text-primary bg-primary/10 border-primary" : "text-muted-foreground border-transparent",
                 )}
                 onClick={() => {
                   onChange(o.value);

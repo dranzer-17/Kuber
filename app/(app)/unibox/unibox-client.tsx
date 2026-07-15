@@ -23,6 +23,8 @@ import { UniboxTemperatureBadge } from "@/components/app/unibox/unibox-temperatu
 import { UniboxInstantlyInterestMenu } from "@/components/app/unibox/unibox-instantly-interest-menu";
 import type { UniboxInterestFilter, UniboxReadStateFilter } from "@/components/app/unibox/unibox-status-filter";
 import { Avatar } from "@/components/leads/lead-ui";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 const READ_STATE_VALUES: UniboxReadStateFilter[] = ["all", "unread", "read", "replied", "needs_reply"];
 
@@ -202,51 +204,52 @@ export function UniboxClient() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="border-b border-border px-6 py-3 flex items-center justify-between shrink-0">
-        <div>
-          <h1 className="text-2xl font-bold">Unibox</h1>
-          <p className="text-xs text-muted-foreground">All conversations across campaigns and inboxes</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void handleSync()}
-            disabled={syncing}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-muted-foreground hover:text-foreground"
-          >
-            {syncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-            Sync now
-          </button>
-        </div>
+      {/* Page identity now lives in the shell's top bar (icon + "Unibox" label) —
+          this strip only carries the page-level action that doesn't belong there. */}
+      <div className="border-b border-border pl-6 pr-6 py-2 flex items-center justify-end shrink-0">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void handleSync()}
+          disabled={syncing}
+          className="gap-1.5 text-xs font-mono uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        >
+          {syncing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          Sync now
+        </Button>
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">
         {showDetail ? (
           <>
-            <div className="border-b border-border px-6 py-3 flex items-center justify-between gap-4 shrink-0">
+            <div className="swatch-bar border-b border-border pl-6 pr-6 py-3 flex items-center justify-between gap-4 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => setView("list")}
                   aria-label="Back to conversations"
-                  className="shrink-0 size-8 flex items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors"
+                  className="shrink-0 text-muted-foreground"
                 >
                   <ArrowLeft className="size-4" />
-                </button>
+                </Button>
                 <Avatar name={leadName} size="sm" />
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium truncate">{leadName}</p>
+                    <p className="font-display font-semibold truncate">{leadName}</p>
                     {leadIsDeleted && (
-                      <span
+                      <Badge
+                        variant="secondary"
                         title="This lead's record has been deleted. Thread history and reply rights are unaffected."
-                        className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-secondary px-1.5 py-0.5 rounded-full border border-border"
+                        className="shrink-0 rounded-full text-[10px] font-semibold uppercase tracking-wide"
                       >
                         Lead deleted
-                      </span>
+                      </Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{selectedSummary.lead_email}</p>
+                  <p className="font-mono text-xs text-muted-foreground truncate">{selectedSummary.lead_email}</p>
                 </div>
                 {selectedSummary.campaign && (
                   <Link

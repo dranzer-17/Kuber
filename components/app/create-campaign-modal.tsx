@@ -48,16 +48,15 @@ export type Campaign = {
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? "default" : "outline"}
+      size="icon"
       onClick={onClick}
-      className={cn(
-        "size-8 rounded-full text-xs font-semibold transition-colors border",
-        active ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-muted-foreground",
-      )}
+      className="size-8 rounded-full text-xs font-semibold"
     >
       {day[0].toUpperCase()}
-    </button>
+    </Button>
   );
 }
 
@@ -302,11 +301,20 @@ export function CreateCampaignModal({
         </DialogHeader>
 
         <div className="max-h-[68vh] space-y-6 overflow-y-auto px-6 py-5">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              Campaign name <span className="text-destructive">*</span>
-            </Label>
-            <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Plastics Outreach" />
+          <div>
+            <p className="eyebrow mb-2">Identity</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">
+                  Campaign name <span className="text-destructive">*</span>
+                </Label>
+                <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Plastics Outreach" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">Sender name</Label>
+                <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+              </div>
+            </div>
           </div>
 
           {role === "manager" && (
@@ -330,11 +338,6 @@ export function CreateCampaignModal({
               </p>
             </div>
           )}
-
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Sender name</Label>
-            <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-          </div>
 
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">Additional context for AI</Label>
@@ -389,9 +392,9 @@ export function CreateCampaignModal({
                   </div>
                 </div>
                 {!timezoneOverride ? (
-                  <button type="button" className="text-xs text-primary hover:underline" onClick={() => setTimezoneOverride(true)}>
+                  <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setTimezoneOverride(true)}>
                     Override
-                  </button>
+                  </Button>
                 ) : (
                   <Select value={timezone} onValueChange={setTimezone}>
                     <SelectTrigger className="h-9 w-45">
@@ -490,29 +493,33 @@ export function CreateCampaignModal({
                     </Select>
                     <div className="flex-1" />
                     {followupSteps.length > 1 && (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setFollowupSteps((prev) => prev.filter((_, i) => i !== idx))}
-                        className="text-xs text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                        className="h-auto p-0 text-xs text-muted-foreground hover:text-destructive hover:bg-transparent shrink-0"
                       >
                         Remove
-                      </button>
+                      </Button>
                     )}
                   </div>
                 ))}
                 {followupSteps.length < 8 && (
-                  <button
+                  <Button
                     type="button"
+                    variant="link"
+                    size="sm"
                     onClick={() =>
                       setFollowupSteps((prev) => {
                         const last = prev[prev.length - 1];
                         return [...prev, { delay: (last?.delay ?? 0) + 30, delay_unit: last?.delay_unit ?? "days" }];
                       })
                     }
-                    className="text-xs font-medium text-primary hover:underline"
+                    className="h-auto p-0 text-xs font-medium"
                   >
                     + Add follow-up step
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -560,10 +567,10 @@ export function CreateCampaignModal({
         : Math.round(attachment.attachment_size / 1024) + " KB"})
                     </span>
                   </div>
-                  <button type="button" onClick={removeAttachment}
-                          className="text-muted-foreground hover:text-foreground">
+                  <Button type="button" variant="ghost" size="icon" onClick={removeAttachment}
+                          className="size-7 text-muted-foreground hover:text-foreground">
                     <X className="size-4" />
-                  </button>
+                  </Button>
                 </div>
                 <p className="text-xs text-green-500 flex items-center gap-1">
                   <Check className="size-3" /> The AI will mention the attachment in each email.

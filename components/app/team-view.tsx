@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserPlus, RefreshCw, Eye, EyeOff } from "lucide-react";
+import { UserPlus, RefreshCw, Eye, EyeOff, Users, ShieldCheck, MapPinOff, Radio } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AvailabilityToggle } from "@/components/ui/availability-toggle";
+import { StatTile } from "@/components/ui/stat-tile";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -158,6 +159,9 @@ export function TeamView() {
   const me = users.find((u) => u.id === session?.user.id);
   const isSuperAdmin = me?.is_super_admin ?? false;
   const activeCount = users.filter((u) => u.is_active).length;
+  const managerCount = users.filter((u) => u.role === "manager").length;
+  const employeeCount = users.filter((u) => u.role === "employee").length;
+  const awayCount = users.filter((u) => u.role === "employee" && u.is_active && u.availability_status === "offline").length;
 
   // Territory-based routing (auto-assignment and manual territory bulk-assign
   // alike) silently skips leads with no covering active employee — surface
@@ -169,22 +173,46 @@ export function TeamView() {
   if (loadingSession || role !== "manager") return null;
 
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-6">
+    <div className="max-w-6xl mx-auto p-6 space-y-6 enter">
       {uncoveredTerritories.length > 0 && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
           <span className="font-semibold">No active employee covers {uncoveredTerritories.map((t) => t.label).join(", ")}.</span>{" "}
           Leads from {uncoveredTerritories.length > 1 ? "these regions" : "this region"} will pile up unassigned in the manager pool until someone is added or reactivated there.
         </div>
       )}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+
+      {/* Overview strip — headcount + coverage at a glance, above the roster
+          so the table can stay a dense, full-width scannable list. */}
+      <div className="space-y-3">
+        <p className="eyebrow px-1">Team · overview</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <StatTile layout="row" label="Active" value={loading ? "—" : activeCount} icon={Users} sub={`of ${users.length} total`} />
+          <StatTile layout="row" label="Managers" value={loading ? "—" : managerCount} icon={ShieldCheck} />
+          <StatTile layout="row" label="Employees" value={loading ? "—" : employeeCount} icon={Users} />
+          <StatTile
+            layout="row"
+            label="Away"
+            value={loading ? "—" : awayCount}
+            icon={Radio}
+            tone={awayCount > 0 ? "amber" : "neutral"}
+            sub="excluded from routing"
+          />
+          <StatTile
+            layout="row"
+            label="Territory gaps"
+            value={loading ? "—" : uncoveredTerritories.length}
+            icon={MapPinOff}
+            tone={uncoveredTerritories.length > 0 ? "red" : "neutral"}
+            sub={uncoveredTerritories.length > 0 ? uncoveredTerritories.map((t) => t.short).join(", ") : "fully covered"}
+          />
+        </div>
+      </div>
+
+      <div className="rounded-md border border-border bg-card overflow-hidden min-w-0">
         <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-border">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold tracking-tight">Users</h2>
-            {!loading && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {activeCount} active · {users.length} total
-              </p>
-            )}
+            <p className="eyebrow">Team</p>
+            <h2 className="font-display text-lg font-semibold mt-0.5">Users</h2>
           </div>
           <Button size="sm" onClick={() => setShowAdd((v) => !v)}>
             <UserPlus className="size-3.5 mr-1.5" /> Add user
@@ -194,8 +222,9 @@ export function TeamView() {
         {showAdd && (
           <form
             onSubmit={handleCreate}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-3 px-5 py-4 border-b border-border bg-secondary/20"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3 px-5 py-4 border-b border-border bg-secondary/20 enter"
           >
+            <p className="eyebrow sm:col-span-2 -mb-1">New user</p>
             <div className="space-y-1.5">
               <Label>Full name</Label>
               <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
@@ -215,15 +244,17 @@ export function TeamView() {
                   minLength={8}
                   className="pr-9"
                 />
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground hover:text-foreground"
+                  className="absolute inset-y-0 right-0 h-full w-9 rounded-none text-muted-foreground hover:bg-transparent hover:text-foreground"
                   tabIndex={-1}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                </button>
+                </Button>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -267,12 +298,12 @@ export function TeamView() {
           <Table>
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="pl-5 text-xs font-semibold text-muted-foreground">User</TableHead>
-                <TableHead className="text-xs font-semibold text-muted-foreground w-30">Workload</TableHead>
-                <TableHead className="text-xs font-semibold text-muted-foreground w-34">Role</TableHead>
-                <TableHead className="text-xs font-semibold text-muted-foreground w-34">Territory</TableHead>
-                <TableHead className="text-xs font-semibold text-muted-foreground w-26">Status</TableHead>
-                <TableHead className="pr-5 text-xs font-semibold text-muted-foreground text-right w-30">Actions</TableHead>
+                <TableHead className="pl-5 eyebrow">User</TableHead>
+                <TableHead className="eyebrow w-30">Workload</TableHead>
+                <TableHead className="eyebrow w-34">Role</TableHead>
+                <TableHead className="eyebrow w-34">Territory</TableHead>
+                <TableHead className="eyebrow w-26">Status</TableHead>
+                <TableHead className="pr-5 eyebrow text-right w-30">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -311,16 +342,16 @@ export function TeamView() {
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                          <p className="text-xs font-mono text-muted-foreground truncate">{u.email}</p>
                         </div>
                       </div>
                     </TableCell>
 
                     <TableCell className="py-3">
                       {u.role === "employee" ? (
-                        <div className="flex flex-col gap-0.5 text-xs tabular-nums">
-                          <span className="text-foreground">{leadCount} <span className="text-muted-foreground">leads</span></span>
-                          <span className="text-foreground">{campaignCount} <span className="text-muted-foreground">campaigns</span></span>
+                        <div className="flex flex-col gap-0.5 font-mono text-xs tabular-nums">
+                          <span className="text-foreground">{leadCount} <span className="text-muted-foreground font-sans">leads</span></span>
+                          <span className="text-foreground">{campaignCount} <span className="text-muted-foreground font-sans">campaigns</span></span>
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
@@ -337,7 +368,7 @@ export function TeamView() {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <span className="inline-flex h-9 items-center px-2.5 rounded-md border border-border bg-secondary/40 text-xs text-muted-foreground">
+                        <span className="inline-flex h-9 items-center px-2.5 rounded-md border border-border bg-secondary/40 font-mono text-xs text-muted-foreground">
                           {roleLabel(u)}
                         </span>
                       )}
@@ -349,7 +380,7 @@ export function TeamView() {
                           value={territorySelectValue(u.territory)}
                           onValueChange={(v) => handlePatch(u.id, { territory: v === "none" ? null : (v as Territory) })}
                         >
-                          <SelectTrigger className="h-9 w-30 bg-card" title={u.territory ? TERRITORY_OPTIONS.find((t) => t.value === territorySelectValue(u.territory))?.label ?? "Foreign (rest of world)" : "No territory"}>
+                          <SelectTrigger className="h-9 w-30 bg-card font-mono text-xs" title={u.territory ? TERRITORY_OPTIONS.find((t) => t.value === territorySelectValue(u.territory))?.label ?? "Foreign (rest of world)" : "No territory"}>
                             <SelectValue>{territoryShort(u.territory)}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
@@ -475,9 +506,10 @@ function ReassignBeforeDeactivateModal({
   return (
     <div className="fixed inset-0 z-200 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 space-y-4">
+      <div className="swatch-bar relative z-10 w-full max-w-md mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 pl-7 space-y-4 enter">
         <div>
-          <p className="text-sm font-bold">Reassign before deactivating</p>
+          <p className="eyebrow">Handover required</p>
+          <p className="font-display text-base font-semibold mt-0.5">Reassign before deactivating</p>
           <p className="text-xs text-muted-foreground mt-1">
             {displayName} still holds {leadCount} lead{leadCount !== 1 ? "s" : ""} and {campaignCount} campaign{campaignCount !== 1 ? "s" : ""}.
             Pick who takes over before this account is deactivated.

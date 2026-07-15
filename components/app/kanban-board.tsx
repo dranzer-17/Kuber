@@ -4,6 +4,7 @@ import { Info, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Lead, LeadStatus } from "@/lib/leads";
 import { kanbanColumnFor, inputRequiredReason } from "@/lib/leads";
+import { Button } from "@/components/ui/button";
 
 const KANBAN_COLS: { id: LeadStatus; label: string; hint?: string; dot: string; header: string }[] = [
   { id: "New",            label: "New",            hint: "Enrichment in progress", dot: "bg-zinc-400",   header: "border-zinc-500/30"   },
@@ -26,7 +27,7 @@ export function KanbanBoard({
   retryingAll?: boolean;
 }) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-4 min-h-[500px]">
+    <div className="enter flex gap-2 overflow-x-auto pb-4 min-h-[500px]">
       {KANBAN_COLS.map((col) => {
         const colLeads = leads.filter((l) => kanbanColumnFor(l) === col.id);
         const failedCount = col.id === "Input Required"
@@ -38,22 +39,23 @@ export function KanbanBoard({
             className="shrink-0 flex flex-col gap-2"
             style={{ width: "calc((100% - 32px) / 5)", minWidth: "160px" }}
           >
-            <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)} title={col.hint}>
+            <div className={cn("swatch-bar overflow-hidden flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)} title={col.hint}>
               <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
-              <span className="text-xs font-semibold truncate">{col.label}</span>
+              <span className="eyebrow truncate text-foreground/80!">{col.label}</span>
               {col.id === "Input Required" && onRetryAllFailed && failedCount > 0 && (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={onRetryAllFailed}
                   disabled={retryingAll}
                   title="Retry enrichment for every failed company in this list"
-                  className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-yellow-500 hover:text-yellow-400 disabled:opacity-50 transition-colors"
+                  className="ml-auto h-auto shrink-0 flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium text-yellow-500 hover:text-yellow-400 hover:bg-transparent disabled:opacity-50"
                 >
                   <RotateCcw className={cn("size-3", retryingAll && "animate-spin")} />
                   Retry all
-                </button>
+                </Button>
               )}
-              <span className={cn("text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0", !(col.id === "Input Required" && onRetryAllFailed && failedCount > 0) && "ml-auto")}>
+              <span className={cn("font-mono text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0", !(col.id === "Input Required" && onRetryAllFailed && failedCount > 0) && "ml-auto")}>
                 {colLeads.length}
               </span>
             </div>
@@ -61,12 +63,13 @@ export function KanbanBoard({
               {colLeads.map((lead) => {
                 const reason = inputRequiredReason(lead);
                 return (
-                  <button
+                  <Button
                     key={lead.id}
                     type="button"
+                    variant="ghost"
                     onClick={() => onCardClick(lead)}
                     className={cn(
-                      "rounded-lg border bg-card p-2.5 text-left cursor-pointer hover:border-muted-foreground/50 transition-colors shadow-sm relative",
+                      "h-auto w-full block rounded-lg border bg-card p-2.5 text-left font-normal cursor-pointer hover:border-muted-foreground/50 hover:bg-card transition-colors shadow-sm relative",
                       reason === "failed" ? "border-yellow-500/40" : reason === "missing_data" ? "border-red-500/30" : "border-border",
                     )}
                     title={reason === "failed" && lead.lastError ? lead.lastError : undefined}
@@ -84,7 +87,7 @@ export function KanbanBoard({
                     <p className="text-xs font-semibold truncate mb-0.5 pr-4">
                       {lead.firstName} {lead.lastName}
                     </p>
-                    <p className="text-[11px] text-muted-foreground truncate mb-2">{lead.company}</p>
+                    <p className="font-mono text-[11px] text-muted-foreground truncate mb-2">{lead.company}</p>
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[10px] text-muted-foreground/60 truncate">
                         {reason === "failed"
@@ -96,7 +99,7 @@ export function KanbanBoard({
                       {lead.score !== "—" && (
                         <span
                           className={cn(
-                            "text-[9px] font-bold px-1 py-0.5 rounded shrink-0",
+                            "font-mono text-[9px] font-bold px-1 py-0.5 rounded shrink-0",
                             lead.score === "Hot"
                               ? "bg-orange-500/15 text-orange-400"
                               : "bg-blue-500/15 text-blue-400"
@@ -106,7 +109,7 @@ export function KanbanBoard({
                         </span>
                       )}
                     </div>
-                  </button>
+                  </Button>
                 );
               })}
               {colLeads.length === 0 && (

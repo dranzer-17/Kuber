@@ -61,9 +61,9 @@ function Field({ label, value, link }: { label: string; value: string | null | u
   if (!value) return null;
   return (
     <div>
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+      <p className="eyebrow mb-0.5">{label}</p>
       {link ? (
-        <a href={toUrl(value)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:underline truncate block">{value}</a>
+        <a href={toUrl(value)} target="_blank" rel="noopener noreferrer" className="font-mono text-sm text-blue-400 hover:underline truncate block">{value}</a>
       ) : (
         <p className="text-sm">{value}</p>
       )}
@@ -82,7 +82,7 @@ function Section({
   return (
     <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+        <div className="flex items-center gap-1.5 eyebrow">
           <Icon className="size-3" /> {label}
         </div>
         {action}
@@ -204,17 +204,18 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
         open ? "translate-x-0" : "translate-x-full",
       )}>
         {/* Header */}
-        <div className="flex items-center gap-3 p-5 border-b border-border shrink-0">
+        <div className="swatch-bar-top flex items-center gap-3 p-5 border-b border-border shrink-0">
           <div className="size-9 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0">
             <Building2 className="size-4 text-muted-foreground" />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-base font-bold truncate">
+            <p className="eyebrow">Organization</p>
+            <h2 className="font-display text-lg font-semibold truncate mt-0.5">
               {org?.name ?? (loading ? "Loading…" : "Organization")}
             </h2>
             {org?.domain && (
               <div className="flex items-center gap-1.5 min-w-0">
-                <a href={toUrl(org.domain)} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 truncate hover:underline">{org.domain}</a>
+                <a href={toUrl(org.domain)} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-blue-400 truncate hover:underline">{org.domain}</a>
                 {org.domain_source === "email_inferred" && (
                   <span className="text-[9px] font-medium uppercase tracking-wide text-amber-500/80 border border-amber-500/30 rounded px-1 py-0.5 shrink-0">Inferred</span>
                 )}
@@ -223,14 +224,16 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {org && !editing && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={() => { setEditing(true); setError(""); }}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary"
+                className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
                 title="Edit organization"
               >
                 <Pencil className="size-3.5" />
-              </button>
+              </Button>
             )}
             {editing && (
               <>
@@ -243,12 +246,12 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                 </Button>
               </>
             )}
-            <button
-              type="button" onClick={onClose}
-              className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary"
+            <Button
+              type="button" variant="ghost" size="icon" onClick={onClose}
+              className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
             >
               <X className="size-4" />
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -298,7 +301,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                     </div>
                   )}
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">Details</legend>
+                    <legend className="eyebrow px-1">Details</legend>
                     <div className="space-y-1.5">
                       <Label className="text-xs">Name</Label>
                       <Input className="h-8 text-sm" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
@@ -317,7 +320,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                     </div>
                   </fieldset>
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
+                    <legend className="eyebrow px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
                     <div className="space-y-1.5">
                       <Label className="text-xs">City</Label>
                       <Input className="h-8 text-sm" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
@@ -328,7 +331,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                     </div>
                   </fieldset>
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">About</legend>
+                    <legend className="eyebrow px-1">About</legend>
                     <div className="space-y-1.5">
                       <Label className="text-xs">Description</Label>
                       <textarea
@@ -347,7 +350,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                   {org.enrichment_stage && (
                     <div className="flex items-center gap-2 px-1">
                       <span className={cn("size-2.5 rounded-full shrink-0", ENRICH_DOT[org.enrichment_stage] ?? "bg-border")} />
-                      <span className="text-sm font-medium">{ENRICH_LABEL[org.enrichment_stage] ?? org.enrichment_stage}</span>
+                      <span className="font-mono text-xs font-semibold uppercase tracking-wider">{ENRICH_LABEL[org.enrichment_stage] ?? org.enrichment_stage}</span>
                     </div>
                   )}
 
@@ -423,7 +426,7 @@ export function OrgDrawer({ orgId, onClose, onAddLead, onLeadClick }: {
                               {[lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unnamed"}
                             </p>
                             {lead.title && <p className="text-xs text-muted-foreground">{lead.title}</p>}
-                            {lead.email && <p className="text-xs text-blue-400">{lead.email}</p>}
+                            {lead.email && <p className="font-mono text-xs text-blue-400">{lead.email}</p>}
                           </div>
                         ))}
                       </div>

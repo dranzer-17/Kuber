@@ -33,16 +33,15 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
 
 function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? "default" : "outline"}
+      size="icon"
       onClick={onClick}
-      className={cn(
-        "size-8 rounded-full text-xs font-semibold transition-colors border",
-        active ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:border-muted-foreground",
-      )}
+      className="size-8 rounded-full text-xs font-semibold"
     >
       {day[0].toUpperCase()}
-    </button>
+    </Button>
   );
 }
 
@@ -215,21 +214,25 @@ export function EditCampaignForm({
             </Select>
             {!isPage && <div className="flex-1" />}
             {followupSteps.length > 1 && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
                 onClick={() => setFollowupSteps((prev) => prev.filter((_, i) => i !== idx))}
-                className="shrink-0 rounded p-0.5 text-destructive hover:bg-destructive/10 transition-colors"
+                className="size-5 shrink-0 rounded p-0.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
                 aria-label={`Remove follow-up ${idx + 1}`}
               >
                 <X className="size-3.5" />
-              </button>
+              </Button>
             )}
           </div>
         </div>
       ))}
       {followupSteps.length < 8 && (
-        <button
+        <Button
           type="button"
+          variant="link"
+          size="sm"
           onClick={() =>
             setFollowupSteps((prev) => {
               const last = prev[prev.length - 1];
@@ -237,12 +240,12 @@ export function EditCampaignForm({
             })
           }
           className={cn(
-            "text-xs font-medium text-primary hover:underline",
+            "h-auto p-0 text-xs font-medium",
             isPage && "col-span-full",
           )}
         >
           + Add follow-up step
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -35,7 +35,7 @@ export function AvailabilityToggle({
         <span
           id={`${id}-label`}
           className={cn(
-            "text-xs font-medium tabular-nums",
+            "font-mono text-xs font-medium tabular-nums",
             !ready && "text-muted-foreground",
             isAvailable && "text-emerald-600 dark:text-emerald-400",
             isAway && "text-amber-600 dark:text-amber-400",

@@ -9,6 +9,7 @@ import type { UniboxInterestFilter, UniboxReadStateFilter } from "@/components/a
 import { hasActiveUniboxFilters, UniboxFiltersPanel } from "@/components/app/unibox/unibox-filters";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SearchInput } from "@/components/ui/search-input";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   threads: UniboxThreadSummary[];
@@ -68,19 +69,29 @@ export function UniboxThreadList({
 
       <div className="flex-1 min-w-0 h-full flex flex-col bg-secondary/20">
         <div className="px-6 py-3 border-b border-border shrink-0 bg-background">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="eyebrow">
+              {threads.length > 0 ? `${threads.length} thread${threads.length === 1 ? "" : "s"}` : "Conversations"}
+            </p>
+            {unreadTotal > 0 && (
+              <p className="font-mono text-[11px] tabular-nums text-primary">{unreadTotal} unread</p>
+            )}
+          </div>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="icon"
               onClick={() => setFiltersOpen((v) => !v)}
               aria-label={filtersOpen ? "Close filters" : "Open filters"}
               className={cn(
-                "relative shrink-0 size-9 flex items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:bg-secondary/40 hover:text-foreground transition-colors",
+                "relative shrink-0 size-9 bg-card text-muted-foreground",
                 filtersActive && "text-primary",
               )}
             >
               <Menu className="size-4" />
               {filtersActive && <span className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary ring-2 ring-card" />}
-            </button>
+            </Button>
             <SearchInput
               value={search}
               onChange={onSearch}
@@ -97,7 +108,7 @@ export function UniboxThreadList({
           ) : threads.length === 0 ? (
             <EmptyState message="No conversations match your filters." />
           ) : (
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden divide-y divide-border">
+            <div className="enter rounded-xl border border-border bg-card shadow-sm overflow-hidden divide-y divide-border">
               {threads.map((t) => {
                 const name = [t.lead?.first_name, t.lead?.last_name].filter(Boolean).join(" ") || t.lead_email || "Unknown";
                 const needsReply = t.latest_direction === "received";
@@ -108,8 +119,10 @@ export function UniboxThreadList({
                     type="button"
                     onClick={() => onSelect(t.thread_id)}
                     className={cn(
-                      "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
-                      selectedId === t.thread_id ? "bg-primary/5" : "hover:bg-secondary/40",
+                      "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors border-l-2",
+                      selectedId === t.thread_id
+                        ? "swatch-bar bg-primary/5 border-transparent"
+                        : "border-transparent hover:bg-secondary/40",
                     )}
                   >
                     <span
@@ -125,13 +138,13 @@ export function UniboxThreadList({
                       </span>
                       <span className="text-muted-foreground"> — {t.preview}</span>
                     </span>
-                    <span className="flex items-center gap-1.5 shrink-0">
+                    <span className="flex items-center gap-2 shrink-0">
                       {isUnread && t.unread_count > 1 && (
-                        <span className="text-[9px] font-semibold tabular-nums min-w-4 text-center px-1 py-0.5 rounded-full bg-primary/15 text-primary">
+                        <span className="font-mono text-[9px] font-semibold tabular-nums min-w-4 text-center px-1 py-0.5 rounded-md bg-primary/15 text-primary">
                           {t.unread_count}
                         </span>
                       )}
-                      <span className="text-[10px] text-muted-foreground w-14 text-right">
+                      <span className="font-mono text-[10px] text-muted-foreground w-14 text-right tabular-nums">
                         {format(new Date(t.latest_at), "MMM d")}
                       </span>
                     </span>
@@ -141,9 +154,9 @@ export function UniboxThreadList({
             </div>
           )}
           {hasMore && (
-            <button type="button" onClick={onLoadMore} className="w-full py-2.5 text-xs text-primary hover:underline">
+            <Button type="button" variant="link" size="sm" onClick={onLoadMore} className="w-full text-xs h-auto py-2.5">
               Load more
-            </button>
+            </Button>
           )}
         </div>
       </div>

@@ -17,15 +17,16 @@ export function LoginForm() {
 
   return (
     <div className="h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+      <div className="enter swatch-bar-top overflow-hidden w-full max-w-sm rounded-xl border border-border bg-card shadow-lg">
         <div className="px-6 py-6 border-b border-border">
-          <div className="flex items-center gap-2.5 mb-5">
+          <div className="flex items-center gap-2.5 mb-6">
             <div className="size-8 bg-foreground rounded-lg flex items-center justify-center">
               <span className="text-background text-sm font-black">{APP_LOGO_INITIAL}</span>
             </div>
-            <span className="font-bold text-lg">{APP_NAME}</span>
+            <span className="font-display font-bold text-lg tracking-tight">{APP_NAME}</span>
           </div>
-          <h1 className="text-2xl font-bold">Sign in</h1>
+          <p className="eyebrow mb-1.5">Console access</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight">Sign in</h1>
           <p className="text-sm text-muted-foreground mt-1">{APP_TAGLINE}</p>
         </div>
         <form action={formAction} className="px-6 py-5 space-y-4">

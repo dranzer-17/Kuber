@@ -13,12 +13,12 @@ import {
 } from "@/lib/leads";
 
 const STATUS_STYLES: Record<LeadStatus, string> = {
-  "Input Required": "bg-yellow-500/15 text-yellow-400 border-yellow-500/25",
-  New:      "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
-  Enriching:"bg-amber-500/15 text-amber-400 border-amber-500/25",
-  Enriched: "bg-blue-500/15 text-blue-400 border-blue-500/25",
-  Open:     "bg-green-500/15 text-green-400 border-green-500/25",
-  Closed:   "bg-zinc-500/15 text-zinc-300 border-zinc-500/25",
+  "Input Required": "bg-yellow-500/10 text-yellow-400 border-yellow-500/25",
+  New:      "bg-zinc-500/10 text-zinc-400 border-zinc-500/25",
+  Enriching:"bg-amber-500/10 text-amber-400 border-amber-500/25",
+  Enriched: "bg-blue-500/10 text-blue-400 border-blue-500/25",
+  Open:     "bg-green-500/10 text-green-400 border-green-500/25",
+  Closed:   "bg-zinc-500/10 text-zinc-300 border-zinc-500/25",
 };
 
 export function StatusBadge({ status, lead }: { status: LeadStatus; lead?: Lead }) {
@@ -27,11 +27,11 @@ export function StatusBadge({ status, lead }: { status: LeadStatus; lead?: Lead 
   if (status === "Input Required" && lead) {
     const reason = inputRequiredReason(lead);
     const cls = reason === "missing_data"
-      ? "bg-red-500/15 text-red-400 border-red-500/30"
-      : "bg-yellow-500/15 text-yellow-400 border-yellow-500/30";
+      ? "bg-red-500/10 text-red-400 border-red-500/30"
+      : "bg-yellow-500/10 text-yellow-400 border-yellow-500/30";
     return (
       <span
-        className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", cls)}
+        className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border font-mono text-[10px] font-semibold uppercase tracking-wider", cls)}
         title={reason === "missing_data"
           ? "Enrichment finished but no email was found — add one before this lead can be contacted"
           : "No usable website/profile — campaigns will use the generic name-swap template"}
@@ -41,18 +41,18 @@ export function StatusBadge({ status, lead }: { status: LeadStatus; lead?: Lead 
     );
   }
   return (
-    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border", STATUS_STYLES[status])}>
+    <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded-sm border font-mono text-[10px] font-semibold uppercase tracking-wider", STATUS_STYLES[status])}>
       {STATUS_LABELS[status]}
     </span>
   );
 }
 
 export function ScoreBadge({ score }: { score: LeadScore }) {
-  if (score === "—") return <span className="text-xs text-muted-foreground">—</span>;
+  if (score === "—") return <span className="font-mono text-xs text-muted-foreground/60">—</span>;
   return (
     <span className={cn(
-      "inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold border",
-      score === "Hot" ? "bg-orange-500/15 text-orange-400 border-orange-500/25" : "bg-blue-500/15 text-blue-400 border-blue-500/25"
+      "inline-flex items-center px-1.5 py-0.5 rounded-sm border font-mono text-[10px] font-bold uppercase tracking-wider",
+      score === "Hot" ? "bg-orange-500/10 text-orange-400 border-orange-500/25" : "bg-blue-500/10 text-blue-400 border-blue-500/25"
     )}>
       {score}
     </span>
@@ -103,7 +103,7 @@ export function PipelineStepper({ currentStatus }: { currentStatus: LeadStatus }
             </div>
             <div className={cn("pb-4", last && "pb-0")}>
               <p className={cn(
-                "text-xs font-semibold",
+                "font-display text-xs font-semibold uppercase tracking-wide",
                 active ? "text-foreground" : done ? "text-muted-foreground" : "text-muted-foreground/40",
               )}>
                 {stage}

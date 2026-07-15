@@ -1,0 +1,907 @@
+<title>Add Leads — Manual Entry, 3 UI directions</title>
+<meta name="description" content="Three distinct interface directions for the Kuber Manual Entry form" />
+
+<style>
+  /* ── Shell tokens (the picker chrome around the mockups) ───────────────── */
+  :root{
+    --shell-bg:#f4f4f6;
+    --shell-ink:#14151a;
+    --shell-muted:#6b6f7a;
+    --shell-card:#ffffff;
+    --shell-border:#e2e3e8;
+    --shell-rail:#101114;
+    --shell-rail-ink:#e9e9ee;
+    --shell-rail-muted:#8b8d99;
+    --shell-rail-border:#232429;
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --shell-bg:#0c0d10;
+      --shell-ink:#eceef2;
+      --shell-muted:#9a9ca6;
+      --shell-card:#15161b;
+      --shell-border:#26272e;
+    }
+  }
+  :root[data-theme="dark"]{
+    --shell-bg:#0c0d10;
+    --shell-ink:#eceef2;
+    --shell-muted:#9a9ca6;
+    --shell-card:#15161b;
+    --shell-border:#26272e;
+  }
+  :root[data-theme="light"]{
+    --shell-bg:#f4f4f6;
+    --shell-ink:#14151a;
+    --shell-muted:#6b6f7a;
+    --shell-card:#ffffff;
+    --shell-border:#e2e3e8;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--shell-bg);
+    color:var(--shell-ink);
+    font-family:var(--font-sans);
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  h1,h2,h3{text-wrap:balance; margin:0;}
+  button{font-family:inherit;}
+  ::selection{background:#6d28d94d;}
+
+  .shell{
+    display:grid;
+    grid-template-columns:296px 1fr;
+    min-height:100vh;
+  }
+  @media (max-width:880px){
+    .shell{grid-template-columns:1fr;}
+  }
+
+  /* ── Picker rail ─────────────────────────────────────────────────────── */
+  .picker{
+    background:var(--shell-rail);
+    color:var(--shell-rail-ink);
+    padding:28px 20px;
+    display:flex;
+    flex-direction:column;
+    gap:22px;
+    position:sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
+    border-right:1px solid var(--shell-rail-border);
+  }
+  @media (max-width:880px){
+    .picker{position:relative; height:auto;}
+  }
+  .picker-head .eyebrow{
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--shell-rail-muted);
+    margin:0 0 8px;
+  }
+  .picker-head h1{
+    font-size:19px;
+    font-weight:650;
+    letter-spacing:-.01em;
+    line-height:1.25;
+  }
+  .picker-head .sub{
+    font-size:12.5px;
+    line-height:1.55;
+    color:var(--shell-rail-muted);
+    margin:8px 0 0;
+  }
+
+  .options{display:flex; flex-direction:column; gap:8px;}
+  .opt-btn{
+    all:unset;
+    cursor:pointer;
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:12px 12px;
+    border-radius:10px;
+    border:1px solid transparent;
+    transition:background-color 140ms ease, border-color 140ms ease;
+  }
+  .opt-btn:hover{background:#ffffff0d;}
+  .opt-btn:focus-visible{outline:2px solid #ffffff80; outline-offset:2px;}
+  .opt-btn.active{
+    background:#ffffff12;
+    border-color:var(--shell-rail-border);
+  }
+  .opt-btn .dot{
+    width:9px; height:9px; border-radius:999px; margin-top:4px; flex-shrink:0;
+    background:var(--dot);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--dot) 22%, transparent);
+  }
+  .opt-btn .opt-text{display:flex; flex-direction:column; gap:2px; min-width:0;}
+  .opt-btn strong{font-size:13.5px; font-weight:600;}
+  .opt-btn small{font-size:11.5px; line-height:1.4; color:var(--shell-rail-muted); font-weight:400;}
+  .opt-btn.active strong{color:#fff;}
+
+  .picker-foot{
+    margin-top:auto;
+    padding-top:16px;
+    border-top:1px solid var(--shell-rail-border);
+  }
+  .picker-foot p{
+    font-size:11.5px;
+    line-height:1.6;
+    color:var(--shell-rail-muted);
+    margin:0;
+  }
+
+  /* ── Stage ───────────────────────────────────────────────────────────── */
+  .stage{
+    padding:40px 32px 80px;
+    overflow-x:auto;
+  }
+  .panel{display:none;}
+  .panel.active{display:block; animation:fadeUp 220ms ease both;}
+  @media (prefers-reduced-motion:reduce){
+    .panel.active{animation:none;}
+  }
+  @keyframes fadeUp{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
+
+  .stage-caption{
+    max-width:760px;
+    margin:0 auto 22px;
+  }
+  .stage-caption .tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color:var(--shell-muted);
+    margin-bottom:8px;
+  }
+  .stage-caption .tag::before{
+    content:"";
+    width:6px; height:6px; border-radius:999px;
+    background:var(--accent);
+  }
+  .stage-caption h2{
+    font-size:20px;
+    font-weight:650;
+    letter-spacing:-.01em;
+    color:var(--shell-ink);
+  }
+  .stage-caption p{
+    font-size:13.5px;
+    line-height:1.6;
+    color:var(--shell-muted);
+    max-width:64ch;
+    margin:6px 0 0;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     OPTION 1 — "Console Card"
+     Calm single-card form. Violet accent. Matches the plain, dense,
+     get-it-done register of an internal ops console.
+     ══════════════════════════════════════════════════════════════════════ */
+  #opt1{
+    --o1-bg:#eef0f4;
+    --o1-card:#ffffff;
+    --o1-border:#e2e4ec;
+    --o1-ink:#161821;
+    --o1-muted:#6c7080;
+    --o1-accent:#6d28d9;
+    --o1-accent-ink:#ffffff;
+    --o1-field-bg:#fbfbfd;
+  }
+  .o1-frame{
+    background:var(--o1-bg);
+    border-radius:16px;
+    padding:36px;
+  }
+  .o1-card{
+    max-width:720px;
+    margin:0 auto;
+    background:var(--o1-card);
+    border:1px solid var(--o1-border);
+    border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,20,30,.04), 0 10px 30px -12px rgba(20,20,30,.10);
+    position:relative;
+    overflow:hidden;
+  }
+  .o1-card::before{
+    content:"";
+    position:absolute; top:0; left:0; right:0; height:3px;
+    background:var(--o1-accent);
+  }
+  .o1-head{
+    padding:22px 28px 18px;
+    border-bottom:1px solid var(--o1-border);
+    color:var(--o1-ink);
+  }
+  .o1-head h3{font-size:16.5px; font-weight:650; letter-spacing:-.01em;}
+  .o1-head p{font-size:12.5px; color:var(--o1-muted); margin:4px 0 0;}
+  .o1-body{padding:24px 28px 8px;}
+  .o1-section + .o1-section{margin-top:26px; padding-top:22px; border-top:1px solid var(--o1-border);}
+  .o1-section-label{
+    font-size:11px; font-weight:650; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--o1-muted); margin:0 0 14px;
+  }
+  .o1-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:620px){.o1-grid{grid-template-columns:1fr;}}
+  .o1-field{display:flex; flex-direction:column; gap:6px;}
+  .o1-field label{font-size:12.5px; font-weight:560; color:var(--o1-ink);}
+  .o1-field label .req{color:#dc2626; margin-left:2px;}
+  .o1-field input, .o1-field select{
+    height:38px;
+    border:1px solid var(--o1-border);
+    background:var(--o1-field-bg);
+    border-radius:8px;
+    padding:0 12px;
+    font-size:13.5px;
+    color:var(--o1-ink);
+    font-family:inherit;
+    transition:border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .o1-field input::placeholder{color:#a3a6b3;}
+  .o1-field input:focus, .o1-field select:focus{
+    outline:none; border-color:var(--o1-accent);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--o1-accent) 16%, transparent);
+  }
+  .o1-hint{font-size:11px; color:var(--o1-muted); margin:2px 0 0;}
+
+  .o1-lead-row{
+    display:grid;
+    grid-template-columns:1fr 1fr 1.3fr 1fr auto;
+    gap:10px;
+    align-items:end;
+    padding:14px 0;
+  }
+  .o1-lead-row + .o1-lead-row{border-top:1px dashed var(--o1-border);}
+  @media (max-width:760px){.o1-lead-row{grid-template-columns:1fr 1fr; }}
+  .o1-lead-row input{height:36px; border:1px solid var(--o1-border); background:var(--o1-field-bg); border-radius:7px; padding:0 10px; font-size:13px; font-family:inherit; color:var(--o1-ink);}
+  .o1-lead-row input:focus{outline:none; border-color:var(--o1-accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--o1-accent) 16%, transparent);}
+  .o1-lead-remove{
+    all:unset; cursor:pointer; width:32px; height:32px; border-radius:7px;
+    display:flex; align-items:center; justify-content:center;
+    color:#a3a6b3; border:1px solid var(--o1-border);
+  }
+  .o1-lead-remove:hover{color:#dc2626; border-color:#fca5a5; background:#fef2f2;}
+  .o1-add-lead{
+    all:unset; cursor:pointer; margin-top:10px;
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:12.5px; font-weight:600; color:var(--o1-accent);
+    padding:8px 4px;
+  }
+  .o1-add-lead:hover{text-decoration:underline;}
+
+  .o1-batch-row{display:flex; gap:14px; align-items:flex-end;}
+  .o1-batch-row .o1-field{flex:1;}
+  .o1-swatches{display:flex; gap:8px;}
+  .o1-swatch{
+    all:unset; cursor:pointer; width:26px; height:26px; border-radius:999px;
+    border:2px solid transparent;
+  }
+  .o1-swatch.sel{border-color:#161821;}
+
+  .o1-assign-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  @media (max-width:700px){.o1-assign-grid{grid-template-columns:1fr 1fr;}}
+  .o1-assign-opt{
+    border:1px solid var(--o1-border); border-radius:9px; padding:12px;
+    cursor:pointer; background:var(--o1-field-bg);
+  }
+  .o1-assign-opt.sel{border-color:var(--o1-accent); background:color-mix(in srgb, var(--o1-accent) 6%, white);}
+  .o1-assign-opt strong{display:block; font-size:12.5px; margin-bottom:3px; color:var(--o1-ink);}
+  .o1-assign-opt span{font-size:11px; line-height:1.4; color:var(--o1-muted);}
+
+  .o1-foot{
+    display:flex; justify-content:flex-end; gap:10px;
+    padding:20px 28px; border-top:1px solid var(--o1-border); margin-top:18px;
+  }
+  .o1-btn{
+    all:unset; cursor:pointer; height:38px; padding:0 18px; border-radius:8px;
+    font-size:13px; font-weight:600; display:flex; align-items:center;
+  }
+  .o1-btn.ghost{border:1px solid var(--o1-border); color:var(--o1-ink);}
+  .o1-btn.ghost:hover{background:#f2f2f5;}
+  .o1-btn.primary{background:var(--o1-accent); color:var(--o1-accent-ink);}
+  .o1-btn.primary:hover{background:#5f21c4;}
+
+  /* ══════════════════════════════════════════════════════════════════════
+     OPTION 2 — "Floating Field"
+     Airy modal, floating labels break the border line, blue accent,
+     roomy vertical rhythm.
+     ══════════════════════════════════════════════════════════════════════ */
+  #opt2{
+    --o2-bg:#f7f8fb;
+    --o2-card:#ffffff;
+    --o2-border:#d7dae3;
+    --o2-ink:#12141a;
+    --o2-muted:#767c8a;
+    --o2-accent:#2563eb;
+  }
+  .o2-frame{background:var(--o2-bg); border-radius:16px; padding:44px 28px;}
+  .o2-card{
+    max-width:660px; margin:0 auto;
+    background:var(--o2-card); border-radius:16px;
+    box-shadow:0 20px 50px -20px rgba(20,30,60,.18), 0 2px 6px rgba(20,30,60,.06);
+  }
+  .o2-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px 28px; border-bottom:1px solid var(--o2-border);
+  }
+  .o2-head h3{font-size:17px; font-weight:600; color:var(--o2-ink);}
+  .o2-close{all:unset; cursor:pointer; color:var(--o2-muted); font-size:18px; line-height:1; padding:4px;}
+  .o2-close:hover{color:var(--o2-ink);}
+  .o2-body{padding:28px; display:flex; flex-direction:column; gap:26px;}
+
+  .o2-fieldset{border:0; padding:0; margin:0; display:flex; flex-direction:column; gap:18px;}
+  .o2-fieldset legend{
+    font-size:10.5px; font-weight:650; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--o2-muted); padding:0 0 4px; margin-bottom:2px;
+  }
+  .o2-grid2{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  @media (max-width:560px){.o2-grid2{grid-template-columns:1fr;}}
+
+  .o2-float{position:relative;}
+  .o2-float input{
+    width:100%; height:46px; border:1.5px solid var(--o2-border); border-radius:9px;
+    padding:0 14px; font-size:14px; color:var(--o2-ink); font-family:inherit;
+    background:transparent;
+  }
+  .o2-float label{
+    position:absolute; left:11px; top:-8px; background:var(--o2-card);
+    padding:0 5px; font-size:11px; color:var(--o2-muted); font-weight:560;
+  }
+  .o2-float label .req{color:#dc2626; margin-left:2px;}
+  .o2-float input:focus{outline:none; border-color:var(--o2-accent); box-shadow:0 0 0 4px color-mix(in srgb, var(--o2-accent) 12%, transparent);}
+  .o2-float input:focus + label, .o2-float.has-value label{color:var(--o2-accent);}
+  .o2-hint{font-size:11px; color:var(--o2-muted); margin:-8px 2px 0;}
+
+  .o2-lead-card{
+    border:1.5px solid var(--o2-border); border-radius:12px; padding:16px;
+    display:flex; flex-direction:column; gap:14px; position:relative;
+  }
+  .o2-lead-card + .o2-lead-card{margin-top:2px;}
+  .o2-lead-num{
+    position:absolute; top:-10px; left:14px; background:var(--o2-card);
+    padding:0 8px; font-size:10.5px; font-weight:650; color:var(--o2-accent);
+  }
+  .o2-lead-remove{
+    all:unset; cursor:pointer; position:absolute; top:12px; right:12px;
+    color:var(--o2-muted); font-size:15px; line-height:1; padding:3px;
+  }
+  .o2-lead-remove:hover{color:#dc2626;}
+  .o2-add-lead{
+    all:unset; cursor:pointer; align-self:flex-start;
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:13px; font-weight:600; color:var(--o2-accent);
+    border:1.5px dashed color-mix(in srgb, var(--o2-accent) 40%, transparent);
+    padding:10px 16px; border-radius:9px; width:100%; justify-content:center;
+  }
+  .o2-add-lead:hover{background:color-mix(in srgb, var(--o2-accent) 6%, transparent);}
+
+  .o2-batch{display:flex; gap:14px; align-items:flex-start;}
+  .o2-batch .o2-float{flex:1;}
+  .o2-colorpick{display:flex; flex-direction:column; gap:8px;}
+  .o2-colorpick > span{font-size:11px; font-weight:560; color:var(--o2-muted);}
+  .o2-swatches{display:flex; gap:7px;}
+  .o2-swatch{all:unset; cursor:pointer; width:24px; height:24px; border-radius:8px; border:2px solid transparent;}
+  .o2-swatch.sel{border-color:var(--o2-ink);}
+
+  .o2-toggle-row{display:flex; align-items:center; justify-content:space-between; gap:16px;}
+  .o2-toggle-row .txt strong{display:block; font-size:13px; color:var(--o2-ink);}
+  .o2-toggle-row .txt span{font-size:11.5px; color:var(--o2-muted);}
+  .o2-switch{
+    position:relative; width:38px; height:22px; border-radius:999px; flex-shrink:0;
+    background:#d7dae3; cursor:pointer; border:0; padding:0;
+  }
+  .o2-switch::after{
+    content:""; position:absolute; top:2px; left:2px; width:18px; height:18px;
+    border-radius:999px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.25);
+    transition:transform 140ms ease;
+  }
+  .o2-switch.on{background:var(--o2-accent);}
+  .o2-switch.on::after{transform:translateX(16px);}
+
+  .o2-assign-select{position:relative;}
+  .o2-assign-list{
+    border:1.5px solid var(--o2-border); border-radius:10px; overflow:hidden;
+  }
+  .o2-assign-item{
+    padding:12px 14px; display:flex; flex-direction:column; gap:2px; cursor:pointer;
+    border-bottom:1px solid var(--o2-border);
+  }
+  .o2-assign-item:last-child{border-bottom:0;}
+  .o2-assign-item strong{font-size:13px; color:var(--o2-ink);}
+  .o2-assign-item span{font-size:11.5px; color:var(--o2-muted);}
+  .o2-assign-item.sel{background:color-mix(in srgb, var(--o2-accent) 7%, transparent);}
+  .o2-assign-item.sel strong{color:var(--o2-accent);}
+
+  .o2-foot{
+    display:flex; justify-content:flex-end; gap:10px;
+    padding:20px 28px; border-top:1px solid var(--o2-border);
+  }
+  .o2-btn{all:unset; cursor:pointer; height:42px; padding:0 20px; border-radius:9px; font-size:13.5px; font-weight:600; display:flex; align-items:center;}
+  .o2-btn.ghost{border:1.5px solid var(--o2-border); color:var(--o2-ink);}
+  .o2-btn.ghost:hover{background:#f2f4f8;}
+  .o2-btn.primary{background:var(--o2-accent); color:#fff;}
+  .o2-btn.primary:hover{background:#1d4ed8;}
+
+  /* ══════════════════════════════════════════════════════════════════════
+     OPTION 3 — "Spec Wizard"
+     Dark step rail on the left, amber accent, progressive disclosure —
+     one step visible at a time. Numbered because it IS a sequence here.
+     ══════════════════════════════════════════════════════════════════════ */
+  #opt3{
+    --o3-bg:#f6f6f4;
+    --o3-card:#ffffff;
+    --o3-border:#e5e4de;
+    --o3-ink:#1a1a17;
+    --o3-muted:#77766c;
+    --o3-accent:#d97706;
+    --o3-rail:#17171a;
+    --o3-rail-border:#2a2a2d;
+  }
+  .o3-frame{background:var(--o3-bg); border-radius:16px; overflow:hidden; max-width:900px; margin:0 auto;
+    box-shadow:0 20px 60px -24px rgba(0,0,0,.35);}
+  .o3-shell{display:grid; grid-template-columns:230px 1fr; min-height:520px;}
+  @media (max-width:680px){.o3-shell{grid-template-columns:1fr;}}
+
+  .o3-rail{background:var(--o3-rail); color:#e7e6e2; padding:22px 16px; display:flex; flex-direction:column;}
+  .o3-rail-head{padding:2px 6px 18px; border-bottom:1px solid var(--o3-rail-border); margin-bottom:14px;}
+  .o3-rail-head .tag{font-family:var(--font-mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#8b8a83;}
+  .o3-rail-head h4{font-size:14.5px; font-weight:650; margin:4px 0 0;}
+  .o3-step{
+    all:unset; cursor:pointer; display:flex; align-items:center; gap:10px;
+    padding:11px 10px; border-radius:9px; color:#a3a29a; width:100%;
+  }
+  .o3-step + .o3-step{margin-top:2px;}
+  .o3-step:hover{background:#ffffff0a;}
+  .o3-step.active{background:#ffffff14; color:#fff;}
+  .o3-step .num{
+    font-family:var(--font-mono); font-size:11px; width:20px; height:20px; border-radius:6px;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    border:1px solid #3a3a3d; color:#8b8a83;
+  }
+  .o3-step.active .num{background:var(--o3-accent); border-color:var(--o3-accent); color:#1a1207; font-weight:700;}
+  .o3-step .lbl{font-size:13px; font-weight:560;}
+  .o3-step .done-mark{margin-left:auto; color:var(--o3-accent); font-size:12px;}
+
+  .o3-content{background:var(--o3-card); display:flex; flex-direction:column;}
+  .o3-content-head{padding:22px 28px 16px; border-bottom:1px solid var(--o3-border);}
+  .o3-content-head .tag{font-family:var(--font-mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--o3-accent);}
+  .o3-content-head h3{font-size:17px; font-weight:650; color:var(--o3-ink); margin-top:4px;}
+  .o3-content-body{padding:24px 28px; flex:1; display:flex; flex-direction:column; gap:20px;}
+  .o3-step-panel{display:none;}
+  .o3-step-panel.active{display:flex; flex-direction:column; gap:20px;}
+
+  .o3-grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:560px){.o3-grid2{grid-template-columns:1fr;}}
+  .o3-field{display:flex; flex-direction:column; gap:6px;}
+  .o3-field label{font-size:11.5px; font-weight:650; color:var(--o3-ink); text-transform:uppercase; letter-spacing:.03em;}
+  .o3-field label .req{color:#c2410c; margin-left:2px; text-transform:none;}
+  .o3-field input, .o3-field select{
+    height:40px; border:1px solid var(--o3-border); border-radius:6px; padding:0 12px;
+    font-size:13.5px; color:var(--o3-ink); font-family:inherit; background:#fdfdfb;
+  }
+  .o3-field input:focus, .o3-field select:focus{
+    outline:none; border-color:var(--o3-accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--o3-accent) 18%, transparent);
+  }
+  .o3-hint{font-size:11px; color:var(--o3-muted); margin:0;}
+
+  .o3-lead-card{border:1px solid var(--o3-border); border-radius:8px; padding:14px; position:relative; background:#fdfdfb;}
+  .o3-lead-card + .o3-lead-card{margin-top:10px;}
+  .o3-lead-tag{
+    font-family:var(--font-mono); font-size:10px; color:var(--o3-muted);
+    position:absolute; top:-9px; left:12px; background:var(--o3-card); padding:0 6px;
+  }
+  .o3-lead-grid{display:grid; grid-template-columns:1fr 1fr 1.3fr 1fr; gap:10px;}
+  @media (max-width:640px){.o3-lead-grid{grid-template-columns:1fr 1fr;}}
+  .o3-lead-grid input{height:36px; border:1px solid var(--o3-border); border-radius:6px; padding:0 10px; font-size:13px; font-family:inherit; background:#fff;}
+  .o3-lead-grid input:focus{outline:none; border-color:var(--o3-accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--o3-accent) 18%, transparent);}
+  .o3-add-lead{
+    all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--font-mono); font-size:11.5px; font-weight:600; color:var(--o3-accent);
+    letter-spacing:.03em;
+  }
+  .o3-add-lead:hover{text-decoration:underline;}
+
+  .o3-swatches{display:flex; gap:8px;}
+  .o3-swatch{all:unset; cursor:pointer; width:24px; height:24px; border-radius:6px; border:2px solid transparent;}
+  .o3-swatch.sel{border-color:var(--o3-ink); transform:scale(1.08);}
+
+  .o3-assign-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;}
+  .o3-assign-opt{border:1px solid var(--o3-border); border-radius:7px; padding:12px; cursor:pointer; background:#fdfdfb;}
+  .o3-assign-opt.sel{border-color:var(--o3-accent); background:color-mix(in srgb, var(--o3-accent) 7%, white);}
+  .o3-assign-opt strong{display:block; font-size:12.5px; margin-bottom:3px; color:var(--o3-ink);}
+  .o3-assign-opt span{font-size:11px; line-height:1.4; color:var(--o3-muted);}
+
+  .o3-content-foot{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    padding:16px 28px; border-top:1px solid var(--o3-border);
+  }
+  .o3-progress{font-family:var(--font-mono); font-size:11px; color:var(--o3-muted); font-variant-numeric:tabular-nums;}
+  .o3-foot-actions{display:flex; gap:10px;}
+  .o3-btn{all:unset; cursor:pointer; height:38px; padding:0 18px; border-radius:7px; font-size:13px; font-weight:600; display:flex; align-items:center;}
+  .o3-btn.ghost{border:1px solid var(--o3-border); color:var(--o3-ink);}
+  .o3-btn.ghost:hover{background:#f1f1ee;}
+  .o3-btn.primary{background:var(--o3-accent); color:#1a1207;}
+  .o3-btn.primary:hover{background:#c2680a;}
+</style>
+
+<div class="shell">
+  <aside class="picker">
+    <div class="picker-head">
+      <p class="eyebrow">Design review · Kuber</p>
+      <h1>Add Leads — Manual&nbsp;Entry</h1>
+      <p class="sub">Same fields, three different interface treatments. Pick the one to build for real — nothing here is wired up yet.</p>
+    </div>
+    <div class="options" role="tablist">
+      <button class="opt-btn active" data-target="opt1" style="--dot:#6d28d9" role="tab" aria-selected="true">
+        <span class="dot"></span>
+        <span class="opt-text"><strong>Option 1 · Console Card</strong><small>One calm card, everything visible, violet accent</small></span>
+      </button>
+      <button class="opt-btn" data-target="opt2" style="--dot:#2563eb" role="tab" aria-selected="false">
+        <span class="dot"></span>
+        <span class="opt-text"><strong>Option 2 · Floating Field</strong><small>Airy dialog, floating labels, blue accent</small></span>
+      </button>
+      <button class="opt-btn" data-target="opt3" style="--dot:#d97706" role="tab" aria-selected="false">
+        <span class="dot"></span>
+        <span class="opt-text"><strong>Option 3 · Spec Wizard</strong><small>Dark step rail, one section at a time, amber accent</small></span>
+      </button>
+    </div>
+    <div class="picker-foot">
+      <p>Rendering only — no data is saved here. Tell Claude which option (or a mix) and it'll be built into the real Add Leads modal.</p>
+    </div>
+  </aside>
+
+  <main class="stage">
+    <!-- ═══════════ OPTION 1 ═══════════ -->
+    <section id="opt1" class="panel active" style="--accent:#6d28d9">
+      <div class="stage-caption">
+        <p class="tag">Option 1 — Console Card</p>
+        <h2>A single flat card, nothing hidden</h2>
+        <p>Every field is visible at once, grouped by hairline dividers — Organization, People, Batch &amp; Assignment. Closest to how the current form already reads, just tightened up: consistent 2-column field grid, a violet top rail as the only accent, dashed row dividers between people.</p>
+      </div>
+      <div class="o1-frame">
+        <div class="o1-card">
+          <div class="o1-head">
+            <h3>Add leads under one organization</h3>
+            <p>Company details, the people at that company, and how the batch should be labelled and assigned.</p>
+          </div>
+          <div class="o1-body">
+            <div class="o1-section">
+              <p class="o1-section-label">Organization</p>
+              <div class="o1-grid">
+                <div class="o1-field">
+                  <label>Organization name<span class="req">*</span></label>
+                  <input type="text" placeholder="e.g. Kuber Polyplast" />
+                </div>
+                <div class="o1-field">
+                  <label>Company website / domain<span class="req">*</span></label>
+                  <input type="text" placeholder="kuberpolyplast.com" />
+                  <p class="o1-hint">Used for Firecrawl enrichment</p>
+                </div>
+                <div class="o1-field">
+                  <label>Industry</label>
+                  <input type="text" placeholder="Masterbatch &amp; compounding" />
+                </div>
+                <div class="o1-field">
+                  <label>Country</label>
+                  <input type="text" placeholder="India" />
+                </div>
+              </div>
+            </div>
+
+            <div class="o1-section">
+              <p class="o1-section-label">People</p>
+              <div class="o1-lead-row">
+                <div class="o1-field"><label>First name<span class="req">*</span></label><input type="text" value="Raj" /></div>
+                <div class="o1-field"><label>Last name</label><input type="text" value="Sharma" /></div>
+                <div class="o1-field"><label>Email<span class="req">*</span></label><input type="text" value="raj@kuberpolyplast.com" /></div>
+                <div class="o1-field"><label>Job title</label><input type="text" placeholder="VP Procurement" /></div>
+                <button class="o1-lead-remove" title="Remove" aria-label="Remove lead">✕</button>
+              </div>
+              <div class="o1-lead-row">
+                <div class="o1-field"><label>First name<span class="req">*</span></label><input type="text" placeholder="First name" /></div>
+                <div class="o1-field"><label>Last name</label><input type="text" placeholder="Last name" /></div>
+                <div class="o1-field"><label>Email<span class="req">*</span></label><input type="text" placeholder="name@company.com" /></div>
+                <div class="o1-field"><label>Job title</label><input type="text" placeholder="Job title" /></div>
+                <button class="o1-lead-remove" title="Remove" aria-label="Remove lead">✕</button>
+              </div>
+              <button class="o1-add-lead">＋ Add another person</button>
+            </div>
+
+            <div class="o1-section">
+              <p class="o1-section-label">Batch &amp; assignment</p>
+              <div class="o1-batch-row">
+                <div class="o1-field">
+                  <label>Batch name<span class="req">*</span></label>
+                  <input type="text" placeholder="e.g. India Plastics Q3" />
+                </div>
+                <div class="o1-field" style="flex:0;">
+                  <label>Colour</label>
+                  <div class="o1-swatches">
+                    <button class="o1-swatch sel" style="background:#7c3aed" title="Violet"></button>
+                    <button class="o1-swatch" style="background:#2563eb" title="Blue"></button>
+                    <button class="o1-swatch" style="background:#16a34a" title="Green"></button>
+                    <button class="o1-swatch" style="background:#ea580c" title="Orange"></button>
+                    <button class="o1-swatch" style="background:#e11d48" title="Rose"></button>
+                  </div>
+                </div>
+              </div>
+              <div class="o1-assign-grid" style="margin-top:16px;">
+                <div class="o1-assign-opt"><strong>Leave in pool</strong><span>Unassigned — distribute later from the Leads page.</span></div>
+                <div class="o1-assign-opt sel"><strong>One employee</strong><span>The whole batch goes to one person.</span></div>
+                <div class="o1-assign-opt"><strong>Round-robin</strong><span>Spread across active employees, least-loaded first.</span></div>
+                <div class="o1-assign-opt"><strong>By territory</strong><span>India → India reps, everything else → foreign reps.</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="o1-foot">
+            <button class="o1-btn ghost">Cancel</button>
+            <button class="o1-btn primary">Preview &amp; save</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ OPTION 2 ═══════════ -->
+    <section id="opt2" class="panel" style="--accent:#2563eb">
+      <div class="stage-caption">
+        <p class="tag">Option 2 — Floating Field</p>
+        <h2>Airier, dialog-native, blue accent</h2>
+        <p>Labels sit directly on the input border instead of stacked above it, each person is their own bordered card with a numbered tab, and the assignment choice becomes a proper selectable list rather than a card grid. More breathing room, fewer hard rules.</p>
+      </div>
+      <div class="o2-frame">
+        <div class="o2-card">
+          <div class="o2-head">
+            <h3>Add Leads · Manual Entry</h3>
+            <button class="o2-close" aria-label="Close">✕</button>
+          </div>
+          <div class="o2-body">
+            <fieldset class="o2-fieldset">
+              <legend>Organization</legend>
+              <div class="o2-grid2">
+                <div class="o2-float has-value">
+                  <input type="text" value="Kuber Polyplast" />
+                  <label>Organization name<span class="req">*</span></label>
+                </div>
+                <div class="o2-float has-value">
+                  <input type="text" value="kuberpolyplast.com" />
+                  <label>Company domain<span class="req">*</span></label>
+                </div>
+              </div>
+              <div class="o2-grid2">
+                <div class="o2-float">
+                  <input type="text" placeholder="" />
+                  <label>Industry</label>
+                </div>
+                <div class="o2-float">
+                  <input type="text" placeholder="" />
+                  <label>Country</label>
+                </div>
+              </div>
+              <p class="o2-hint">Domain is used to enrich the company profile automatically.</p>
+            </fieldset>
+
+            <fieldset class="o2-fieldset">
+              <legend>People</legend>
+              <div class="o2-lead-card">
+                <span class="o2-lead-num">Person 1</span>
+                <button class="o2-lead-remove" aria-label="Remove person">✕</button>
+                <div class="o2-grid2">
+                  <div class="o2-float has-value"><input type="text" value="Raj" /><label>First name<span class="req">*</span></label></div>
+                  <div class="o2-float has-value"><input type="text" value="Sharma" /><label>Last name</label></div>
+                </div>
+                <div class="o2-grid2">
+                  <div class="o2-float has-value"><input type="text" value="raj@kuberpolyplast.com" /><label>Email<span class="req">*</span></label></div>
+                  <div class="o2-float"><input type="text" placeholder="" /><label>Job title</label></div>
+                </div>
+              </div>
+              <button class="o2-add-lead">＋ Add another person</button>
+            </fieldset>
+
+            <fieldset class="o2-fieldset">
+              <legend>Batch</legend>
+              <div class="o2-batch">
+                <div class="o2-float">
+                  <input type="text" placeholder="" />
+                  <label>Batch name<span class="req">*</span></label>
+                </div>
+                <div class="o2-colorpick">
+                  <span>Colour</span>
+                  <div class="o2-swatches">
+                    <button class="o2-swatch sel" style="background:#2563eb" title="Blue"></button>
+                    <button class="o2-swatch" style="background:#7c3aed" title="Violet"></button>
+                    <button class="o2-swatch" style="background:#16a34a" title="Green"></button>
+                    <button class="o2-swatch" style="background:#ea580c" title="Orange"></button>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset class="o2-fieldset">
+              <legend>Assign imported leads</legend>
+              <div class="o2-assign-list">
+                <div class="o2-assign-item"><strong>Leave in pool</strong><span>Unassigned — distribute later from the Leads page</span></div>
+                <div class="o2-assign-item sel"><strong>One employee</strong><span>The whole batch goes to one person</span></div>
+                <div class="o2-assign-item"><strong>Round-robin</strong><span>Spread across active employees, least-loaded first</span></div>
+                <div class="o2-assign-item"><strong>By territory</strong><span>India → India reps, everything else → foreign reps</span></div>
+              </div>
+              <div class="o2-toggle-row" style="margin-top:16px;">
+                <div class="txt"><strong>Notify assignee</strong><span>Send an in-app note when this batch lands with them</span></div>
+                <button class="o2-switch on" aria-pressed="true"></button>
+              </div>
+            </fieldset>
+          </div>
+          <div class="o2-foot">
+            <button class="o2-btn ghost">Cancel</button>
+            <button class="o2-btn primary">Preview &amp; save</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════ OPTION 3 ═══════════ -->
+    <section id="opt3" class="panel" style="--accent:#d97706">
+      <div class="stage-caption">
+        <p class="tag">Option 3 — Spec Wizard</p>
+        <h2>One step at a time, dark rail, amber accent</h2>
+        <p>Filling this form really is a sequence — company, then its people, then how the batch gets labelled and routed — so this direction makes that explicit: a dark left rail steps through Organization → People → Batch, one panel visible at a time, with a running progress count in the footer.</p>
+      </div>
+      <div class="o3-frame">
+        <div class="o3-shell">
+          <nav class="o3-rail">
+            <div class="o3-rail-head">
+              <p class="tag">Add leads</p>
+              <h4>Manual entry</h4>
+            </div>
+            <button class="o3-step active" data-step="s1"><span class="num">1</span><span class="lbl">Organization</span></button>
+            <button class="o3-step" data-step="s2"><span class="num">2</span><span class="lbl">People</span></button>
+            <button class="o3-step" data-step="s3"><span class="num">3</span><span class="lbl">Batch &amp; assign</span></button>
+          </nav>
+          <div class="o3-content">
+            <div class="o3-content-head">
+              <p class="tag" id="o3-step-tag">Step 1 of 3</p>
+              <h3 id="o3-step-title">Organization</h3>
+            </div>
+            <div class="o3-content-body">
+              <div class="o3-step-panel active" id="s1">
+                <div class="o3-grid2">
+                  <div class="o3-field"><label>Organization name<span class="req">*</span></label><input type="text" value="Kuber Polyplast" /></div>
+                  <div class="o3-field"><label>Company domain<span class="req">*</span></label><input type="text" value="kuberpolyplast.com" /></div>
+                </div>
+                <div class="o3-grid2">
+                  <div class="o3-field"><label>Industry</label><input type="text" placeholder="Masterbatch & compounding" /></div>
+                  <div class="o3-field"><label>Country</label><input type="text" placeholder="India" /></div>
+                </div>
+                <p class="o3-hint">The domain is used to enrich the company profile via Firecrawl once saved.</p>
+              </div>
+
+              <div class="o3-step-panel" id="s2">
+                <div class="o3-lead-card">
+                  <span class="o3-lead-tag">PERSON · 01</span>
+                  <div class="o3-lead-grid">
+                    <input type="text" value="Raj" placeholder="First name *" />
+                    <input type="text" value="Sharma" placeholder="Last name" />
+                    <input type="text" value="raj@kuberpolyplast.com" placeholder="Email *" />
+                    <input type="text" placeholder="Job title" />
+                  </div>
+                </div>
+                <div class="o3-lead-card">
+                  <span class="o3-lead-tag">PERSON · 02</span>
+                  <div class="o3-lead-grid">
+                    <input type="text" placeholder="First name *" />
+                    <input type="text" placeholder="Last name" />
+                    <input type="text" placeholder="Email *" />
+                    <input type="text" placeholder="Job title" />
+                  </div>
+                </div>
+                <button class="o3-add-lead">+ ADD PERSON</button>
+              </div>
+
+              <div class="o3-step-panel" id="s3">
+                <div class="o3-grid2">
+                  <div class="o3-field"><label>Batch name<span class="req">*</span></label><input type="text" placeholder="e.g. India Plastics Q3" /></div>
+                  <div class="o3-field">
+                    <label>Colour</label>
+                    <div class="o3-swatches">
+                      <button class="o3-swatch sel" style="background:#d97706" title="Amber"></button>
+                      <button class="o3-swatch" style="background:#7c3aed" title="Violet"></button>
+                      <button class="o3-swatch" style="background:#2563eb" title="Blue"></button>
+                      <button class="o3-swatch" style="background:#16a34a" title="Green"></button>
+                    </div>
+                  </div>
+                </div>
+                <div class="o3-field"><label>Assign imported leads</label></div>
+                <div class="o3-assign-grid">
+                  <div class="o3-assign-opt"><strong>Leave in pool</strong><span>Distribute later from the Leads page.</span></div>
+                  <div class="o3-assign-opt sel"><strong>One employee</strong><span>The whole batch goes to one person.</span></div>
+                  <div class="o3-assign-opt"><strong>Round-robin</strong><span>Least-loaded active employee first.</span></div>
+                  <div class="o3-assign-opt"><strong>By territory</strong><span>Routed by the lead's country.</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="o3-content-foot">
+              <span class="o3-progress" id="o3-progress">STEP 1 / 3</span>
+              <div class="o3-foot-actions">
+                <button class="o3-btn ghost" id="o3-back" disabled>Back</button>
+                <button class="o3-btn primary" id="o3-next">Continue</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Option picker
+  var buttons = document.querySelectorAll(".opt-btn");
+  var panels = document.querySelectorAll(".panel");
+  buttons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      buttons.forEach(function (b) { b.classList.remove("active"); b.setAttribute("aria-selected", "false"); });
+      panels.forEach(function (p) { p.classList.remove("active"); });
+      btn.classList.add("active");
+      btn.setAttribute("aria-selected", "true");
+      document.getElementById(btn.dataset.target).classList.add("active");
+    });
+  });
+
+  // Option 3 mini wizard
+  var steps = ["s1", "s2", "s3"];
+  var titles = ["Organization", "People", "Batch & assign"];
+  var current = 0;
+  var railSteps = document.querySelectorAll(".o3-step");
+  var stepPanels = document.querySelectorAll(".o3-step-panel");
+  var backBtn = document.getElementById("o3-back");
+  var nextBtn = document.getElementById("o3-next");
+
+  function renderStep() {
+    railSteps.forEach(function (s, i) { s.classList.toggle("active", i === current); });
+    stepPanels.forEach(function (p) { p.classList.toggle("active", p.id === steps[current]); });
+    document.getElementById("o3-step-tag").textContent = "Step " + (current + 1) + " of 3";
+    document.getElementById("o3-step-title").textContent = titles[current];
+    document.getElementById("o3-progress").textContent = "STEP " + (current + 1) + " / 3";
+    backBtn.disabled = current === 0;
+    nextBtn.textContent = current === steps.length - 1 ? "Preview & save" : "Continue";
+  }
+  railSteps.forEach(function (btn, i) {
+    btn.addEventListener("click", function () { current = i; renderStep(); });
+  });
+  backBtn.addEventListener("click", function () { if (current > 0) { current--; renderStep(); } });
+  nextBtn.addEventListener("click", function () { if (current < steps.length - 1) { current++; renderStep(); } });
+
+  // Simple swatch selection per option (visual only)
+  document.querySelectorAll(".o1-swatch, .o2-swatch, .o3-swatch").forEach(function (sw) {
+    sw.addEventListener("click", function () {
+      var group = sw.parentElement.querySelectorAll("button");
+      group.forEach(function (g) { g.classList.remove("sel"); });
+      sw.classList.add("sel");
+    });
+  });
+  document.querySelectorAll(".o1-assign-opt, .o2-assign-item, .o3-assign-opt").forEach(function (opt) {
+    opt.addEventListener("click", function () {
+      var group = opt.parentElement.children;
+      Array.prototype.forEach.call(group, function (g) { g.classList.remove("sel"); });
+      opt.classList.add("sel");
+    });
+  });
+  document.querySelectorAll(".o2-switch").forEach(function (sw) {
+    sw.addEventListener("click", function () {
+      sw.classList.toggle("on");
+      sw.setAttribute("aria-pressed", sw.classList.contains("on"));
+    });
+  });
+</script>

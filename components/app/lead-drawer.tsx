@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import type { Lead, EnrichmentStage } from "@/lib/leads";
 import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
-import { fetchLead, fetchLeadActivity, fetchUsers, patchLead, rescrapeOrg, type Profile, type LeadActivityEvent } from "@/lib/api-client";
+import { fetchLead, fetchLeadActivity, fetchUsers, patchLead, rescrapeOrg, fetchServiceHealth, type Profile, type LeadActivityEvent } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,7 +77,7 @@ function Section({
 }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-1.5">
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+      <div className="flex items-center gap-1.5 eyebrow">
         <Icon className="size-3" /> {label}
       </div>
       <div className="text-sm leading-relaxed">{children}</div>
@@ -99,7 +99,7 @@ function EnrichStageBadge({ stage, hasData }: { stage: EnrichmentStage | null; h
   };
   const c = configs[stage];
   return (
-    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] border font-medium", c.cls)}>
+    <span className={cn("inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-mono text-[10px] uppercase tracking-wider border font-semibold", c.cls)}>
       {stage === "done"     && <CheckCircle2 className="size-2.5" />}
       {stage === "failed"   && <AlertCircle  className="size-2.5" />}
       {stage === "queued"   && <Clock        className="size-2.5" />}
@@ -134,7 +134,7 @@ function TimelineItem({ log, isLast }: { log: EnrichLog; isLast: boolean }) {
         <p className={cn("font-medium leading-snug", isError ? "text-red-400" : "text-foreground")}>
           {label}
         </p>
-        <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
+        <div className="flex items-center gap-2 mt-0.5 text-muted-foreground font-mono text-[10px] tabular-nums">
           <span>{time}</span>
           {log.duration_ms != null && <span>· {log.duration_ms}ms</span>}
         </div>
@@ -382,6 +382,17 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       setTimeout(async () => {
         if (display.orgId) await fetchEnrichStatus(display.orgId);
         if (lead) await fetchFresh(lead);
+        // A retry that still fails is almost always billing, not a dead
+        // website — surface the real upstream cause instead of letting the
+        // generic "couldn't read website" copy mislead the manager again.
+        fetchServiceHealth(tok)
+          .then((issues) => {
+            const openrouter = issues.find((i) => i.service === "OpenRouter");
+            const firecrawl = issues.find((i) => i.service === "Firecrawl");
+            if (openrouter) toast.error(openrouter.message);
+            if (firecrawl) toast.error(firecrawl.message);
+          })
+          .catch(() => {});
       }, 800);
     } catch { /* non-fatal */ }
     finally { setRetrying(false); }
@@ -412,28 +423,31 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
         {display && (
           <>
             {/* Header */}
-            <div className="flex items-start gap-3 p-5 border-b border-border shrink-0">
+            <div className="swatch-bar-top flex items-start gap-3 p-5 border-b border-border shrink-0">
               <Avatar name={`${display.firstName} ${display.lastName}`} size="md" />
               <div className="flex-1 min-w-0">
-                <h2 className="text-base font-bold truncate">{display.firstName} {display.lastName}</h2>
+                <p className="eyebrow">Lead · {display.id.slice(0, 8)}</p>
+                <h2 className="font-display text-lg font-semibold truncate mt-0.5">{display.firstName} {display.lastName}</h2>
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
                   <StatusBadge status={display.status} />
                   <ScoreBadge score={display.score} />
-                  <span className="text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border border-border">
+                  <span className="font-mono text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border border-border">
                     {display.source}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 {!editing ? (
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon"
                     onClick={() => { populateForm(display); setEditing(true); setSaveError(""); }}
-                    className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary"
+                    className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
                     title="Edit lead"
                   >
                     <Pencil className="size-3.5" />
-                  </button>
+                  </Button>
                 ) : (
                   <>
                     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setEditing(false); setSaveError(""); }}>
@@ -445,12 +459,12 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </Button>
                   </>
                 )}
-                <button
-                  type="button" onClick={onClose}
-                  className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-lg hover:bg-secondary"
+                <Button
+                  type="button" variant="ghost" size="icon" onClick={onClose}
+                  className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
                 >
                   <X className="size-4" />
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -466,7 +480,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </div>
                   )}
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">Personal</legend>
+                    <legend className="eyebrow px-1">Personal</legend>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs">First name</Label>
@@ -487,7 +501,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </div>
                   </fieldset>
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1">Professional</legend>
+                    <legend className="eyebrow px-1">Professional</legend>
                     <div className="space-y-1.5">
                       <Label className="text-xs">Job title</Label>
                       <Input className="h-8 text-sm" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
@@ -502,7 +516,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </div>
                   </fieldset>
                   <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
+                    <legend className="eyebrow px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs">City</Label>
@@ -526,14 +540,15 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
 
               {/* Organization — clickable row that opens OrgDrawer */}
               {display.company && (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => display.orgId && onOrgClick?.(display.orgId)}
                   disabled={!display.orgId || !onOrgClick}
-                  className="w-full text-left rounded-xl border border-border bg-secondary/30 p-4 hover:border-muted-foreground/50 hover:bg-secondary/50 transition-colors group disabled:cursor-default disabled:hover:border-border disabled:hover:bg-secondary/30"
+                  className="w-full h-auto flex-col items-stretch justify-start rounded-xl border-border bg-secondary/30 p-4 text-left font-normal hover:border-muted-foreground/50 hover:bg-secondary/50 group disabled:cursor-default disabled:hover:border-border disabled:hover:bg-secondary/30"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <div className="flex items-center gap-1.5 eyebrow">
                       <Building2 className="size-3" /> Organization
                     </div>
                     {display.orgId && onOrgClick && (
@@ -544,14 +559,14 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     <p className="font-medium">{display.company}</p>
                     {display.domain && (
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline">{display.domain}</a>
+                        <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-blue-400 hover:underline">{display.domain}</a>
                         {display.domainSource === "email_inferred" && (
                           <span className="text-[9px] font-medium uppercase tracking-wide text-amber-500/80 border border-amber-500/30 rounded px-1 py-0.5">Inferred from email</span>
                         )}
                       </div>
                     )}
                   </div>
-                </button>
+                </Button>
               )}
 
               {/* Contact */}
@@ -561,10 +576,12 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                 )}
                 <p>
                   <span className="text-muted-foreground">Email: </span>
-                  {display.email || <span className="text-muted-foreground/50 italic">Not yet enriched</span>}
+                  {display.email
+                    ? <span className="font-mono text-xs">{display.email}</span>
+                    : <span className="text-muted-foreground/50 italic">Not yet enriched</span>}
                 </p>
                 {display.phone && (
-                  <p><span className="text-muted-foreground">Phone: </span>{display.phone}</p>
+                  <p><span className="text-muted-foreground">Phone: </span><span className="font-mono text-xs">{display.phone}</span></p>
                 )}
                 {display.country && (
                   <p><span className="text-muted-foreground">Country: </span>{display.country}</p>
@@ -605,7 +622,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
               <div className="grid grid-cols-2 gap-3">
                 <Section icon={Globe2} label="Source">
                   <p className="font-medium">{display.source}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Added {display.createdAt}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground mt-0.5">Added {display.createdAt}</p>
                 </Section>
                 <Section icon={Megaphone} label="Campaign">
                   {display.campaigns && display.campaigns.length > 0 ? (
@@ -613,7 +630,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                       {display.campaigns.map((c) => (
                         <div key={c.id} className="flex items-center justify-between gap-2">
                           <p className="text-sm font-medium truncate">{c.name}</p>
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border border-border rounded px-1.5 py-0.5 shrink-0">
+                          <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border border-border rounded px-1.5 py-0.5 shrink-0">
                             {c.crm_status}
                           </span>
                         </div>
@@ -626,18 +643,23 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
               </div>
 
               {/* ── Company Enrichment ── */}
-              <div className="rounded-xl border border-border overflow-hidden">
+              <div className="swatch-bar rounded-xl border border-border overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 bg-secondary/30 border-b border-border">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Building2 className="size-3 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Company Enrichment</span>
+                    <span className="eyebrow">Company Enrichment</span>
                     <EnrichStageBadge stage={currentStage} hasData={enrichHasData} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {/* Rescraping spends credits — manager-only. Employees work
                         their leads as given; enrichment is the manager's job
                         (planning.md D8 / Q6). */}
-                    {role === "manager" && (currentStage === "failed" || currentStage === "queued" || currentStage === null || (currentStage === "done" && !enrichHasData)) && attempts < 3 && (
+                    {/* No attempts<3 gate: the 3-attempt cap is for the
+                        automatic-retry loop only. A manually clicked retry
+                        always gets a fresh budget server-side (see rescrape
+                        route) — otherwise a permanently-failed org could
+                        never be retried even after topping up credits. */}
+                    {role === "manager" && (currentStage === "failed" || currentStage === "queued" || currentStage === null || (currentStage === "done" && !enrichHasData)) && (
                       <Button
                         size="sm" variant="outline"
                         className="h-6 px-2 text-[11px] gap-1"
@@ -648,18 +670,20 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         {currentStage === "failed" || (currentStage === "done" && !enrichHasData) ? "Retry" : "Enrich"}
                       </Button>
                     )}
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
                       onClick={() => {
                         if (lead) void fetchFresh(lead);
                         if (display.orgId) void fetchEnrichStatus(display.orgId);
                       }}
                       disabled={loadingLead}
-                      className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                      className="h-auto gap-1 p-0 text-[11px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
                     >
                       <RefreshCw className={cn("size-3", loadingLead && "animate-spin")} />
                       Refresh
-                    </button>
+                    </Button>
                   </div>
                 </div>
 
@@ -679,7 +703,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     <>
                       {(enrichData?.company_description ?? display.companyDescription) && (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">What they do</p>
+                          <p className="eyebrow mb-1">What they do</p>
                           <p className="text-sm text-muted-foreground leading-relaxed">
                             {enrichData?.company_description ?? display.companyDescription}
                           </p>
@@ -687,7 +711,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                       )}
                       {(enrichData?.sells_to ?? display.sellsTo) && (
                         <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Who they sell to</p>
+                          <p className="eyebrow mb-1">Who they sell to</p>
                           <p className="text-sm text-muted-foreground leading-relaxed">
                             {enrichData?.sells_to ?? display.sellsTo}
                           </p>
@@ -696,13 +720,15 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </>
                   )}
                   {/* Friendly, non-technical status — the raw upstream error
-                      (HTTP 402 dumps etc.) stays server-side in enrichment_logs
-                      and is surfaced app-wide via the API-key banner, not here. */}
+                      (HTTP 402 dumps etc.) stays server-side in enrichment_logs.
+                      Retry additionally toasts the real cause (see handleRetry)
+                      when it's a billing issue, so this copy stays deliberately
+                      vague rather than blaming the website. */}
                   {currentStage === "failed" && (
                     <div className="flex items-start gap-2 text-xs text-muted-foreground bg-secondary/40 rounded-lg p-3">
                       <AlertCircle className="size-3.5 shrink-0 mt-0.5 text-amber-400" />
                       <span>
-                        Couldn&apos;t build a company profile (its website couldn&apos;t be read).
+                        Couldn&apos;t build a company profile.
                         This lead can still be emailed using the generic template.
                         {attempts >= 3 ? " Automatic retries exhausted — use Refresh to try again." : ""}
                       </span>

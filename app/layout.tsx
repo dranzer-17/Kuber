@@ -4,8 +4,10 @@ import { Toaster } from "sonner";
 import "./globals.css";
 import { APP_DESCRIPTION, APP_TITLE, THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY } from "@/lib/branding";
 
-// Self-hosted via next/font (no external request at runtime, zero layout
-// shift). globals.css falls back to the system stack if the variable is absent.
+// One font, everywhere — Inter (self-hosted via next/font, no external
+// request at runtime, zero layout shift). globals.css falls back to the
+// system stack if the variable is absent. Do not add a second display/mono
+// face — differentiate headings/data via weight, size, and tracking only.
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
@@ -102,7 +104,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={inter.variable}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={inter.variable}
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

@@ -3,6 +3,9 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, X, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { SearchInput } from "@/components/ui/search-input";
+import { AppCheckbox } from "@/components/ui/app-checkbox";
 import {
   INTEREST_FILTER_OPTIONS,
   READ_STATE_OPTIONS,
@@ -12,11 +15,13 @@ import {
 
 const rowClass = (active: boolean) =>
   cn(
-    "w-full flex items-center gap-3 px-3.5 py-2 rounded-full text-sm text-left transition-colors",
-    active ? "bg-primary/15 text-primary font-semibold" : "text-foreground/80 hover:bg-secondary/50",
+    "w-full flex items-center gap-3 px-3.5 py-2 rounded-md text-sm text-left transition-colors border-l-2",
+    active
+      ? "bg-primary/10 text-primary font-semibold border-primary"
+      : "text-foreground/80 hover:bg-secondary/50 border-transparent",
   );
 
-const sectionLabelClass = "px-4 pb-1.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground first:pt-2";
+const sectionLabelClass = "eyebrow px-4 pb-1.5 pt-4 first:pt-2";
 
 /** Whether any filter is currently applied — used for the toggle button's active-dot badge. */
 export function hasActiveUniboxFilters(
@@ -38,14 +43,15 @@ function FilterDropdown({
     <div>
       <p className={sectionLabelClass}>{label}</p>
       <div className="px-2">
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={onToggle}
-          className="w-full flex items-center justify-between gap-2 h-9 px-3.5 rounded-lg border border-border bg-card text-sm hover:bg-secondary/40 transition-colors"
+          className="w-full h-9 justify-between px-3.5 text-sm font-normal bg-card"
         >
           <span className="truncate text-foreground/80">{summary}</span>
           <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-180")} />
-        </button>
+        </Button>
       </div>
       {expanded && <div className="pt-1.5">{children}</div>}
     </div>
@@ -123,16 +129,21 @@ export function UniboxFiltersPanel({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
-        <p className="text-sm font-semibold">Filters</p>
-        <button
+      <div className="swatch-bar-top px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
+        <div>
+          <p className="eyebrow">Refine</p>
+          <p className="font-display text-sm font-semibold leading-tight">Filters</p>
+        </div>
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={onClose}
           aria-label="Close filters"
-          className="size-7 flex items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/60 hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
           <X className="size-4" />
-        </button>
+        </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
@@ -144,7 +155,9 @@ export function UniboxFiltersPanel({
           {READ_STATE_OPTIONS.map((o) => (
             <button key={o.value} type="button" onClick={() => onReadState(o.value)} className={rowClass(readState === o.value)}>
               <span className="flex-1 truncate">{o.label}</span>
-              {o.value === "unread" && unreadTotal > 0 && <span className="text-[11px] tabular-nums">{unreadTotal}</span>}
+              {o.value === "unread" && unreadTotal > 0 && (
+                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{unreadTotal}</span>
+              )}
             </button>
           ))}
         </div>
@@ -169,27 +182,28 @@ export function UniboxFiltersPanel({
           onToggle={() => setCampaignsExpanded((v) => !v)}
         >
           <div className="px-4 pb-1.5">
-            <input
-              type="search"
+            <SearchInput
               value={campaignSearch}
-              onChange={(e) => setCampaignSearch(e.target.value)}
+              onChange={setCampaignSearch}
               placeholder="Search campaigns…"
-              className="w-full h-8 px-2.5 rounded-md border border-border bg-card text-xs"
+              size="sm"
             />
           </div>
           <div className="px-2 space-y-0.5 max-h-48 overflow-y-auto">
             {filteredCampaigns.map((c) => {
               const checked = campaignIds.includes(c.id);
               return (
-                <label key={c.id} className={cn(rowClass(checked), "cursor-pointer")}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleCampaign(c.id)}
-                    className="size-3.5 rounded border-border accent-primary shrink-0"
-                  />
+                <div
+                  key={c.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleCampaign(c.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleCampaign(c.id); } }}
+                  className={cn(rowClass(checked), "cursor-pointer")}
+                >
+                  <AppCheckbox checked={checked} size="sm" />
                   <span className="truncate">{c.name}</span>
-                </label>
+                </div>
               );
             })}
             {filteredCampaigns.length === 0 && <p className="text-xs text-muted-foreground text-center py-3">No matches</p>}
@@ -203,12 +217,11 @@ export function UniboxFiltersPanel({
           onToggle={() => setInboxExpanded((v) => !v)}
         >
           <div className="px-4 pb-1.5">
-            <input
-              type="search"
+            <SearchInput
               value={inboxSearch}
-              onChange={(e) => setInboxSearch(e.target.value)}
+              onChange={setInboxSearch}
               placeholder="Search inboxes…"
-              className="w-full h-8 px-2.5 rounded-md border border-border bg-card text-xs"
+              size="sm"
             />
           </div>
           <div className="px-2 space-y-0.5 pb-1 max-h-48 overflow-y-auto">
@@ -225,14 +238,16 @@ export function UniboxFiltersPanel({
       </div>
 
       <div className="px-4 py-3 border-t border-border shrink-0">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={clearAll}
           disabled={!active}
-          className="w-full text-center text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed py-2 rounded-md hover:bg-secondary/50 transition-colors"
+          className="w-full text-xs font-medium text-muted-foreground hover:text-foreground"
         >
           Clear all filters
-        </button>
+        </Button>
       </div>
     </div>
   );

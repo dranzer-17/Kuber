@@ -12,6 +12,8 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/90",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        warning:
+          "bg-amber-500 text-white hover:bg-amber-500/90",
         outline:
           "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
         secondary:
@@ -24,6 +26,11 @@ const buttonVariants = cva(
         sm: "h-9 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
         icon: "h-10 w-10",
+        /** Compact square icon button (toolbar controls, inline row actions) —
+         *  smaller than `icon` for dense chrome like rich-text toolbars and
+         *  table-row icon actions. Icon size is set on the icon itself
+         *  (e.g. `size-3.5`), matching the existing `size="icon"` convention. */
+        "icon-sm": "size-7 rounded",
       },
     },
     defaultVariants: {

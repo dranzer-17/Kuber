@@ -4,12 +4,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 
-const MAX_ENRICHMENT_ATTEMPTS = 3;
-
-// Bulk version of the single-org rescrape/retry — requeues every org that
-// failed enrichment but hasn't yet burned through its 3 attempts, instead of
-// managers clicking "retry" one company at a time (there was no bulk path
-// before this, and failures pile up fast on a large import).
+// Bulk version of the single-org rescrape/retry — requeues every failed org,
+// instead of managers clicking "retry" one company at a time (there was no
+// bulk path before this, and failures pile up fast on a large import).
 export async function POST(req: NextRequest) {
   try { await requireManager(req); } catch (r) { return r as Response; }
 
@@ -21,17 +18,23 @@ export async function POST(req: NextRequest) {
   // (proxy/tunnel URL-length limit) with supabase-js never surfacing it as a
   // thrown error, so a prior version of this route reported success when
   // nothing had actually been requeued.
+  //
+  // No enrichment_attempts filter: the 3-attempt cap is for the automatic
+  // retry loop only. "Retry all" is a deliberate manual action — usually
+  // fired right after topping up OpenRouter/Firecrawl credits — so every
+  // failed org gets reset to a fresh attempt budget rather than staying
+  // stuck at MAX_ATTEMPTS forever.
   const { data: updated, error } = await db
     .from("organizations")
     .update({
       has_scraped: false,
       enrichment_stage: "queued",
       enrichment_status: "SCRAPE_QUEUED",
+      enrichment_attempts: 0,
       last_error: null,
       updated_at: new Date().toISOString(),
     })
     .eq("enrichment_stage", "failed")
-    .or(`enrichment_attempts.is.null,enrichment_attempts.lt.${MAX_ENRICHMENT_ATTEMPTS}`)
     .select("id");
 
   if (error) return fail(500, "INTERNAL", error.message);

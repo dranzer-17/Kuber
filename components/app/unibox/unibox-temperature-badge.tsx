@@ -1,6 +1,7 @@
 "use client";
 
 import { Flame, Snowflake } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { temperatureBadge } from "@/lib/temperature-badge";
 
@@ -19,15 +20,16 @@ export function UniboxTemperatureBadge({ temperature, className }: Props) {
   const icon = ICONS[temperature ?? ""] ?? null;
 
   return (
-    <span
+    <Badge
+      variant="outline"
       className={cn(
-        "inline-flex items-center gap-1 text-xs font-semibold uppercase px-2.5 py-1 rounded-full border shrink-0",
+        "gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md shrink-0",
         badge.cls,
         className,
       )}
     >
       {icon}
       {badge.label}
-    </span>
+    </Badge>
   );
 }

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
 import {
-  assignCampaign, deleteCampaign, fetchUsers, pauseCampaign, resumeCampaign, type Profile,
+  deleteCampaign, fetchUsers, pauseCampaign, resumeCampaign, type Profile,
 } from "@/lib/api-client";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import { Pause, Play, Trash2, User, UserPlus } from "lucide-react";
@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SearchInput } from "@/components/ui/search-input";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
+import { Card } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -49,10 +51,6 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   const [pausingCampaign, setPausingCampaign] = useState<Campaign | null>(null);
   const [pauseLoading, setPauseLoading] = useState(false);
   const [resumingId, setResumingId] = useState<string | null>(null);
-  const [assigningCampaign, setAssigningCampaign] = useState<Campaign | null>(null);
-  const [assignTarget, setAssignTarget] = useState<string>("pool");
-  const [reassignLeads, setReassignLeads] = useState(true);
-  const [assignLoading, setAssignLoading] = useState(false);
 
   useEffect(() => {
     if (role !== "manager" || !session) return;
@@ -60,7 +58,6 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   }, [role, session]);
 
   const userMap = new Map(users.map((u) => [u.id, u]));
-  const activeEmployees = users.filter((u) => u.role === "employee" && u.is_active);
 
   function displayName(userId: string | null | undefined): string | null {
     if (!userId) return null;
@@ -82,12 +79,6 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
     Paused: list.filter((c) => c.status === "Paused").length,
   };
 
-  function openAssignModal(c: Campaign) {
-    setAssigningCampaign(c);
-    setAssignTarget(c.assignedTo ?? "pool");
-    setReassignLeads(true);
-  }
-
   async function handleResume(c: Campaign) {
     if (!session || resumingId) return;
     setResumingId(c.id);
@@ -108,10 +99,9 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-8 space-y-6">
-      <div>
-        <p className="eyebrow mb-1">Outreach</p>
-        <h1 className="font-display text-2xl font-semibold tracking-tight">Campaigns</h1>
+    <div className="max-w-6xl mx-auto p-8 space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <p className="eyebrow">Outreach · Campaigns</p>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -121,28 +111,13 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
           placeholder="Search campaigns…"
           wrapperClassName="flex-1 min-w-[200px] max-w-xs"
         />
-        <div className="flex items-center gap-1.5">
-          {(["All", "Draft", "Live", "Paused"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatusFilter(s)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
-                statusFilter === s
-                  ? s === "All"
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : cn(CAMPAIGN_STATUS_STYLES[s]?.badge, "border-current")
-                  : "bg-transparent text-muted-foreground border-border hover:border-muted-foreground/40 hover:text-foreground",
-              )}
-            >
-              {s}
-              <span className={cn("ml-1.5 font-mono tabular-nums", statusFilter === s ? "opacity-70" : "opacity-50")}>
-                {counts[s]}
-              </span>
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+          options={(["All", "Draft", "Live", "Paused"] as const).map((s) => ({
+            value: s, label: s, count: counts[s],
+          }))}
+        />
         {role === "manager" && users.length > 0 && (
           <Select value={ownerFilter} onValueChange={setOwnerFilter}>
             <SelectTrigger className="h-9 w-40 bg-card"><SelectValue placeholder="Owner" /></SelectTrigger>
@@ -165,112 +140,107 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
           }
         />
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((c) => {
             const style = CAMPAIGN_STATUS_STYLES[c.status] ?? CAMPAIGN_STATUS_STYLES.Draft;
             const replyRate = c.sent > 0 ? Math.round((c.replied / c.sent) * 100) : 0;
             const assigneeName = role === "manager" ? displayName(c.assignedTo) : null;
             return (
-              <div
+              <Card
                 key={c.id}
-                className="enter swatch-bar relative group/card rounded-xl border border-border bg-card transition-all hover:bg-secondary/30 hover:border-border/80 hover:shadow-sm"
+                swatch="left"
+                className="enter relative group/card flex flex-col p-5 transition-all hover:bg-secondary/30 hover:border-border/80 hover:shadow-sm"
               >
-                <button
+                <div className="absolute right-3 top-3 flex items-center gap-0.5 opacity-0 group-hover/card:opacity-100 transition-all z-10">
+                  {c.status === "Live" && (
+                    <Button
+                      type="button" variant="ghost" size="icon"
+                      title="Pause campaign (stops all sending, incl. follow-ups)"
+                      onClick={() => setPausingCampaign(c)}
+                      className="size-8 text-muted-foreground/50 hover:text-amber-400 hover:bg-amber-500/10"
+                    >
+                      <Pause className="size-4" />
+                    </Button>
+                  )}
+                  {c.status === "Paused" && (
+                    <Button
+                      type="button" variant="ghost" size="icon"
+                      title="Resume campaign"
+                      disabled={resumingId === c.id}
+                      onClick={() => void handleResume(c)}
+                      className="size-8 text-muted-foreground/50 hover:text-green-400 hover:bg-green-500/10 disabled:opacity-50"
+                    >
+                      <Play className="size-4" />
+                    </Button>
+                  )}
+                  <Button
+                    type="button" variant="ghost" size="icon"
+                    title="Delete campaign"
+                    onClick={() => setDeletingCampaign(c)}
+                    className="size-8 text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => router.push(`/campaigns/${c.id}`)}
-                  className="w-full p-5 flex items-center gap-5 text-left"
+                  className="h-auto flex-1 flex flex-col items-stretch justify-start p-0 text-left font-normal hover:bg-transparent"
                 >
-                  <div className={cn("size-2 rounded-full shrink-0 mt-0.5", style.dot)} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-start gap-2 mb-1.5 pr-20">
+                    <div className={cn("size-2 rounded-full shrink-0 mt-1.5", style.dot)} />
+                    <div className="flex-1 min-w-0">
                       <p className="font-display font-semibold truncate">{c.name}</p>
                       <span className={cn(
-                        "font-mono text-[10px] font-semibold uppercase tracking-wider border rounded-md px-1.5 py-0.5 shrink-0",
+                        "inline-block mt-1 font-mono text-[10px] font-semibold uppercase tracking-wider border rounded-md px-1.5 py-0.5 shrink-0",
                         style.badge,
                       )}>
                         {c.status}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className={cn(
-                        "text-[11px] px-1.5 py-0.5 rounded border",
-                        c.humanInLoop
-                          ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
-                          : "text-muted-foreground bg-secondary/50 border-border",
-                      )}>
-                        {c.humanInLoop ? "Human review" : "Auto-send"}
-                      </span>
-                      <span className="font-mono text-[11px] text-muted-foreground">Created {c.createdAt}</span>
-                      {role === "manager" && c.createdBy && userMap.has(c.createdBy) && (
-                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                          <User className="size-3" />
-                          {displayName(c.createdBy)}
-                        </span>
-                      )}
-                      {assigneeName && (
-                        <span className="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border text-primary bg-primary/10 border-primary/20">
-                          <UserPlus className="size-3" />
-                          {assigneeName}
-                        </span>
-                      )}
-                    </div>
                   </div>
-                  <div className="flex items-center gap-px shrink-0 pr-24">
+
+                  <div className="flex items-center gap-2 flex-wrap mb-4">
+                    <span className={cn(
+                      "text-[11px] px-1.5 py-0.5 rounded border",
+                      c.humanInLoop
+                        ? "text-blue-400 bg-blue-500/10 border-blue-500/20"
+                        : "text-muted-foreground bg-secondary/50 border-border",
+                    )}>
+                      {c.humanInLoop ? "Human review" : "Auto-send"}
+                    </span>
+                    {role === "manager" && c.createdBy && userMap.has(c.createdBy) && (
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <User className="size-3" />
+                        {displayName(c.createdBy)}
+                      </span>
+                    )}
+                    {assigneeName && (
+                      <span className="flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border text-primary bg-primary/10 border-primary/20">
+                        <UserPlus className="size-3" />
+                        {assigneeName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1 mt-auto pt-3 border-t border-border">
                     {[
                       { label: "Leads", value: c.leads, color: "text-foreground" },
                       { label: "Sent", value: c.sent, color: "text-foreground" },
                       { label: "Replied", value: c.replied, color: "text-green-400" },
                       { label: "Reply rate", value: `${replyRate}%`, color: replyRate > 0 ? "text-green-400" : "text-muted-foreground" },
-                    ].map(({ label, value, color }, idx) => (
-                      <div key={label} className={cn("text-center px-5 py-1", idx < 3 && "border-r border-border")}>
-                        <p className={cn("font-mono text-lg font-bold tabular-nums", color)}>{value}</p>
-                        <p className="eyebrow">{label}</p>
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="text-center">
+                        <p className={cn("font-mono text-sm font-bold tabular-nums", color)}>{value}</p>
+                        <p className="eyebrow mt-0.5">{label}</p>
                       </div>
                     ))}
                   </div>
-                </button>
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/card:opacity-100 transition-all">
-                  {role === "manager" && (
-                    <button
-                      type="button"
-                      title="Assign campaign to an employee"
-                      onClick={() => openAssignModal(c)}
-                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
-                    >
-                      <UserPlus className="size-4" />
-                    </button>
-                  )}
-                  {c.status === "Live" && (
-                    <button
-                      type="button"
-                      title="Pause campaign (stops all sending, incl. follow-ups)"
-                      onClick={() => setPausingCampaign(c)}
-                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
-                    >
-                      <Pause className="size-4" />
-                    </button>
-                  )}
-                  {c.status === "Paused" && (
-                    <button
-                      type="button"
-                      title="Resume campaign"
-                      disabled={resumingId === c.id}
-                      onClick={() => void handleResume(c)}
-                      className="p-2 rounded-lg text-muted-foreground/50 hover:text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
-                    >
-                      <Play className="size-4" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    title="Delete campaign"
-                    onClick={() => setDeletingCampaign(c)}
-                    className="p-2 rounded-lg text-muted-foreground/50 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </div>
-              </div>
+                  <p className="font-mono text-[10px] text-muted-foreground mt-3">Created {c.createdAt}</p>
+                </Button>
+              </Card>
             );
           })}
         </div>
@@ -304,6 +274,8 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
         open={!!pausingCampaign}
         title={`Pause "${pausingCampaign?.name}"?`}
         description="Instantly stops sending this campaign, including scheduled follow-ups, until you resume it. Conversations already started are unaffected."
+        confirmLabel="Pause"
+        tone="warning"
         loading={pauseLoading}
         onClose={() => { if (!pauseLoading) setPausingCampaign(null); }}
         onConfirm={async () => {
@@ -328,87 +300,6 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
         }}
       />
 
-      {/* Assign campaign modal (managers only) */}
-      {assigningCampaign && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!assignLoading) setAssigningCampaign(null); }} />
-          <div className="enter swatch-bar-top relative w-full max-w-md rounded-xl border border-border bg-card p-6 space-y-5 shadow-xl">
-            <div>
-              <p className="eyebrow mb-1">Assign campaign</p>
-              <p className="font-display font-semibold text-sm">{assigningCampaign.name}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                The assignee sees this campaign, its drafts, and every reply in their inbox. One assignee at a time — assigning someone new replaces the current one.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <p className="eyebrow">Assign to</p>
-              <Select value={assignTarget} onValueChange={setAssignTarget}>
-                <SelectTrigger className="h-9 w-full bg-card"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pool">Nobody (manager pool)</SelectItem>
-                  {activeEmployees.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.full_name || u.email}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {assigningCampaign.assignedTo && (
-                <p className="text-[11px] text-muted-foreground">
-                  Currently assigned to {displayName(assigningCampaign.assignedTo) ?? "an inactive user"}.
-                </p>
-              )}
-            </div>
-
-            <label className={cn(
-              "flex items-start gap-2.5 rounded-lg border border-border p-3 text-xs cursor-pointer transition-colors hover:bg-secondary/30",
-              assignTarget === "pool" && "opacity-50 pointer-events-none",
-            )}>
-              <input
-                type="checkbox"
-                checked={reassignLeads}
-                onChange={(e) => setReassignLeads(e.target.checked)}
-                className="mt-0.5 accent-[var(--primary)]"
-              />
-              <span>
-                <span className="font-medium text-foreground">Also assign this campaign&apos;s leads to them</span>
-                <br />
-                <span className="text-muted-foreground">Keeps the Leads table and the inbox consistent. Untick if this campaign&apos;s leads are split between people.</span>
-              </span>
-            </label>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" disabled={assignLoading} onClick={() => setAssigningCampaign(null)}>Cancel</Button>
-              <Button
-                disabled={assignLoading || !session}
-                onClick={async () => {
-                  if (!assigningCampaign || !session || assignLoading) return;
-                  const id = assigningCampaign.id;
-                  const target = assignTarget === "pool" ? null : assignTarget;
-                  setAssignLoading(true);
-                  try {
-                    const res = await assignCampaign(session.access_token, id, target, target ? reassignLeads : false);
-                    const name = target ? (displayName(target) ?? "employee") : null;
-                    toast.success(
-                      target
-                        ? `Assigned to ${name}${res.leads_reassigned > 0 ? ` (+${res.leads_reassigned} leads)` : ""}`
-                        : "Returned to the manager pool",
-                    );
-                    setCampaigns((prev) => prev.map((c) => (c.id === id ? { ...c, assignedTo: target } : c)));
-                    setAssigningCampaign(null);
-                    router.refresh();
-                  } catch (e) {
-                    toast.error((e as Error).message || "Failed to assign campaign");
-                  } finally {
-                    setAssignLoading(false);
-                  }
-                }}
-              >
-                {assignLoading ? "Assigning…" : "Assign"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

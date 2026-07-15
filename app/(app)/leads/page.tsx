@@ -1,6 +1,6 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, fetchServiceHealth, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,7 +25,6 @@ import {
 import { useApp } from "@/lib/app-context";
 import { Avatar, StatusBadge } from "@/components/leads/lead-ui";
 import { KanbanBoard } from "@/components/app/kanban-board";
-import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
@@ -46,6 +45,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   Pagination,
   PaginationContent,
@@ -222,29 +222,32 @@ function ColumnsDropdown({ visible, onChange }: {
       {open && (
         <div className="absolute right-0 top-full mt-1.5 z-50 w-44 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
           <div className="px-3 py-2 border-b border-border">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Toggle columns</p>
+            <p className="eyebrow">Toggle columns</p>
           </div>
           <div className="py-1">
             {COLUMN_DEFS.map((col) => (
-              <button
+              <Button
                 key={col.key}
                 type="button"
+                variant="ghost"
                 onClick={() => toggle(col.key)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-secondary transition-colors"
+                className="w-full h-auto justify-start gap-2.5 rounded-none px-3 py-2 text-sm font-normal"
               >
                 <AppCheckbox checked={!!visible[col.key]} />
                 <span className="text-sm text-foreground">{col.label}</span>
-              </button>
+              </Button>
             ))}
           </div>
           <div className="border-t border-border px-3 py-2">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => onChange(DEFAULT_VISIBILITY)}
-              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              className="h-auto p-0 text-[11px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
             >
               Reset to default
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -297,11 +300,12 @@ function MultiSelectDropdown<T extends string>({
 
   return (
     <div ref={ref} className="relative">
-      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">{label}</p>
-      <button
+      <p className="eyebrow mb-2">{label}</p>
+      <Button
         type="button"
+        variant="outline"
         onClick={() => setOpen((o) => !o)}
-        className="w-full min-h-9 flex items-center flex-wrap gap-1.5 px-3 py-1.5 rounded-md border border-input bg-card text-left text-sm transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full h-auto min-h-9 flex-wrap justify-start gap-1.5 rounded-md px-3 py-1.5 text-left text-sm font-normal bg-card"
       >
         {selected.size === 0 ? (
           <span className="text-muted-foreground text-xs">Select {label.toLowerCase()}…</span>
@@ -332,19 +336,19 @@ function MultiSelectDropdown<T extends string>({
             <path d="M6 9l6 6 6-6" />
           </svg>
         </span>
-      </button>
+      </Button>
 
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-md border border-border bg-card shadow-xl overflow-hidden">
           <div className="px-2 py-1.5 border-b border-border">
             <div className="flex items-center gap-2 px-1">
               <Search className="size-3.5 text-muted-foreground shrink-0" />
-              <input
+              <Input
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search or type to add…"
-                className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+                className="h-auto flex-1 border-0 bg-transparent px-0 py-0 text-xs shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/60"
               />
             </div>
           </div>
@@ -355,19 +359,20 @@ function MultiSelectDropdown<T extends string>({
               filtered.map((o) => {
                 const active = selected.has(o.value);
                 return (
-                  <button
+                  <Button
                     key={o.value}
                     type="button"
+                    variant="ghost"
                     onClick={() => toggle(o.value)}
                     className={cn(
-                      "w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-secondary",
+                      "w-full h-auto justify-start gap-2.5 rounded-none px-3 py-2 text-sm font-normal",
                       active && "bg-secondary/60"
                     )}
                   >
                     {o.dot && <span className={cn("size-2 rounded-full shrink-0", o.dot)} />}
                     <span className="flex-1 text-left">{o.label}</span>
                     {active && <Check className="size-3.5 text-foreground shrink-0" />}
-                  </button>
+                  </Button>
                 );
               })
             )}
@@ -391,7 +396,7 @@ function DateRangePicker({
 }) {
   return (
     <div>
-      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Created Date</p>
+      <p className="eyebrow mb-2">Created Date</p>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <p className="text-[10px] text-muted-foreground mb-1">From</p>
@@ -448,6 +453,13 @@ function DateRangePicker({
   );
 }
 
+// ── Filters modal ─────────────────────────────────────────────────────────────
+// Overlay (not the shared Dialog primitive — matches this file's own
+// bulk-assign modal precedent below: a custom fixed overlay with
+// swatch-bar-top + eyebrow chrome) triggered by the "Filters" button in the
+// toolbar. Uses a draft/Apply step (unlike an always-live rail) since this is
+// an explicit commit surface, not a persistent layout element.
+
 function FiltersModal({
   filters,
   onChange,
@@ -486,12 +498,18 @@ function FiltersModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-xl flex flex-col max-h-[85vh]">
+      <div className="swatch-bar-top relative z-10 w-full max-w-md rounded-xl border border-border bg-background shadow-xl flex flex-col max-h-[85vh]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <p className="text-sm font-semibold">Filters</p>
-          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+          <div>
+            <p className="eyebrow">Refine</p>
+            <p className="font-display text-base font-semibold mt-0.5">Filters</p>
+          </div>
+          <Button
+            variant="ghost" size="icon" className="size-7 text-muted-foreground"
+            onClick={onClose}
+          >
             <X className="size-4" />
-          </button>
+          </Button>
         </div>
         <div className="overflow-y-auto px-5 py-5 space-y-5 flex-1">
           <MultiSelectDropdown
@@ -534,13 +552,13 @@ function FiltersModal({
           />
         </div>
         <div className="flex items-center justify-between px-5 py-4 border-t border-border shrink-0">
-          <button
-            type="button"
+          <Button
+            variant="ghost" size="sm"
             onClick={() => setDraft({ statuses: new Set(), assignees: new Set(), sources: new Set(), batchLabels: new Set(), createdFrom: undefined, createdTo: undefined })}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="h-auto p-0 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
           >
             Clear all
-          </button>
+          </Button>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
             <Button size="sm" onClick={() => { onChange(draft); onClose(); }}>Apply</Button>
@@ -566,6 +584,7 @@ export default function LeadsPage() {
     setSelectedOrgId,
     setShowCreateCampaign,
     setDeletingLead,
+    setShowAddLeads,
   } = useApp();
 
   const router      = useRouter();
@@ -762,6 +781,8 @@ export default function LeadsPage() {
   return (
     <div className="flex flex-col h-full">
       {/* ── Top bar ── */}
+      {/* No redundant page-title block here — the app shell's top bar already
+          shows "Leads" as the section identity; this row is action controls only. */}
       <div className="flex items-center justify-between px-8 py-4 border-b border-border shrink-0">
         <div className="flex items-center gap-4 flex-wrap">
           <SegmentedTabs
@@ -794,13 +815,15 @@ export default function LeadsPage() {
             </Button>
           )}
           {someChecked && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setCheckedIds(new Set())}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="h-auto p-0 text-xs font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
             >
               Clear
-            </button>
+            </Button>
           )}
         </div>
 
@@ -818,19 +841,30 @@ export default function LeadsPage() {
           <Button
             variant="outline" size="sm" className="gap-1.5"
             disabled={loadingLeads}
-            onClick={() => session && loadLeads(session.access_token)}
+            onClick={() => {
+              if (!session) return;
+              void loadLeads(session.access_token);
+              // Banner lives on Dashboard — on Leads refresh, re-check and toast
+              // if an upstream provider is still out of credits so retries
+              // don't fail silently against a misleading "website unreadable" copy.
+              void fetchServiceHealth(session.access_token)
+                .then((issues) => {
+                  const openrouter = issues.find((i) => i.service === "OpenRouter");
+                  const firecrawl = issues.find((i) => i.service === "Firecrawl");
+                  if (openrouter) toast.error(openrouter.message);
+                  if (firecrawl) toast.error(firecrawl.message);
+                })
+                .catch(() => {});
+            }}
           >
             <RefreshCw className={cn("size-3.5", loadingLeads && "animate-spin")} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => router.push("/leads/add")} className="gap-1.5">
+          <Button size="sm" onClick={() => setShowAddLeads(true)} className="gap-1.5">
             <Plus className="size-3.5" /> Add leads
           </Button>
         </div>
       </div>
-
-      {/* Upstream credit/API-key failures (OpenRouter/Firecrawl/Apollo). */}
-      <ServiceHealthBanner />
 
       {/* ── Search + Columns toolbar ── */}
       {leadsEntityMode === "individual" && leadsViewMode === "list" && (
@@ -862,26 +896,23 @@ export default function LeadsPage() {
                 <SelectItem value="za">Z – A</SelectItem>
               </SelectContent>
             </Select>
-            <button
+            <Button
               type="button"
+              variant={isFiltersEmpty(filters) ? "outline" : "default"}
+              size="sm"
+              className={cn("relative gap-1.5", isFiltersEmpty(filters) && "bg-card")}
               onClick={() => setShowFilters(true)}
-              className={cn(
-                "relative flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-medium transition-colors",
-                isFiltersEmpty(filters)
-                  ? "border-border bg-card text-muted-foreground hover:text-foreground hover:border-muted-foreground"
-                  : "border-primary bg-primary/10 text-primary"
-              )}
             >
               <SlidersHorizontal className="size-3.5" />
               Filters
               {!isFiltersEmpty(filters) && (
-                <span className="ml-0.5 size-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center">
+                <span className="ml-0.5 size-4 rounded-full bg-primary-foreground/20 font-mono text-[9px] font-bold tabular-nums flex items-center justify-center">
                   {activeFilterCount(filters)}
                 </span>
               )}
-            </button>
+            </Button>
             <ColumnsDropdown visible={visibleCols} onChange={setVisibleCols} />
-            <span className="text-xs text-muted-foreground tabular-nums">{displayLeads.length} leads</span>
+            <span className="font-mono text-xs text-muted-foreground tabular-nums">{displayLeads.length} leads</span>
           </div>
         </div>
       )}
@@ -936,12 +967,12 @@ export default function LeadsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border hover:bg-transparent">
-                      <TableHead className="text-xs font-semibold text-muted-foreground">Organization</TableHead>
-                      <TableHead className="text-xs font-semibold text-muted-foreground w-8" title="Enrichment" />
-                      <TableHead className="text-xs font-semibold text-muted-foreground">Domain</TableHead>
-                      <TableHead className="text-xs font-semibold text-muted-foreground">Description</TableHead>
-                      <TableHead className="text-xs font-semibold text-muted-foreground">Sells To</TableHead>
-                      <TableHead className="text-xs font-semibold text-muted-foreground text-right">Leads</TableHead>
+                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Organization</TableHead>
+                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-8" title="Enrichment" />
+                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Domain</TableHead>
+                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Description</TableHead>
+                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Sells To</TableHead>
+                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Leads</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -956,7 +987,7 @@ export default function LeadsPage() {
                         <TableRow
                           key={org.id}
                           onClick={() => setSelectedOrgId(org.id)}
-                          className="cursor-pointer border-border transition-colors hover:bg-secondary/40"
+                          className="cursor-pointer border-border border-l-2 border-l-transparent transition-colors hover:border-l-primary hover:bg-secondary/40"
                         >
                           <TableCell>
                             <div className="flex items-center gap-2.5">
@@ -969,7 +1000,7 @@ export default function LeadsPage() {
                           <TableCell className="text-center">
                             <EnrichDot stage={org.enrichmentStage} />
                           </TableCell>
-                          <TableCell><span className="text-xs text-muted-foreground">{org.domain || "—"}</span></TableCell>
+                          <TableCell><span className="font-mono text-xs text-muted-foreground">{org.domain || "—"}</span></TableCell>
                           <TableCell className="max-w-xs">
                             <span className="text-xs text-muted-foreground line-clamp-2">{org.companyDescription || "—"}</span>
                           </TableCell>
@@ -977,7 +1008,7 @@ export default function LeadsPage() {
                             <span className="text-xs text-muted-foreground line-clamp-2">{org.sellsTo || "—"}</span>
                           </TableCell>
                           <TableCell className="text-right">
-                            <span className="text-xs font-semibold tabular-nums">{org.leads.length}</span>
+                            <span className="font-mono text-xs font-semibold tabular-nums">{org.leads.length}</span>
                           </TableCell>
                         </TableRow>
                       ))
@@ -1005,25 +1036,25 @@ export default function LeadsPage() {
                       onClick={toggleAll}
                     />
                   </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground">Lead</TableHead>
-                  {visibleCols.organization && <TableHead className="text-xs font-semibold text-muted-foreground">Organization</TableHead>}
-                  {visibleCols.email     && <TableHead className="text-xs font-semibold text-muted-foreground">Email</TableHead>}
-                  {visibleCols.phone     && <TableHead className="text-xs font-semibold text-muted-foreground">Phone</TableHead>}
-                  {visibleCols.job_title && <TableHead className="text-xs font-semibold text-muted-foreground">Job Title</TableHead>}
+                  <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Lead</TableHead>
+                  {visibleCols.organization && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Organization</TableHead>}
+                  {visibleCols.email     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Email</TableHead>}
+                  {visibleCols.phone     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Phone</TableHead>}
+                  {visibleCols.job_title && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Job Title</TableHead>}
                   {visibleCols.status    && (
-                    <TableHead className="text-xs font-semibold text-muted-foreground">
+                    <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                       <span className="inline-flex items-center gap-0.5">
                         Status <InfoTip text={CAMPAIGN_ACTION_HELP.statusColumn} />
                       </span>
                     </TableHead>
                   )}
-                  {visibleCols.assigned  && <TableHead className="text-xs font-semibold text-muted-foreground">Assigned</TableHead>}
-                  {visibleCols.source    && <TableHead className="text-xs font-semibold text-muted-foreground">Source</TableHead>}
-                  {visibleCols.domain    && <TableHead className="text-xs font-semibold text-muted-foreground">Domain</TableHead>}
-                  {visibleCols.country   && <TableHead className="text-xs font-semibold text-muted-foreground">Country</TableHead>}
-                  {visibleCols.campaign  && <TableHead className="text-xs font-semibold text-muted-foreground">Campaign</TableHead>}
-                  {visibleCols.batch     && <TableHead className="text-xs font-semibold text-muted-foreground">Batch</TableHead>}
-                  {visibleCols.added     && <TableHead className="text-xs font-semibold text-muted-foreground">Added</TableHead>}
+                  {visibleCols.assigned  && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Assigned</TableHead>}
+                  {visibleCols.source    && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Source</TableHead>}
+                  {visibleCols.domain    && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Domain</TableHead>}
+                  {visibleCols.country   && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Country</TableHead>}
+                  {visibleCols.campaign  && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Campaign</TableHead>}
+                  {visibleCols.batch     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Batch</TableHead>}
+                  {visibleCols.added     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Added</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1046,8 +1077,8 @@ export default function LeadsPage() {
                         key={lead.id}
                         onClick={() => setSelectedLead(lead)}
                         className={cn(
-                          "cursor-pointer border-border transition-colors hover:bg-secondary/40",
-                          isChecked && "bg-secondary/30",
+                          "cursor-pointer border-border border-l-2 border-l-transparent transition-colors hover:border-l-primary hover:bg-secondary/40",
+                          isChecked && "bg-secondary/30 border-l-primary",
                         )}
                       >
                         <TableCell
@@ -1073,8 +1104,8 @@ export default function LeadsPage() {
                           </div>
                         </TableCell>
                         {visibleCols.organization && <TableCell><span className="text-sm">{lead.company || "—"}</span></TableCell>}
-                        {visibleCols.email     && <TableCell><span className="text-xs text-muted-foreground">{lead.email}</span></TableCell>}
-                        {visibleCols.phone     && <TableCell><span className="text-xs text-muted-foreground">{lead.phone || "—"}</span></TableCell>}
+                        {visibleCols.email     && <TableCell><span className="font-mono text-xs text-muted-foreground">{lead.email}</span></TableCell>}
+                        {visibleCols.phone     && <TableCell><span className="font-mono text-xs text-muted-foreground">{lead.phone || "—"}</span></TableCell>}
                         {visibleCols.job_title && <TableCell><span className="text-sm">{lead.jobTitle}</span></TableCell>}
                         {visibleCols.status    && <TableCell><StatusBadge status={lead.status} /></TableCell>}
                         {visibleCols.assigned  && (
@@ -1085,21 +1116,21 @@ export default function LeadsPage() {
                                 {assigneeDisplayName(lead.assignedTo, session, employees)}
                               </span>
                             ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-yellow-500/15 text-yellow-400 border border-yellow-500/25">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-mono font-semibold uppercase tracking-wider bg-yellow-500/10 text-yellow-400 border border-yellow-500/25">
                                 Unassigned
                               </span>
                             )}
                           </TableCell>
                         )}
                         {visibleCols.source    && <TableCell><span className="text-xs text-muted-foreground">{lead.source}</span></TableCell>}
-                        {visibleCols.domain    && <TableCell><span className="text-xs text-muted-foreground">{lead.domain || "—"}</span></TableCell>}
+                        {visibleCols.domain    && <TableCell><span className="font-mono text-xs text-muted-foreground">{lead.domain || "—"}</span></TableCell>}
                         {visibleCols.country   && <TableCell><span className="text-xs text-muted-foreground">{lead.country || "—"}</span></TableCell>}
                         {visibleCols.campaign && (
                           <TableCell>
                             {lead.campaigns.length > 0 ? (
                               <div className="flex flex-wrap gap-1">
                                 {lead.campaigns.map((c) => (
-                                  <span key={c.id} className="text-[10px] font-medium bg-secondary border border-border rounded px-1.5 py-0.5 text-muted-foreground whitespace-nowrap">
+                                  <span key={c.id} className="font-mono text-[10px] font-medium bg-secondary border border-border rounded-sm px-1.5 py-0.5 text-muted-foreground whitespace-nowrap">
                                     {c.name}
                                   </span>
                                 ))}
@@ -1121,7 +1152,7 @@ export default function LeadsPage() {
                             })() : <span className="text-xs text-muted-foreground">—</span>}
                           </TableCell>
                         )}
-                        {visibleCols.added     && <TableCell><span className="text-xs text-muted-foreground">{lead.createdAt.slice(0, 10)}</span></TableCell>}
+                        {visibleCols.added     && <TableCell><span className="font-mono text-xs text-muted-foreground tabular-nums">{lead.createdAt.slice(0, 10)}</span></TableCell>}
                       </TableRow>
                     );
                   })
@@ -1153,7 +1184,7 @@ export default function LeadsPage() {
             </Select>
           </Field>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground tabular-nums">
+            <span className="font-mono text-xs text-muted-foreground tabular-nums">
               Page {safePage} of {totalPages}
             </span>
             <Pagination className="mx-0 w-auto">
@@ -1219,13 +1250,14 @@ export default function LeadsPage() {
         return (
         <div className="fixed inset-0 z-200 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!bulkAssigning) setShowBulkAssign(false); }} />
-          <div className="relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
+          <div className="swatch-bar-top relative z-10 w-full max-w-sm mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 flex flex-col gap-5">
             <div className="flex items-start gap-4">
               <div className="shrink-0 size-10 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center">
                 <UserPlus className="size-5 text-primary" />
               </div>
               <div>
-                <p className="font-semibold text-sm">Assign {checkedIds.size} lead{checkedIds.size !== 1 ? "s" : ""}</p>
+                <p className="eyebrow">Routing</p>
+                <p className="font-display text-base font-semibold mt-0.5">Assign {checkedIds.size} lead{checkedIds.size !== 1 ? "s" : ""}</p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">Choose how these leads should be routed to employees.</p>
               </div>
             </div>
@@ -1269,19 +1301,20 @@ export default function LeadsPage() {
 
             {alreadyAssignedCount > 0 && (
               <div className="space-y-2">
-                <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 text-xs cursor-pointer hover:bg-secondary/40">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={assignSkipAssigned}
-                    onChange={(e) => setAssignSkipAssigned(e.target.checked)}
-                  />
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setAssignSkipAssigned((v) => !v)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setAssignSkipAssigned((v) => !v); } }}
+                  className="flex items-start gap-2.5 rounded-lg border border-border p-3 text-xs cursor-pointer hover:bg-secondary/40"
+                >
+                  <AppCheckbox checked={assignSkipAssigned} className="mt-0.5" />
                   <span>
                     <span className="font-medium text-foreground">Skip already assigned leads</span>
                     <br />
                     <span className="text-muted-foreground">Leave the {alreadyAssignedCount} already-owned {alreadyAssignedCount !== 1 ? "leads" : "lead"} untouched and only assign the rest.</span>
                   </span>
-                </label>
+                </div>
                 {!assignSkipAssigned && (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
                     {alreadyAssignedCount} of these {alreadyAssignedCount !== 1 ? "leads are" : "lead is"} already assigned to someone else — proceeding will reassign {alreadyAssignedCount !== 1 ? "them" : "it"}.
@@ -1291,15 +1324,16 @@ export default function LeadsPage() {
             )}
 
             <div className="flex items-center justify-end gap-2">
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => setShowBulkAssign(false)}
                 disabled={bulkAssigning}
-                className="px-4 py-2 rounded-lg text-sm font-medium border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+                className="rounded-lg bg-secondary/50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 disabled={bulkAssigning || !session || (assignStrategy === "manual" && employeesLoading)}
                 onClick={async () => {
@@ -1345,11 +1379,11 @@ export default function LeadsPage() {
                     setBulkAssigning(false);
                   }
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center gap-2"
+                className="gap-2 rounded-lg"
               >
                 {bulkAssigning ? <RefreshCw className="size-3.5 animate-spin" /> : <UserPlus className="size-3.5" />}
                 {needsOverwriteConfirm ? "Reassign anyway" : "Assign"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

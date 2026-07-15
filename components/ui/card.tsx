@@ -2,19 +2,28 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-const Card = React.forwardRef<
-  HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn(
-      "rounded-xl border border-border bg-card text-card-foreground shadow-sm",
-      className
-    )}
-    {...props}
-  />
-))
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Adds the signature bg-primary rail on the card's leading edge — the
+   *  masterbatch color-chip motif. Use on one or two hero surfaces per view,
+   *  not on every card. */
+  swatch?: "left" | "top" | "none";
+}
+
+const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ className, swatch = "none", ...props }, ref) => (
+    <div
+      ref={ref}
+      className={cn(
+        "rounded-xl border border-border bg-card text-card-foreground shadow-sm",
+        swatch !== "none" && "overflow-hidden",
+        swatch === "left" && "swatch-bar",
+        swatch === "top" && "swatch-bar-top",
+        className
+      )}
+      {...props}
+    />
+  )
+)
 Card.displayName = "Card"
 
 const CardHeader = React.forwardRef<
@@ -36,7 +45,7 @@ const CardTitle = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "text-2xl font-semibold leading-none tracking-tight",
+      "font-display text-2xl font-semibold leading-none tracking-tight",
       className
     )}
     {...props}

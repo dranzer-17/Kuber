@@ -67,7 +67,7 @@ export function SegmentedTabs<T extends string>({
             {typeof opt.count === "number" && opt.count > 0 ? (
               <span
                 className={cn(
-                  "min-w-[18px] rounded-full px-1 text-[10px] font-semibold tabular-nums text-center",
+                  "min-w-[18px] rounded-full px-1 font-mono text-[10px] font-semibold tabular-nums text-center",
                   active ? "bg-primary/20 text-primary" : "bg-border text-muted-foreground",
                 )}
               >

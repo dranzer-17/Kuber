@@ -29,19 +29,38 @@ interface StatTileProps {
   /** Tints the icon badge and value text for a semantic outcome. Omit for the neutral default. */
   tone?: StatTileTone;
   className?: string;
+  /** "card" (default) is the stacked icon-over-value tile. "row" is a compact
+   *  horizontal layout (icon left, value+label right) for dense stacked rails. */
+  layout?: "card" | "row";
 }
 
-export function StatTile({ label, value, icon: Icon, sub, tone = "neutral", className }: StatTileProps) {
+export function StatTile({ label, value, icon: Icon, sub, tone = "neutral", className, layout = "card" }: StatTileProps) {
+  if (layout === "row") {
+    return (
+      <div className={cn("swatch-bar overflow-hidden rounded-xl border border-border bg-card p-3 flex items-center gap-3", className)}>
+        {Icon && (
+          <div className={cn("size-8 rounded-lg flex items-center justify-center border shrink-0", TONE_ICON[tone])}>
+            <Icon className="size-4" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="eyebrow">{label}</p>
+          <p className={cn("font-mono text-lg font-bold tabular-nums leading-tight", TONE_TEXT[tone])}>{value}</p>
+          {sub && <p className="text-[9px] text-muted-foreground/60 mt-0.5 truncate">{sub}</p>}
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className={cn("rounded-xl border border-border bg-card p-3", Icon ? "flex flex-col gap-2" : "text-center py-3", className)}>
+    <div className={cn("swatch-bar-top overflow-hidden rounded-xl border border-border bg-card p-3", Icon ? "flex flex-col gap-2" : "text-center py-3", className)}>
       {Icon && (
         <div className={cn("size-7 rounded-lg flex items-center justify-center border", TONE_ICON[tone])}>
           <Icon className="size-3.5" />
         </div>
       )}
       <div>
-        <p className={cn("text-xl font-bold tabular-nums leading-tight", TONE_TEXT[tone])}>{value}</p>
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wide mt-1">{label}</p>
+        <p className={cn("font-mono text-xl font-bold tabular-nums leading-tight", TONE_TEXT[tone])}>{value}</p>
+        <p className="eyebrow mt-1">{label}</p>
         {sub && <p className="text-[9px] text-muted-foreground/60 mt-0.5">{sub}</p>}
       </div>
     </div>

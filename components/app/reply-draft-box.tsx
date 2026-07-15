@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, CheckCircle2, Paperclip, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -80,7 +81,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
         </div>
         <div className="flex items-center gap-1.5 pr-1">
           <CheckCircle2 className="size-3 text-green-400" />
-          <p className="text-[10px] text-green-400">Sent</p>
+          <p className="font-mono text-[10px] uppercase tracking-wide text-green-400">Sent</p>
         </div>
       </div>
     );
@@ -165,13 +166,16 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   }
 
   return (
-    <div className="w-full rounded-2xl rounded-br-sm border border-primary/20 bg-primary/5 overflow-hidden">
+    <div className="enter swatch-bar w-full rounded-xl rounded-br-sm border border-primary/20 bg-primary/5 overflow-hidden">
       <div className="px-4 py-2.5 border-b border-primary/10 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-primary">Your reply</span>
-          <span className={cn("text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full", DRAFT_STATUS_STYLE[status] ?? "")}>
+        <div className="flex items-center gap-2.5">
+          <div className="leading-tight">
+            <p className="eyebrow">AI draft · review</p>
+            <span className="font-display text-xs font-semibold text-primary">Your reply</span>
+          </div>
+          <Badge variant="outline" className={cn("rounded-md border-transparent font-mono text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5", DRAFT_STATUS_STYLE[status] ?? "")}>
             {status}
-          </span>
+          </Badge>
         </div>
         <Button
           size="sm"
@@ -239,7 +243,8 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
         </div>
 
         {regenOpen && (
-          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
+          <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-2">
+            <p className="eyebrow">Regenerate instructions</p>
             <Input
               value={regenQuery}
               onChange={(e) => setRegenQuery(e.target.value)}
@@ -255,7 +260,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
         )}
 
         {status === "failed" && error && (
-          <p className="text-xs text-red-400 mt-1">Error: {error}</p>
+          <p className="font-mono text-xs text-red-400 mt-1">Error: {error}</p>
         )}
       </div>
     </div>

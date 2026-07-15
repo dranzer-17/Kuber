@@ -5,6 +5,7 @@ import { BarChart2, CheckCircle2, Loader2, RotateCcw, Send, Users, AlertCircle }
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
+import { Card } from "@/components/ui/card";
 
 const DONUT_COLORS = ["#71717a", "#3b82f6", "#06b6d4", "#14b8a6", "#ef4444"];
 
@@ -29,33 +30,6 @@ export type CampaignReportData = {
   };
   stageDistribution: Array<{ stage: string; label: string; count: number }>;
 };
-
-function StatCard({
-  title, value, icon: Icon, sub, accent,
-}: {
-  title: string;
-  value: string | number;
-  icon: React.ElementType;
-  sub?: string;
-  accent?: "red" | "default";
-}) {
-  return (
-    <div className={cn(
-      "rounded-xl border p-4",
-      accent === "red" ? "border-red-500/30 bg-red-500/5" : "border-border bg-card",
-    )}>
-      <div className={cn(
-        "w-fit p-2 rounded-lg mb-3 border",
-        accent === "red" ? "border-red-500/30 bg-red-500/10" : "border-border bg-secondary",
-      )}>
-        <Icon className={cn("size-4", accent === "red" ? "text-red-400" : "text-muted-foreground")} />
-      </div>
-      <div className={cn("text-2xl font-bold tabular-nums", accent === "red" && "text-red-400")}>{value}</div>
-      <div className="text-sm font-medium text-foreground/80">{title}</div>
-      {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
-    </div>
-  );
-}
 
 function DonutTooltip({ active, payload }: {
   active?: boolean;
@@ -90,29 +64,84 @@ export function CampaignReportView({
   return (
     <div className="flex-1 overflow-y-auto p-8 space-y-6">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">Campaign report</p>
-        <h2 className="text-lg font-bold">Performance overview</h2>
+        <p className="eyebrow">Campaign report</p>
+        <h2 className="font-display text-lg font-bold mt-0.5">Performance overview</h2>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-        <StatCard title="Leads" value={totals.leads} icon={Users} />
-        <StatCard title="Drafts" value={totals.draftsGenerated} icon={BarChart2} sub={`${rates.certifyRate}% certified`} />
-        <StatCard title="Certified" value={totals.certified} icon={CheckCircle2} />
-        <StatCard title="Sent" value={totals.sent} icon={Send} />
-        <StatCard
-          title="Failed drafts"
-          value={draftGeneration.failed}
-          icon={AlertCircle}
-          accent={draftGeneration.failed > 0 ? "red" : "default"}
-          sub={draftGeneration.failed > 0 ? "Needs retry" : "None"}
-        />
+      {/* ── Hero: outbound summary + stage donut (2/3) beside a compact stats rail (1/3) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card swatch="left" className="lg:col-span-2 p-6">
+          <div className="flex items-end gap-8 pb-4 mb-4 border-b border-border">
+            <div>
+              <p className="font-mono text-4xl font-bold tabular-nums leading-none">{totals.sent}</p>
+              <p className="eyebrow mt-1.5">Sent</p>
+            </div>
+            <div>
+              <p className="font-mono text-4xl font-bold tabular-nums text-green-400 leading-none">{totals.certified}</p>
+              <p className="eyebrow mt-1.5">Certified</p>
+            </div>
+            <div className="ml-auto text-right">
+              <p className="eyebrow">Stage distribution</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Leads by journey stage</p>
+            </div>
+          </div>
+          {donutData.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">No data yet.</p>
+          ) : (
+            <div className="flex items-center gap-6">
+              <div className="shrink-0">
+                <ResponsiveContainer width={200} height={200}>
+                  <PieChart>
+                    <Pie
+                      data={donutData}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={90}
+                      paddingAngle={2}
+                    >
+                      {donutData.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<DonutTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 space-y-2.5 min-w-0">
+                {donutData.map((d) => (
+                  <div key={d.name} className="flex items-center gap-2">
+                    <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                    <span className="text-xs text-muted-foreground flex-1 truncate">{d.name}</span>
+                    <span className="font-mono text-xs font-semibold tabular-nums">{d.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+
+        <div className="flex flex-col gap-3">
+          <StatTile layout="row" label="Leads" value={totals.leads} icon={Users} />
+          <StatTile layout="row" label="Drafts" value={totals.draftsGenerated} icon={BarChart2} sub={`${rates.certifyRate}% certified`} />
+          <StatTile layout="row" label="Certified" value={totals.certified} icon={CheckCircle2} />
+          <StatTile layout="row" label="Sent" value={totals.sent} icon={Send} />
+          <StatTile
+            layout="row" label="Failed drafts" value={draftGeneration.failed} icon={AlertCircle}
+            tone={draftGeneration.failed > 0 ? "red" : "neutral"}
+            sub={draftGeneration.failed > 0 ? "Needs retry" : "None"}
+          />
+        </div>
       </div>
 
-      {/* Draft generation section */}
-      <div className="rounded-xl border border-border bg-card p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+      {/* ── Draft generation — distinct full-width section, not a card equal to the hero ── */}
+      <div>
+        <div className="flex items-start justify-between gap-4 flex-wrap pb-3 mb-4 border-b border-border">
           <div>
-            <h3 className="text-sm font-semibold">Draft generation</h3>
+            <p className="eyebrow">Pipeline</p>
+            <h3 className="font-display text-base font-semibold mt-0.5">Draft generation</h3>
             <p className="text-xs text-muted-foreground mt-0.5">AI email draft pipeline for this campaign</p>
           </div>
           {draftGeneration.failed > 0 && onRetryAllFailed && (
@@ -141,10 +170,10 @@ export function CampaignReportView({
           ))}
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-1.5 mt-4">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>Generation success rate</span>
-            <span className="tabular-nums font-medium text-foreground">{draftGeneration.successRate}%</span>
+            <span className="font-mono tabular-nums font-medium text-foreground">{draftGeneration.successRate}%</span>
           </div>
           <div className="h-2 rounded-full bg-secondary overflow-hidden">
             <div
@@ -159,60 +188,6 @@ export function CampaignReportView({
             Based on {draftGeneration.succeeded + draftGeneration.failed} completed attempts
             {draftGeneration.generating > 0 ? ` · ${draftGeneration.generating} still generating` : ""}
           </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="bg-card border border-border rounded-xl p-6">
-          <h3 className="text-sm font-semibold mb-1">Stage distribution</h3>
-          <p className="text-xs text-muted-foreground mb-4">Leads by campaign journey stage</p>
-          {donutData.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-8 text-center">No data yet.</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <PieChart>
-                <Pie
-                  data={donutData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={2}
-                >
-                  {donutData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip content={<DonutTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-          <div className="flex flex-wrap gap-3 mt-2">
-            {donutData.map((d) => (
-              <div key={d.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
-                {d.name} ({d.value})
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-xl p-6 flex flex-col justify-center gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest mb-1">Outbound summary</p>
-            <div className="flex items-end gap-6 mt-2">
-              <div>
-                <p className="text-4xl font-bold tabular-nums">{totals.sent}</p>
-                <p className="text-sm text-muted-foreground">Sent</p>
-              </div>
-              <div>
-                <p className="text-4xl font-bold tabular-nums text-green-400">{totals.certified}</p>
-                <p className="text-sm text-muted-foreground">Certified</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
