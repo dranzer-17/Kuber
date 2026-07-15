@@ -282,11 +282,11 @@ export function CreateCampaignModal({
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent className="max-w-3xl overflow-hidden p-0">
-        <DialogHeader className="border-b border-border px-6 pt-6 pb-4 text-left">
-          <p className="text-xs text-muted-foreground mb-1">
-            New Campaign · {leads.length} lead{leads.length !== 1 ? "s" : ""} ready for outreach
+        <DialogHeader className="swatch-bar-top border-b border-border px-6 pt-6 pb-4 text-left">
+          <p className="eyebrow mb-1">
+            New campaign · <span className="tabular-nums">{leads.length}</span> lead{leads.length !== 1 ? "s" : ""} ready for outreach
           </p>
-          <DialogTitle className="text-xl">Configure campaign</DialogTitle>
+          <DialogTitle className="font-display text-xl">Configure campaign</DialogTitle>
         </DialogHeader>
 
         <div className="max-h-[68vh] space-y-6 overflow-y-auto px-6 py-5">
@@ -347,21 +347,23 @@ export function CreateCampaignModal({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden divide-y divide-border">
-            <div className="flex items-center justify-between gap-4 px-5 py-4">
-              <div className="flex items-center gap-2.5">
-                <Clock className="size-4 text-muted-foreground shrink-0" />
-                <div>
-                  <p className="text-sm font-medium leading-none">Sending window</p>
-                  <p className="text-xs text-muted-foreground">Local time of recipient</p>
+          <div>
+            <p className="eyebrow mb-2">Schedule</p>
+            <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden divide-y divide-border">
+              <div className="flex items-center justify-between gap-4 px-5 py-4">
+                <div className="flex items-center gap-2.5">
+                  <Clock className="size-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium leading-none">Sending window</p>
+                    <p className="text-xs text-muted-foreground">Local time of recipient</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <TimeSelect value={windowFrom} onChange={setWindowFrom} />
+                  <span className="text-xs text-muted-foreground">to</span>
+                  <TimeSelect value={windowTo} onChange={setWindowTo} />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <TimeSelect value={windowFrom} onChange={setWindowFrom} />
-                <span className="text-xs text-muted-foreground">to</span>
-                <TimeSelect value={windowTo} onChange={setWindowTo} />
-              </div>
-            </div>
 
             <div className="flex flex-col gap-2 px-5 py-4">
               <div className="flex items-center justify-between gap-4">
@@ -370,7 +372,7 @@ export function CreateCampaignModal({
                   <div>
                     <p className="text-sm font-medium leading-none">Timezone</p>
                     <p className="text-xs text-muted-foreground">
-                      Auto-detected: {timezone}{primaryCountry ? ` (${primaryCountry})` : ""}
+                      Auto-detected: <span className="font-mono">{timezone}</span>{primaryCountry ? ` (${primaryCountry})` : ""}
                     </p>
                   </div>
                 </div>
@@ -455,7 +457,7 @@ export function CreateCampaignModal({
                         const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
                         setFollowupSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, delay: v } : s)));
                       }}
-                      className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-medium focus-visible:ring-0"
+                      className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-mono font-medium tabular-nums focus-visible:ring-0"
                     />
                     <Select
                       value={step.delay_unit}
@@ -502,9 +504,12 @@ export function CreateCampaignModal({
                 )}
               </div>
             </div>
+            </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
+          <div>
+            <p className="eyebrow mb-2">Attachment</p>
+            <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
             <div className="flex items-start gap-2">
               <Paperclip className="size-4 text-muted-foreground mt-0.5" />
               <div>
@@ -537,7 +542,7 @@ export function CreateCampaignModal({
                   <div className="flex items-center gap-2 min-w-0">
                     <FileText className="size-4 text-muted-foreground shrink-0" />
                     <span className="text-sm truncate">{attachment.attachment_name}</span>
-                    <span className="text-xs text-muted-foreground shrink-0">
+                    <span className="font-mono text-xs text-muted-foreground shrink-0 tabular-nums">
                       ({attachment.attachment_size >= 1024 * 1024
         ? (attachment.attachment_size / 1024 / 1024).toFixed(1) + " MB"
         : Math.round(attachment.attachment_size / 1024) + " KB"})
@@ -555,6 +560,7 @@ export function CreateCampaignModal({
             )}
 
             {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
+            </div>
           </div>
 
           <p className="text-xs text-muted-foreground">
