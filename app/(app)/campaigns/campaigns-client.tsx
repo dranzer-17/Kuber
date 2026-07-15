@@ -110,8 +110,8 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
   return (
     <div className="max-w-5xl mx-auto p-8 space-y-6">
       <div>
-        <p className="text-sm text-muted-foreground mb-1">Outreach</p>
-        <h1 className="text-2xl font-bold">Campaigns</h1>
+        <p className="eyebrow mb-1">Outreach</p>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Campaigns</h1>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -137,7 +137,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
               )}
             >
               {s}
-              <span className={cn("ml-1.5 tabular-nums", statusFilter === s ? "opacity-70" : "opacity-50")}>
+              <span className={cn("ml-1.5 font-mono tabular-nums", statusFilter === s ? "opacity-70" : "opacity-50")}>
                 {counts[s]}
               </span>
             </button>
@@ -173,7 +173,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
             return (
               <div
                 key={c.id}
-                className="relative group/card rounded-xl border border-border bg-card transition-all hover:bg-secondary/30 hover:border-border/80 hover:shadow-sm"
+                className="enter swatch-bar relative group/card rounded-xl border border-border bg-card transition-all hover:bg-secondary/30 hover:border-border/80 hover:shadow-sm"
               >
                 <button
                   type="button"
@@ -183,9 +183,9 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                   <div className={cn("size-2 rounded-full shrink-0 mt-0.5", style.dot)} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="font-semibold truncate">{c.name}</p>
+                      <p className="font-display font-semibold truncate">{c.name}</p>
                       <span className={cn(
-                        "text-[10px] font-semibold uppercase tracking-wide border rounded-md px-1.5 py-0.5 shrink-0",
+                        "font-mono text-[10px] font-semibold uppercase tracking-wider border rounded-md px-1.5 py-0.5 shrink-0",
                         style.badge,
                       )}>
                         {c.status}
@@ -200,7 +200,7 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                       )}>
                         {c.humanInLoop ? "Human review" : "Auto-send"}
                       </span>
-                      <span className="text-[11px] text-muted-foreground">Created {c.createdAt}</span>
+                      <span className="font-mono text-[11px] text-muted-foreground">Created {c.createdAt}</span>
                       {role === "manager" && c.createdBy && userMap.has(c.createdBy) && (
                         <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                           <User className="size-3" />
@@ -223,8 +223,8 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
                       { label: "Reply rate", value: `${replyRate}%`, color: replyRate > 0 ? "text-green-400" : "text-muted-foreground" },
                     ].map(({ label, value, color }, idx) => (
                       <div key={label} className={cn("text-center px-5 py-1", idx < 3 && "border-r border-border")}>
-                        <p className={cn("text-lg font-bold tabular-nums", color)}>{value}</p>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+                        <p className={cn("font-mono text-lg font-bold tabular-nums", color)}>{value}</p>
+                        <p className="eyebrow">{label}</p>
                       </div>
                     ))}
                   </div>
@@ -332,16 +332,17 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
       {assigningCampaign && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => { if (!assignLoading) setAssigningCampaign(null); }} />
-          <div className="relative w-full max-w-md rounded-xl border border-border bg-card p-6 space-y-5 shadow-xl">
+          <div className="enter swatch-bar-top relative w-full max-w-md rounded-xl border border-border bg-card p-6 space-y-5 shadow-xl">
             <div>
-              <p className="font-semibold text-sm">Assign &quot;{assigningCampaign.name}&quot;</p>
+              <p className="eyebrow mb-1">Assign campaign</p>
+              <p className="font-display font-semibold text-sm">{assigningCampaign.name}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 The assignee sees this campaign, its drafts, and every reply in their inbox. One assignee at a time — assigning someone new replaces the current one.
               </p>
             </div>
 
             <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">Assign to</p>
+              <p className="eyebrow">Assign to</p>
               <Select value={assignTarget} onValueChange={setAssignTarget}>
                 <SelectTrigger className="h-9 w-full bg-card"><SelectValue /></SelectTrigger>
                 <SelectContent>
