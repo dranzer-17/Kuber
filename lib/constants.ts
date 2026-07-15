@@ -25,7 +25,14 @@ export const APOLLO_SENIORITIES = [
 export const ALLOWED_KEYWORDS = ["plastics", "polymer", "moulding", "packaging"] as const;
 export type AllowedKeyword = (typeof ALLOWED_KEYWORDS)[number];
 
-export type IndustryKeyword = { label: string; starred?: boolean };
+// `query` is the term actually sent to Apollo's `q_keywords` — it must be
+// short and plain (no slashes/parens/example lists). Apollo matches q_keywords
+// literally against its own index; the descriptive `label` text (live-tested
+// 2026-07-14) returns 0 total_entries for 26/28 of these segments verbatim,
+// while short single/two-word terms return real volume. Picked via live
+// Apollo API testing against the app's actual title/seniority/employee-range
+// filter stack — not guessed.
+export type IndustryKeyword = { label: string; query: string; starred?: boolean };
 export type IndustryKeywordCategory = { id: string; label: string; emoji: string; keywords: IndustryKeyword[] };
 
 export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
@@ -34,10 +41,10 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "PET Bottles & Closures",
     emoji: "🧴",
     keywords: [
-      { label: "Beverage Bottles (Water/Juice/CSD)", starred: true },
-      { label: "Cosmetic & Personal Care Bottles", starred: true },
-      { label: "Pharma & Agrochemical Bottles" },
-      { label: "Caps & Closures" },
+      { label: "Beverage Bottles (Water/Juice/CSD)", query: "bottling", starred: true },
+      { label: "Cosmetic & Personal Care Bottles", query: "cosmetics", starred: true },
+      { label: "Pharma & Agrochemical Bottles", query: "pharmaceuticals" },
+      { label: "Caps & Closures", query: "closures" },
     ],
   },
   {
@@ -45,11 +52,11 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Blown Film & Flexible Packaging",
     emoji: "📦",
     keywords: [
-      { label: "Packaging Films (Pouches/Lamination)", starred: true },
-      { label: "Stretch & Cling Films" },
-      { label: "Agricultural Films (Mulch/Silage/Greenhouse)" },
-      { label: "Milk Pouch & Food Films" },
-      { label: "Courier Bags & Industrial Bags" },
+      { label: "Packaging Films (Pouches/Lamination)", query: "flexible packaging", starred: true },
+      { label: "Stretch & Cling Films", query: "flexible packaging" },
+      { label: "Agricultural Films (Mulch/Silage/Greenhouse)", query: "agriculture" },
+      { label: "Milk Pouch & Food Films", query: "dairy" },
+      { label: "Courier Bags & Industrial Bags", query: "shipping" },
     ],
   },
   {
@@ -57,9 +64,9 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Blow Molding",
     emoji: "🪣",
     keywords: [
-      { label: "Industrial Drums & IBCs" },
-      { label: "Water Tanks & Storage" },
-      { label: "Automotive Blow Molded Parts" },
+      { label: "Industrial Drums & IBCs", query: "containers" },
+      { label: "Water Tanks & Storage", query: "tanks" },
+      { label: "Automotive Blow Molded Parts", query: "automotive" },
     ],
   },
   {
@@ -67,9 +74,9 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Injection Molding",
     emoji: "🔧",
     keywords: [
-      { label: "Household Goods & Furniture", starred: true },
-      { label: "Toy Manufacturers" },
-      { label: "Industrial Parts (Crates/Pallets)" },
+      { label: "Household Goods & Furniture", query: "furniture", starred: true },
+      { label: "Toy Manufacturers", query: "toys" },
+      { label: "Industrial Parts (Crates/Pallets)", query: "pallets" },
     ],
   },
   {
@@ -77,7 +84,7 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Roto Molding",
     emoji: "🔄",
     keywords: [
-      { label: "Roto Molding Tanks & Equipment" },
+      { label: "Roto Molding Tanks & Equipment", query: "molding" },
     ],
   },
   {
@@ -85,9 +92,9 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Compounders",
     emoji: "⚗️",
     keywords: [
-      { label: "PE/PP Commodity Compounders (PE100)", starred: true },
-      { label: "Engineering Plastic Compounders (ABS/PC/Nylon)", starred: true },
-      { label: "Recycled Plastic Compounders" },
+      { label: "PE/PP Commodity Compounders (PE100)", query: "polymers", starred: true },
+      { label: "Engineering Plastic Compounders (ABS/PC/Nylon)", query: "engineering plastics", starred: true },
+      { label: "Recycled Plastic Compounders", query: "recycling" },
     ],
   },
   {
@@ -95,8 +102,8 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Recyclers",
     emoji: "♻️",
     keywords: [
-      { label: "PE/PP Recyclers & Reclaimers", starred: true },
-      { label: "PET Recyclers & rPET Processors" },
+      { label: "PE/PP Recyclers & Reclaimers", query: "recycling", starred: true },
+      { label: "PET Recyclers & rPET Processors", query: "recycling" },
     ],
   },
   {
@@ -104,16 +111,25 @@ export const INDUSTRY_KEYWORD_CATEGORIES: IndustryKeywordCategory[] = [
     label: "Specialty",
     emoji: "⭐",
     keywords: [
-      { label: "Mono Concentrate Users (Europe/Americas)", starred: true },
-      { label: "Black Masterbatch Buyers (General)" },
-      { label: "Pipe Manufacturers (HDPE/PPR/PVC)", starred: true },
-      { label: "Masterbatch Distributors" },
-      { label: "Masterbatch Manufacturers" },
-      { label: "Solar Film Manufacturers" },
-      { label: "Textile & Fiber Manufacturers" },
+      { label: "Mono Concentrate Users (Europe/Americas)", query: "masterbatch", starred: true },
+      { label: "Black Masterbatch Buyers (General)", query: "masterbatch" },
+      { label: "Pipe Manufacturers (HDPE/PPR/PVC)", query: "pipe", starred: true },
+      { label: "Masterbatch Distributors", query: "masterbatch" },
+      { label: "Masterbatch Manufacturers", query: "masterbatch" },
+      { label: "Solar Film Manufacturers", query: "solar" },
+      { label: "Textile & Fiber Manufacturers", query: "textile" },
     ],
   },
 ];
+
+/** Resolve a UI keyword label (or a free-typed custom keyword) to the term actually sent to Apollo's q_keywords. */
+export function resolveApolloKeyword(label: string): string {
+  for (const category of INDUSTRY_KEYWORD_CATEGORIES) {
+    const match = category.keywords.find((k) => k.label === label);
+    if (match) return match.query;
+  }
+  return label;
+}
 
 export type LocationCategory = { id: string; label: string; countries: string[] };
 

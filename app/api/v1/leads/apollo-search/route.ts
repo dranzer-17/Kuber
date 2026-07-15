@@ -4,7 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fail, ok } from "@/lib/api-response";
 import { ApolloSearchSchema } from "@/lib/validators/leads";
 import { searchPeople } from "@/lib/services/apollo";
-import { type EnrichTarget } from "@/lib/services/enrich-leads";
+import { resolveApolloKeyword } from "@/lib/constants";
+// Only used here for counting/ids (the actual enrich pass re-queries its own
+// full target shape) — deliberately a narrower local type, not EnrichTarget.
+type NewLeadTarget = { id: string; apollo_id: string; first_name: string | null; organization_id: string | null; org_name: string | null };
 import { internalAppBaseUrl } from "@/lib/internal-url";
 
 export const maxDuration = 300;
@@ -26,7 +29,7 @@ export async function POST(req: NextRequest) {
     let previewPeople: Array<{ firstName: string; lastName: string; email: string; company: string; jobTitle: string }> = [];
     try {
       const result = await searchPeople({
-        keyword: keywords[0],
+        keyword: resolveApolloKeyword(keywords[0]),
         locations,
         page: 1,
         titles: titles ?? undefined,
@@ -64,10 +67,11 @@ export async function POST(req: NextRequest) {
   let totalEntries = 0;
   let inserted = 0;
   let skippedDuplicate = 0;
+  let skippedUnenrichable = 0;
   let orgsCreated = 0;
   let orgsReused = 0;
   const warnings: string[] = [];
-  const newLeadTargets: EnrichTarget[] = [];
+  const newLeadTargets: NewLeadTarget[] = [];
   const newOrgIds: string[] = [];
   // WHO already owns each duplicate — previously a second importer just saw
   // "skipped" with no clue the lead already belongs to someone else (review
@@ -75,12 +79,20 @@ export async function POST(req: NextRequest) {
   const DUPLICATE_SAMPLE_CAP = 50;
   const duplicateOwners: Array<{ name: string; company: string; assigned_to: string | null }> = [];
 
-  for (const keyword of keywords) {
+  // Dropdown labels (e.g. "Beverage Bottles (Water/Juice/CSD)") are display
+  // text, not Apollo query terms — Apollo's q_keywords matches near-literally
+  // and returns 0 results for punctuation-heavy phrases, so resolve to the
+  // validated short term (lib/constants.ts) and dedup so two labels that
+  // resolve to the same query don't search Apollo twice.
+  const resolvedKeywords = [...new Map(keywords.map((label) => [resolveApolloKeyword(label), label])).entries()]
+    .map(([query, label]) => ({ query, label }));
+
+  for (const { query, label } of resolvedKeywords) {
     for (let page = 1; page <= max_pages; page++) {
       let result;
       try {
         result = await searchPeople({
-          keyword, locations, page,
+          keyword: query, locations, page,
           titles: titles ?? undefined,
           seniorities: seniorities ?? undefined,
         });
@@ -88,14 +100,14 @@ export async function POST(req: NextRequest) {
         const status = (err as { status?: number }).status;
         if (status === 401) return fail(502, "UPSTREAM_APOLLO", "Invalid or non-master Apollo key");
         if (status === 422) return fail(502, "UPSTREAM_APOLLO", (err as Error).message);
-        warnings.push(`[${keyword}] stopped at page ${page}: ${(err as Error).message}`);
+        warnings.push(`[${label}] stopped at page ${page}: ${(err as Error).message}`);
         break;
       }
 
       if (page === 1) {
         totalEntries += result.total_entries;
         if (result.total_entries === 0) {
-          warnings.push(`[${keyword}] no results — try removing location filter or changing keyword`);
+          warnings.push(`[${label}] no results — try removing location filter or changing keyword`);
           break;
         }
       }
@@ -110,7 +122,7 @@ export async function POST(req: NextRequest) {
       const { data: existing } = await db
         .from("leads").select("apollo_id, assigned_to").in("apollo_id", apolloIds);
       const existingOwners = new Map((existing ?? []).map((r) => [r.apollo_id, r.assigned_to as string | null]));
-      const newPeople = people.filter((p) => !existingOwners.has(p.id));
+      let newPeople = people.filter((p) => !existingOwners.has(p.id));
       skippedDuplicate += people.length - newPeople.length;
       for (const p of people) {
         if (existingOwners.has(p.id) && duplicateOwners.length < DUPLICATE_SAMPLE_CAP) {
@@ -119,6 +131,20 @@ export async function POST(req: NextRequest) {
             company: p.organization?.name ?? "Unknown",
             assigned_to: existingOwners.get(p.id) ?? null,
           });
+        }
+      }
+
+      // Don't re-add someone we already asked Apollo about and got no email
+      // for — that answer doesn't change, so re-inserting them just re-runs
+      // the same doomed (and now try-once) email-reveal for a person already
+      // parked in the disconnected archive table.
+      if (newPeople.length > 0) {
+        const { data: alreadyArchived } = await db
+          .from("unenrichable_leads").select("apollo_id").in("apollo_id", newPeople.map((p) => p.id));
+        const archivedIds = new Set((alreadyArchived ?? []).map((r) => r.apollo_id));
+        if (archivedIds.size > 0) {
+          skippedUnenrichable += archivedIds.size;
+          newPeople = newPeople.filter((p) => !archivedIds.has(p.id));
         }
       }
 
@@ -245,6 +271,7 @@ export async function POST(req: NextRequest) {
     total_entries: totalEntries,
     inserted,
     skipped: skippedDuplicate,
+    skipped_unenrichable: skippedUnenrichable,
     orgs_created: orgsCreated,
     orgs_reused: orgsReused,
     enrich_queued: newLeadTargets.length,

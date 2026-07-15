@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AvailabilityToggle } from "@/components/ui/availability-toggle";
 import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo, fetchUsers, fetchMyAvailability, setMyAvailability, type AvailabilityStatus } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -204,17 +205,30 @@ function AvailabilityCard() {
 
   return (
     <div className="rounded-xl border border-border bg-card p-6 flex items-center justify-between gap-4">
-      <div>
-        <p className="text-sm font-medium">Availability</p>
+      <div className="min-w-0">
+        <p className="text-sm font-medium flex items-center gap-2">
+          Availability
+          {status && (
+            <span
+              className={cn(
+                "size-1.5 rounded-full shrink-0",
+                status === "online" ? "bg-emerald-500" : "bg-amber-500",
+              )}
+              aria-hidden
+            />
+          )}
+        </p>
         <p className="text-xs text-muted-foreground mt-0.5">
           {status === "offline"
             ? "You're marked away — you won't receive new automatic lead assignments (you can still be assigned manually)."
             : "You're available for new automatic lead assignments."}
         </p>
       </div>
-      <Button variant="outline" className="h-9 shrink-0" disabled={saving || !status} onClick={() => void toggle()}>
-        {status === "offline" ? "Set available" : "Set away"}
-      </Button>
+      <AvailabilityToggle
+        status={status}
+        disabled={saving}
+        onToggle={() => void toggle()}
+      />
     </div>
   );
 }

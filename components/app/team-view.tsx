@@ -10,6 +10,7 @@ import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AvailabilityToggle } from "@/components/ui/availability-toggle";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -395,15 +396,15 @@ export function TeamView() {
                         {/* Availability toggle (spec §2B) — mark an active employee
                             temporarily unavailable without deactivating them. */}
                         {u.is_active && u.role === "employee" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs"
-                            title={u.availability_status === "offline" ? "Mark available (include in auto-assignment)" : "Mark away (exclude from auto-assignment)"}
-                            onClick={() => void handlePatch(u.id, { availability_status: u.availability_status === "offline" ? "online" : "offline" })}
-                          >
-                            {u.availability_status === "offline" ? "Set available" : "Set away"}
-                          </Button>
+                          <AvailabilityToggle
+                            status={u.availability_status}
+                            showLabel={false}
+                            onToggle={() =>
+                              void handlePatch(u.id, {
+                                availability_status: u.availability_status === "offline" ? "online" : "offline",
+                              })
+                            }
+                          />
                         )}
                         {canToggleActive ? (
                           <Button

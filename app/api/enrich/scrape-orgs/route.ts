@@ -1,13 +1,25 @@
 import { NextRequest, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { complete } from "@/lib/services/llm";
+import { scrapePage } from "@/lib/services/firecrawl";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { deriveDomainFromEmail } from "@/lib/utils/domain";
 import { autoAssignEnrichedLeads } from "@/lib/services/assignment";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const maxDuration = 55;
+// Raised from 55s to match the other enrichment routes (apollo-search, enrich
+// both run at 300s) — the LLM step alone is allowed up to 90s per attempt
+// (lib/http.ts TIMEOUTS.llm) with up to 3 retries, so 55s was already too
+// tight for even a single slow org, let alone a batch of 10.
+export const maxDuration = 300;
+
+// Retryable = plausibly transient (network blip, timeout, rate limit) — worth
+// automatically trying again. Not retryable = the content itself is the
+// problem (no domain, empty page, nothing extractable) — retrying instantly
+// won't change the outcome, so these go straight to a human via Input Required.
+const RETRYABLE_STATUSES = new Set(["SCRAPE_FAILED", "LLM_EXTRACTION_FAILED"]);
+const MAX_ENRICHMENT_ATTEMPTS = 3;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -73,29 +85,36 @@ async function markFailed(db: Db, orgId: string, status: string, errorMessage: s
     .single();
 
   const attempts = (org?.enrichment_attempts ?? 0) + 1;
-  const isPermanent = attempts >= 3;
+  const outOfRetries = attempts >= MAX_ENRICHMENT_ATTEMPTS;
+  // Transient failure with attempts left: requeue instead of concluding — the
+  // ongoing scrape-orgs self-chain (and the daily watchdog) will pick it back
+  // up automatically, so this needs no human until it's actually out of tries.
+  const shouldRetry = RETRYABLE_STATUSES.has(status) && !outOfRetries;
 
   await db.from("organizations").update({
-    enrichment_stage: isPermanent ? "failed" : "failed",
-    enrichment_status: isPermanent ? "ENRICHMENT_FAILED_PERMANENT" : status,
+    enrichment_stage: shouldRetry ? "queued" : "failed",
+    enrichment_status: shouldRetry ? status : (outOfRetries ? "ENRICHMENT_FAILED_PERMANENT" : status),
     enrichment_attempts: attempts,
     last_error: errorMessage.slice(0, 500),
     updated_at: new Date().toISOString(),
   }).eq("id", orgId);
 
-  // Fix A: sync leads.status when org enrichment fails
-  await db.from("leads")
-    .update({ status: "input_required", updated_at: new Date().toISOString() })
-    .eq("organization_id", orgId)
-    .eq("is_deleted", false)
-    .not("status", "in", '("open","closed")');
+  // Only conclude leads to Input Required once we've actually stopped trying —
+  // while retrying, the org is back in the "queued" pipeline so leads stay New.
+  if (!shouldRetry) {
+    await db.from("leads")
+      .update({ status: "input_required", updated_at: new Date().toISOString() })
+      .eq("organization_id", orgId)
+      .eq("is_deleted", false)
+      .not("status", "in", '("open","closed")');
+  }
 
   await insertLog(db, {
     org_id: orgId,
     source: "system",
-    event: isPermanent ? "ENRICHMENT_FAILED_PERMANENT" : "ENRICHMENT_FAILED",
+    event: shouldRetry ? "ENRICHMENT_RETRY_QUEUED" : (outOfRetries ? "ENRICHMENT_FAILED_PERMANENT" : "ENRICHMENT_FAILED"),
     error: errorMessage,
-    payload: { attempts, is_permanent: isPermanent },
+    payload: { attempts, retrying: shouldRetry },
   });
 }
 
@@ -239,53 +258,56 @@ async function processOneOrg(
       return "merged";
     }
     if (result.type === "failed") {
-      await markFailed(db, org.id, "SCRAPE_FAILED", "No domain available after Phase 2A and no usable lead email domain");
+      await markFailed(db, org.id, "NO_DOMAIN", "No domain available after Phase 2A and no usable lead email domain");
       return;
     }
     org.domain = result.domain;
   }
 
+  // ── B.5: Nobody to email under this org — don't spend Firecrawl/LLM credits
+  // scraping a website whose only leads can never be contacted. Rare in
+  // practice now that email-reveal archives+removes (and cleans up an
+  // orphaned org) the moment a lead fails — this is a defensive backstop for
+  // odd orderings (e.g. a manual rescrape) rather than the common path.
+  const { count: usableLeadCount } = await db
+    .from("leads")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", org.id)
+    .eq("is_deleted", false)
+    .or("email.not.is.null,has_email.eq.true");
+  if ((usableLeadCount ?? 0) === 0) {
+    await markFailed(db, org.id, "NO_EMAILED_LEADS", "No lead under this org has (or is waiting on) a usable email");
+    return;
+  }
+
   // ── C: Firecrawl scrape ────────────────────────────────────────────────────
+  // Goes through lib/services/firecrawl.ts's scrapePage(), which wraps the
+  // call in fetchWithRetry("firecrawl", ...) — a 60s AbortController timeout
+  // plus retry on 429/5xx (lib/http.ts). The previous raw fetch() here had
+  // neither: a hung Firecrawl response could stall this whole batch of up to
+  // 10 orgs until the platform killed the entire function.
   const scrapeStart = Date.now();
   let markdown: string | null = null;
 
   try {
-    const firecrawlRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.FIRECRAWL_API_KEY}`,
-      },
-      body: JSON.stringify({
-        url: `https://${org.domain}`,
-        formats: ["markdown"],
-        onlyMainContent: true,
-        timeout: 15000,
-      }),
-    });
-
-    const firecrawlData = await firecrawlRes.json() as {
-      success?: boolean;
-      error?: string;
-      data?: { markdown?: string };
-    };
+    const result = await scrapePage(`https://${org.domain}`);
     const scrapeDuration = Date.now() - scrapeStart;
 
-    if (!firecrawlRes.ok || !firecrawlData.success) {
-      const errMsg = firecrawlData.error ?? `HTTP ${firecrawlRes.status}`;
+    if (!result.success) {
+      const errMsg = result.error ?? "Unknown Firecrawl error";
       await insertLog(db, {
         org_id: org.id,
         source: "firecrawl",
         event: "SCRAPE_FAILED",
         duration_ms: scrapeDuration,
         error: errMsg,
-        payload: { status: firecrawlRes.status, domain: org.domain },
+        payload: { domain: org.domain },
       });
       await markFailed(db, org.id, "SCRAPE_FAILED", errMsg);
       return;
     }
 
-    markdown = firecrawlData.data?.markdown ?? null;
+    markdown = result.data?.markdown ?? null;
     const charCount = markdown?.length ?? 0;
 
     if (!markdown || charCount < 500) {
@@ -438,15 +460,17 @@ export async function POST(req: NextRequest) {
   const db = createAdminClient();
 
   // ── Watchdog: reset orgs stuck in 'scraping' beyond the function's max
-  // lifetime. Each requeue counts as an attempt so a pathological org can't
-  // loop forever burning Firecrawl/LLM credits (planning.md Phase 3.2).
+  // lifetime. Threshold must stay above maxDuration (300s) or this would fire
+  // on batches that are still legitimately running. Each requeue counts as an
+  // attempt so a pathological org can't loop forever burning Firecrawl/LLM
+  // credits (planning.md Phase 3.2).
   const { data: stuckScraping } = await db.from("organizations")
     .select("id, enrichment_attempts")
     .eq("enrichment_stage", "scraping")
-    .lt("enrichment_started_at", new Date(Date.now() - 5 * 60 * 1000).toISOString());
+    .lt("enrichment_started_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
   for (const stuck of stuckScraping ?? []) {
     const attempts = (stuck.enrichment_attempts ?? 0) + 1;
-    const givenUp = attempts >= 3;
+    const givenUp = attempts >= MAX_ENRICHMENT_ATTEMPTS;
     await db.from("organizations").update({
       enrichment_stage: givenUp ? "failed" : "queued",
       enrichment_status: givenUp ? "ENRICHMENT_FAILED_PERMANENT" : "REQUEUED_STUCK_SCRAPING",
@@ -480,7 +504,7 @@ export async function POST(req: NextRequest) {
   // the same org before either marked it 'scraping', causing duplicate
   // Firecrawl/LLM spend. claim_queued_orgs uses FOR UPDATE SKIP LOCKED so
   // concurrent callers always get disjoint batches.
-  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: 10 });
+  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: 5 });
   if (claimError) {
     return Response.json({ error: claimError.message }, { status: 500 });
   }

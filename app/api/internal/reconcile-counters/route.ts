@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { runEnrichmentWatchdog } from "@/lib/services/enrichment-watchdog";
 
 export const maxDuration = 120;
 
@@ -49,24 +50,13 @@ async function reconcile(db: Db) {
   return { campaigns_checked: (campaigns ?? []).length, campaigns_corrected: updated };
 }
 
-/** Nudge the scrape worker so its watchdogs (stuck scraping / stale queued)
- *  run even on an otherwise idle day. */
-function triggerScrapeWatchdog(req: NextRequest) {
-  if (!process.env.INTERNAL_SECRET) return;
-  const baseUrl = internalAppBaseUrl(req);
-  const secret = process.env.INTERNAL_SECRET;
-  void fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
-    method: "POST",
-    headers: { "x-internal-secret": secret },
-  }).catch(() => {});
-}
-
 export async function POST(req: NextRequest) {
   if (!safeSecretEqual(req.headers.get("x-internal-secret"), process.env.INTERNAL_SECRET)) {
     return fail(401, "UNAUTHORIZED", "Internal secret required");
   }
-  const result = await reconcile(createAdminClient());
-  triggerScrapeWatchdog(req);
+  const db = createAdminClient();
+  const result = await reconcile(db);
+  await runEnrichmentWatchdog(internalAppBaseUrl(req), db);
   return ok(result);
 }
 
@@ -80,7 +70,8 @@ export async function GET(req: NextRequest) {
   if (!authorized) {
     return fail(401, "UNAUTHORIZED", "Cron authorization required");
   }
-  const result = await reconcile(createAdminClient());
-  triggerScrapeWatchdog(req);
+  const db = createAdminClient();
+  const result = await reconcile(db);
+  await runEnrichmentWatchdog(internalAppBaseUrl(req), db);
   return ok(result);
 }

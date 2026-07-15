@@ -16,14 +16,22 @@ const KANBAN_COLS: { id: LeadStatus; label: string; hint?: string; dot: string; 
 export function KanbanBoard({
   leads,
   onCardClick,
+  onRetryAllFailed,
+  retryingAll,
 }: {
   leads: Lead[];
   onCardClick: (lead: Lead) => void;
+  /** Manager-only bulk retry for the "failed website" flavour of Input Required. Omit to hide the action. */
+  onRetryAllFailed?: () => void;
+  retryingAll?: boolean;
 }) {
   return (
     <div className="flex gap-2 overflow-x-auto pb-4 min-h-[500px]">
       {KANBAN_COLS.map((col) => {
         const colLeads = leads.filter((l) => kanbanColumnFor(l) === col.id);
+        const failedCount = col.id === "Input Required"
+          ? colLeads.filter((l) => inputRequiredReason(l) === "failed").length
+          : 0;
         return (
           <div
             key={col.id}
@@ -33,7 +41,19 @@ export function KanbanBoard({
             <div className={cn("flex items-center gap-1.5 px-2.5 py-2 rounded-lg border bg-card", col.header)} title={col.hint}>
               <span className={cn("size-2 rounded-full shrink-0", col.dot)} />
               <span className="text-xs font-semibold truncate">{col.label}</span>
-              <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0">
+              {col.id === "Input Required" && onRetryAllFailed && failedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={onRetryAllFailed}
+                  disabled={retryingAll}
+                  title="Retry enrichment for every failed company in this list"
+                  className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-medium text-yellow-500 hover:text-yellow-400 disabled:opacity-50 transition-colors"
+                >
+                  <RotateCcw className={cn("size-3", retryingAll && "animate-spin")} />
+                  Retry all
+                </button>
+              )}
+              <span className={cn("text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0", !(col.id === "Input Required" && onRetryAllFailed && failedCount > 0) && "ml-auto")}>
                 {colLeads.length}
               </span>
             </div>

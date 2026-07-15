@@ -1,6 +1,6 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -612,6 +612,21 @@ export default function LeadsPage() {
   const [assignSkipAssigned, setAssignSkipAssigned] = useState(false);
   const [employees,        setEmployees       ] = useState<Profile[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
+  const [retryingAll,      setRetryingAll     ] = useState(false);
+
+  async function handleRetryAllFailed() {
+    if (!session || retryingAll) return;
+    setRetryingAll(true);
+    try {
+      const { requeued } = await retryAllFailedEnrichment(session.access_token);
+      toast.success(requeued > 0 ? `Retrying enrichment for ${requeued} compan${requeued === 1 ? "y" : "ies"}…` : "Nothing left to retry.");
+      setTimeout(() => { if (session) void loadLeads(session.access_token); }, 3000);
+    } catch (e) {
+      toast.error((e as Error).message || "Retry failed");
+    } finally {
+      setRetryingAll(false);
+    }
+  }
 
   useEffect(() => {
     if (role !== "manager" || !session) return;
@@ -647,6 +662,19 @@ export default function LeadsPage() {
     if (leads.length > 0) return;
     void loadLeads(session.access_token);
   }, [session, leads.length, loadingLeads, loadLeads]);
+
+  // Background enrichment (email reveal, website scraping) keeps changing lead
+  // status after this page's initial load, but nothing pushes those changes to
+  // the browser — without this, the list/Kanban silently goes stale and looks
+  // like data disappeared even though the database is fine. Poll quietly
+  // while this page is open; skip a tick if a load is already in flight.
+  useEffect(() => {
+    if (!session) return;
+    const interval = setInterval(() => {
+      if (!loadingLeads) void loadLeads(session.access_token);
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [session, loadingLeads, loadLeads]);
 
   // Fetch import batches for the batch filter dropdown; re-run when leads refresh
   useEffect(() => {
@@ -956,7 +984,12 @@ export default function LeadsPage() {
             </div>
           );
         })() : leadsViewMode === "kanban" ? (
-          <KanbanBoard leads={leads} onCardClick={(lead) => setSelectedLead(lead)} />
+          <KanbanBoard
+            leads={leads}
+            onCardClick={(lead) => setSelectedLead(lead)}
+            onRetryAllFailed={role === "manager" ? handleRetryAllFailed : undefined}
+            retryingAll={retryingAll}
+          />
         ) : (
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <Table>

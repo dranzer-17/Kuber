@@ -297,6 +297,11 @@ export async function rescrapeOrg(token: string, orgId: string): Promise<{ id: s
   return apiFetch(`/api/v1/organizations/${orgId}/rescrape`, { method: "POST" }, token);
 }
 
+/** Requeues every org that failed enrichment but still has retry attempts left. */
+export async function retryAllFailedEnrichment(token: string): Promise<{ requeued: number }> {
+  return apiFetch(`/api/enrich/retry-all`, { method: "POST" }, token);
+}
+
 export async function createLead(token: string, body: {
   email: string; first_name?: string; last_name?: string;
   organization_name: string; organization_domain?: string;

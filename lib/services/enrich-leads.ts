@@ -7,6 +7,7 @@ export interface EnrichLeadsResult {
   matched: number;
   verified: number;
   unverified: number;
+  archived: number;
   credits_consumed: number;
   missing_apollo_ids: string[];
   enriched_org_ids: string[];
@@ -17,8 +18,55 @@ export interface EnrichTarget {
   id: string;          // DB lead UUID
   apollo_id: string;
   first_name: string | null;
+  last_name: string | null;
+  title: string | null;
+  country: string | null;
+  city: string | null;
+  state: string | null;
   organization_id: string | null;
   org_name: string | null;
+}
+
+// Apollo charges a credit for a bulk_match call EVEN when it comes back
+// "unavailable" — confirmed live (see conversation) — and that answer never
+// changes on a re-ask (it's Apollo's own data gap, not a transient failure
+// like a slow website). So email-reveal is try-once: anyone Apollo doesn't
+// hand back a real email for gets archived into `unenrichable_leads` (a flat
+// table with no foreign keys into the working schema — never shown in the
+// app, never asked about again) and removed from `leads` immediately, instead
+// of lingering as "has_email=true, email=null" to be re-charged on every
+// future enrichment pass.
+async function archiveUnenrichableLead(
+  db: SupabaseClient,
+  target: EnrichTarget,
+  linkedinUrl?: string | null,
+): Promise<void> {
+  await db.from("unenrichable_leads").upsert({
+    apollo_id: target.apollo_id,
+    first_name: target.first_name,
+    last_name: target.last_name,
+    title: target.title,
+    organization_name: target.org_name,
+    country: target.country,
+    city: target.city,
+    state: target.state,
+    linkedin_url: linkedinUrl ?? null,
+  }, { onConflict: "apollo_id", ignoreDuplicates: true });
+
+  await db.from("leads").delete().eq("id", target.id);
+
+  // This was the org's only lead — an empty company record is just clutter
+  // (and would otherwise sit around getting queued/rescraped for nobody).
+  if (target.organization_id) {
+    const { count } = await db
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", target.organization_id)
+      .eq("is_deleted", false);
+    if ((count ?? 0) === 0) {
+      await db.from("organizations").delete().eq("id", target.organization_id);
+    }
+  }
 }
 
 export async function enrichLeads(
@@ -30,6 +78,7 @@ export async function enrichLeads(
   let matched = 0;
   let verified = 0;
   let unverified = 0;
+  let archived = 0;
   let totalCredits = 0;
   let processedCount = 0;
   const missingApolloIds: string[] = [];
@@ -53,9 +102,21 @@ export async function enrichLeads(
       const result = await bulkMatch(chunkDetails);
       totalCredits += result.credits_consumed ?? 0;
 
+      const seenApolloIds = new Set<string>();
+
       for (const match of result.matches ?? []) {
         const lead = chunkTargets.find((t) => t.apollo_id === match.id);
         if (!lead) continue;
+        seenApolloIds.add(match.id);
+
+        if (match.email == null) {
+          // Apollo acknowledged the person but has no email on file — final
+          // answer, archive now rather than leave it to be re-asked (and
+          // re-charged) on every future run.
+          await archiveUnenrichableLead(db, lead, match.linkedin_url);
+          archived++;
+          continue;
+        }
 
         matched++;
         if (match.email_status === "verified") verified++; else unverified++;
@@ -180,6 +241,15 @@ export async function enrichLeads(
           .in("crm_status", ["new", "enriching", "enriched", "skipped"]);
       }
 
+      // Targets Apollo didn't return a record for at all — same final "no
+      // email, ever" outcome as an explicit null-email match, so archive them.
+      for (const target of chunkTargets) {
+        if (!seenApolloIds.has(target.apollo_id)) {
+          await archiveUnenrichableLead(db, target);
+          archived++;
+        }
+      }
+
       processedCount += chunkTargets.length;
       onProgress?.(processedCount, targets.length);
 
@@ -196,7 +266,8 @@ export async function enrichLeads(
   // "New" now means "enrichment in flight", so a bulk-match run must leave no
   // org dangling: revive previously-failed orgs that just gained a domain
   // (they'll be scraped), and mark still-domainless orgs failed so their
-  // leads move to Input Required instead of sitting in New forever.
+  // leads move to Input Required instead of sitting in New forever. Orgs
+  // deleted above (their only lead just got archived) are simply no-ops here.
   if (touchedOrgIds.size > 0) {
     const ids = [...touchedOrgIds];
     const now = new Date().toISOString();
@@ -225,7 +296,9 @@ export async function enrichLeads(
       .in("enrichment_stage", ["queued", "scraping"]);
   }
 
-  // Collect missing (still no email after enrichment)
+  // Collect missing (still no email after enrichment) — should stay empty in
+  // practice now that unresolved targets are archived+removed above; kept as
+  // a defensive check in case a target somehow survived without resolution.
   const allApolloIds = targets.map((t) => t.apollo_id);
   const { data: stillMissing } = await db
     .from("leads")
@@ -238,6 +311,7 @@ export async function enrichLeads(
     matched,
     verified,
     unverified,
+    archived,
     credits_consumed: totalCredits,
     missing_apollo_ids: missingApolloIds,
     enriched_org_ids: [...enrichedOrgIds],

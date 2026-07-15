@@ -7,6 +7,14 @@
     {
       "path": "/api/internal/reconcile-counters",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/internal/enrichment-watchdog",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/internal/auto-retry-failed-orgs",
+      "schedule": "0 */3 * * *"
     }
   ]
 }
