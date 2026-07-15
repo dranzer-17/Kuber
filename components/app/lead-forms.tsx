@@ -993,15 +993,24 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     const domainMapped    = !!mapping.organization_domain;
 
     return (
-      <div className="space-y-4">
+      <form
+        className="space-y-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!emailMapped || !firstNameMapped || !domainMapped || importing) return;
+          if (!batchName.trim()) { setBatchNameError(true); return; }
+          setBatchNameError(false);
+          setShowConfirm(true);
+        }}
+      >
         <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3">
           <FileText className="size-4 text-muted-foreground shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">{fileName}</p>
             <p className="text-xs text-muted-foreground">{rows.length} rows · {headers.length} columns detected</p>
           </div>
-          <Button variant="outline" size="sm" className="shrink-0 bg-card" onClick={() => setShowRawPreview(true)}>View</Button>
-          <Button variant="outline" size="sm" className="shrink-0 bg-card" onClick={reset}>Change</Button>
+          <Button type="button" variant="outline" size="sm" className="shrink-0 bg-card" onClick={() => setShowRawPreview(true)}>View</Button>
+          <Button type="button" variant="outline" size="sm" className="shrink-0 bg-card" onClick={reset}>Change</Button>
         </div>
 
         <div className="space-y-3">
@@ -1054,15 +1063,8 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="bg-card" onClick={reset}>Back</Button>
-            <Button
-              disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}
-              onClick={() => {
-                if (!batchName.trim()) { setBatchNameError(true); return; }
-                setBatchNameError(false);
-                setShowConfirm(true);
-              }}
-            >
+            <Button type="button" variant="outline" size="sm" className="bg-card" onClick={reset}>Back</Button>
+            <Button type="submit" disabled={!emailMapped || !firstNameMapped || !domainMapped || importing}>
               Preview & Import
             </Button>
           </div>
@@ -1111,7 +1113,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
+      </form>
     );
   }
 
@@ -1254,7 +1256,10 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
   }));
 
   return (
-    <div className="space-y-6">
+    <form
+      className="space-y-6"
+      onSubmit={(e) => { e.preventDefault(); handleOpenConfirm(); }}
+    >
       <p className="text-sm text-muted-foreground">
         {editMode ? "Edit organization and linked leads." : "Add leads under one organization."}
       </p>
@@ -1287,7 +1292,12 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
         {leads.map((lead, index) => (
           <div key={index} className={cn("space-y-3 relative", index > 0 && "border-t border-border pt-4")}>
             {leads.length > 1 && (
-              <button type="button" onClick={() => removeLead(index)} className="absolute top-0 right-0 text-muted-foreground hover:text-foreground transition-colors" aria-label="Remove lead">
+              <button
+                type="button"
+                onClick={() => removeLead(index)}
+                className="absolute top-0 right-0 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Remove lead"
+              >
                 <X className="size-4" />
               </button>
             )}
@@ -1329,7 +1339,7 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
       {!editMode && <AssignToField employees={employees} value={assignTo} onChange={setAssignTo} />}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
-      <Button type="button" disabled={saving} onClick={handleOpenConfirm}>
+      <Button type="submit" disabled={saving}>
         {saving ? "Saving…" : editMode ? "Save changes" : "Preview & Save"}
       </Button>
       {saved && <p className="text-sm text-green-400">Saved successfully.</p>}
@@ -1344,6 +1354,6 @@ export function ManualForm({ onImport, prefillOrg, prefillLeads, editMode = fals
           onCancel={() => setShowConfirm(false)}
         />
       )}
-    </div>
+    </form>
   );
 }
