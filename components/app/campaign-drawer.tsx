@@ -57,7 +57,7 @@ import { supabase } from "@/lib/supabase";
 import { useApp } from "@/lib/app-context";
 import type { Campaign } from "@/components/app/create-campaign-modal";
 import { CampaignConfigModal } from "@/components/app/campaign-config-modal";
-import { EditCampaignForm } from "@/components/app/edit-campaign-modal";
+import { EditCampaignForm, SharedSettingsNotice } from "@/components/app/edit-campaign-modal";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Lead } from "@/lib/leads";
@@ -403,7 +403,12 @@ export function CampaignDetail({
     })();
   }, []);
 
-  const { loadCampaigns, session: appSession } = useApp();
+  const { loadCampaigns, session: appSession, role } = useApp();
+  // Options/Sequences are shared campaign-wide settings (spec §5 — a campaign
+  // is a container that can hold leads owned by several employees at once), so
+  // only managers may edit them; an employee editing here would silently change
+  // what every other teammate's leads in the same campaign send under.
+  const isManager = role === "manager";
 
   useEffect(() => {
     setCampaignName(campaign.name);
@@ -939,7 +944,7 @@ export function CampaignDetail({
   }
 
   async function handleSaveSeqDraft() {
-    if (!activeSeqStep) return;
+    if (!activeSeqStep || !isManager) return;
     setSeqStepSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -963,7 +968,7 @@ export function CampaignDetail({
   }
 
   async function handleRegenerateSeqDraft() {
-    if (!activeSeqStep) return;
+    if (!activeSeqStep || !isManager) return;
     setSeqRegenerating(true);
     setSeqRegenOpen(false);
     try {
@@ -2343,6 +2348,8 @@ export function CampaignDetail({
               </div>
             ) : (
               <div className="max-w-2xl mx-auto space-y-4">
+                <SharedSettingsNotice readOnly={!isManager} />
+
                 {/* Header */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -2358,7 +2365,7 @@ export function CampaignDetail({
                       ) : null;
                     })()}
                   </div>
-                  {seqHasContent && (
+                  {seqHasContent && isManager && (
                     <div className="flex items-center gap-2">
                       <Button
                         type="button"
@@ -2398,6 +2405,7 @@ export function CampaignDetail({
                       <Label className="eyebrow">Subject</Label>
                       <Input
                         value={seqSubjectEdit}
+                        disabled={!isManager}
                         onChange={(e) => setSeqSubjectEdit(e.target.value)}
                         placeholder="No subject (threaded reply)"
                         className="text-sm"
@@ -2408,11 +2416,12 @@ export function CampaignDetail({
                       <RichTextEditor
                         value={seqBodyEdit}
                         onChange={setSeqBodyEdit}
+                        disabled={!isManager}
                         minHeight={280}
                         showTemplateVars
                       />
                     </div>
-                    {seqRegenOpen && (
+                    {seqRegenOpen && isManager && (
                       <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
                         <Input
                           value={seqRegenQuery}
@@ -2448,6 +2457,7 @@ export function CampaignDetail({
           <EditCampaignForm
             variant="page"
             campaign={campaign}
+            readOnly={!isManager}
             onSaved={() => {
               if (appSession?.access_token) void loadCampaigns(appSession.access_token);
             }}

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CampaignStepsSchema } from "@/lib/validators/campaigns";
@@ -23,12 +23,17 @@ export async function GET(
   return ok({ steps: data ?? [] });
 }
 
+// Manager-only write: sequence steps are campaign-wide templates that propagate
+// live to every Instantly sub-campaign already sending, i.e. to every teammate's
+// leads in this container, not just the editor's own (spec §5, EDGE_CASES.md §2.10).
+// GET above stays open to any employee with campaign access so they can still
+// view the sequence content read-only.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  let user: Awaited<ReturnType<typeof requireAuth>>;
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
   const { id } = await params;
   const parsed = CampaignStepsSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid steps", parsed.error.flatten());

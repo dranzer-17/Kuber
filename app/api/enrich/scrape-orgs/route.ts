@@ -6,6 +6,7 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 import { deriveDomainFromEmail } from "@/lib/utils/domain";
 import { autoAssignEnrichedLeads } from "@/lib/services/assignment";
 import { logLeadEvents } from "@/lib/services/lead-events";
+import { checkFirecrawlCredits, checkOpenRouterCredits } from "@/lib/services/provider-credits";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -498,6 +499,31 @@ export async function POST(req: NextRequest) {
   }
 
   const db = createAdminClient();
+
+  // ── Credit gate: don't spend a single attempt on a guaranteed failure.
+  // Retrying while a provider is genuinely out of money just burns the 3-try
+  // budget for no reason (real websites, none of it their fault) and leaves
+  // healthy leads stuck needing a manual retry once credit is topped up. Skip
+  // the whole batch untouched — nothing claimed, nothing marked failed — and
+  // let the next watchdog tick (or self-chain re-trigger below) check again.
+  const [firecrawlCredits, openRouterCredits] = await Promise.all([
+    checkFirecrawlCredits(db),
+    checkOpenRouterCredits(db),
+  ]);
+  if (!firecrawlCredits.ok || !openRouterCredits.ok) {
+    const reason = [!firecrawlCredits.ok && firecrawlCredits.message, !openRouterCredits.ok && openRouterCredits.message]
+      .filter(Boolean).join(" · ");
+    await insertLog(db, {
+      source: "system",
+      event: "SKIPPED_LOW_CREDITS",
+      payload: { firecrawl: firecrawlCredits, openrouter: openRouterCredits },
+      error: reason,
+    });
+    // Deliberately do NOT self-trigger here — that would spin in a tight loop
+    // re-checking credits every few hundred ms. The 15-min watchdog is the
+    // only thing that re-checks while credit stays low.
+    return Response.json({ processed: 0, succeeded: 0, failed: 0, status: "skipped_low_credits", reason });
+  }
 
   // ── Watchdog: reset orgs stuck in 'scraping' beyond the function's max
   // lifetime. Threshold must stay above maxDuration (300s) or this would fire

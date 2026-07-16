@@ -6,6 +6,7 @@ import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -202,6 +203,11 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
+
+  await logLeadEvent(db, data.id, "created", "Added manually", { actorId: user.id });
+  if (assigned_to) {
+    await logLeadEvent(db, data.id, "assigned", "Assigned to an employee", { actorId: user.id, metadata: { assignee_id: assigned_to } });
+  }
 
   if (importId) {
     await db.from("imports").update({ lead_count: 1 }).eq("id", importId);

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchCampaignSchema } from "@/lib/validators/campaigns";
@@ -11,9 +11,15 @@ import { assertCampaignAccess } from "@/lib/auth/scope";
 // sub-campaigns. Unlike the main PATCH /campaigns/[id] route this is not
 // restricted to draft/processing status — schedule settings (daily limit, send
 // window, days) are safe to change on active campaigns.
+//
+// Manager-only: a campaign is a shared container (spec §5) that can hold leads
+// owned by several employees at once. These settings (sender identity, daily
+// limit, sending window, send days) are campaign-wide, not per-lead-owner — if
+// any assignee could edit them, they'd silently change what every other
+// teammate's leads in the same campaign send under. See EDGE_CASES.md §2.10.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: Awaited<ReturnType<typeof requireAuth>>;
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, Loader2, Clock, Globe, Calendar, Gauge, X } from "lucide-react";
+import { ChevronRight, Loader2, Clock, Globe, Calendar, Gauge, X, Lock, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,13 +31,14 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
   return { value, label: `${String(dh).padStart(2, "0")}:${m} ${period}` };
 });
 
-function DayPill({ day, active, onClick }: { day: string; active: boolean; onClick: () => void }) {
+function DayPill({ day, active, onClick, disabled }: { day: string; active: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <Button
       type="button"
       variant={active ? "default" : "outline"}
       size="icon"
       onClick={onClick}
+      disabled={disabled}
       className="size-8 rounded-full text-xs font-semibold"
     >
       {day[0].toUpperCase()}
@@ -45,9 +46,9 @@ function DayPill({ day, active, onClick }: { day: string; active: boolean; onCli
   );
 }
 
-function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger className="h-9 w-32 tabular-nums">
         <SelectValue />
       </SelectTrigger>
@@ -60,6 +61,22 @@ function TimeSelect({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
+/** Shared-settings notice shown on the Options/Sequences forms — a campaign is a
+ *  container that can hold leads owned by several employees at once, so these
+ *  settings apply to everyone's leads in it, not just the viewer's own. */
+export function SharedSettingsNotice({ readOnly }: { readOnly: boolean }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-600 dark:text-amber-400">
+      {readOnly ? <Lock className="size-4 shrink-0 mt-0.5" /> : <Info className="size-4 shrink-0 mt-0.5" />}
+      <span>
+        {readOnly
+          ? "Only managers can edit campaign options. These settings are shared by the whole campaign — every teammate's leads in it send under them."
+          : "Shared campaign settings — changes here apply to every teammate's leads in this campaign, not just your own."}
+      </span>
+    </div>
+  );
+}
+
 type FollowupStep = { delay: number; delay_unit: "minutes" | "hours" | "days" };
 
 export function EditCampaignForm({
@@ -67,12 +84,15 @@ export function EditCampaignForm({
   onSaved,
   className,
   variant = "modal",
+  readOnly = false,
 }: {
   campaign: Campaign;
   onSaved?: (patch: Partial<Campaign>) => void;
   className?: string;
   /** "modal" = boxed card (used in the narrow edit dialog). "page" = borderless, spread across full width (used in the campaign drawer). */
   variant?: "modal" | "page";
+  /** Manager-only settings, viewed by a non-manager: render every control disabled, hide Save. */
+  readOnly?: boolean;
 }) {
   const [senderName, setSenderName] = useState(campaign.senderName ?? "");
   const [aiPromptContext, setAiPromptContext] = useState(campaign.aiPromptContext ?? "");
@@ -115,6 +135,7 @@ export function EditCampaignForm({
   }, [campaign.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSave() {
+    if (readOnly) return;
     setSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -189,6 +210,7 @@ export function EditCampaignForm({
               min={1}
               max={365}
               value={step.delay}
+              disabled={readOnly}
               onChange={(e) => {
                 const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
                 setFollowupSteps((prev) => prev.map((s, i) => i === idx ? { ...s, delay: v } : s));
@@ -197,6 +219,7 @@ export function EditCampaignForm({
             />
             <Select
               value={step.delay_unit}
+              disabled={readOnly}
               onValueChange={(unit) =>
                 setFollowupSteps((prev) =>
                   prev.map((s, i) => i === idx ? { ...s, delay_unit: unit as FollowupStep["delay_unit"] } : s),
@@ -213,7 +236,7 @@ export function EditCampaignForm({
               </SelectContent>
             </Select>
             {!isPage && <div className="flex-1" />}
-            {followupSteps.length > 1 && (
+            {!readOnly && followupSteps.length > 1 && (
               <Button
                 type="button"
                 variant="ghost"
@@ -228,7 +251,7 @@ export function EditCampaignForm({
           </div>
         </div>
       ))}
-      {followupSteps.length < 8 && (
+      {!readOnly && followupSteps.length < 8 && (
         <Button
           type="button"
           variant="link"
@@ -255,6 +278,7 @@ export function EditCampaignForm({
 
     return (
       <div className={cn("space-y-6", className)}>
+        <SharedSettingsNotice readOnly={readOnly} />
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left: identity & AI */}
           <div className="space-y-6 lg:col-span-2">
@@ -262,7 +286,7 @@ export function EditCampaignForm({
             <div className={fieldBlock}>
               <Label className="text-sm font-medium">Sender name</Label>
               <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
-              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+              <Input value={senderName} disabled={readOnly} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
             </div>
 
             <div className={cn(fieldBlock, "flex flex-1 flex-col")}>
@@ -270,6 +294,7 @@ export function EditCampaignForm({
               <p className="text-xs text-muted-foreground">Extra guidance the AI uses when writing emails</p>
               <Textarea
                 value={aiPromptContext}
+                disabled={readOnly}
                 onChange={(e) => setAiPromptContext(e.target.value)}
                 placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
                 className="bg-background flex-1 min-h-32 resize-none"
@@ -295,6 +320,7 @@ export function EditCampaignForm({
                   min={1}
                   max={500}
                   value={dailyLimit}
+                  disabled={readOnly}
                   onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
                   className="h-9 w-24 text-center font-mono tabular-nums"
                 />
@@ -309,9 +335,9 @@ export function EditCampaignForm({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <TimeSelect value={windowFrom} onChange={setWindowFrom} />
+                  <TimeSelect value={windowFrom} onChange={setWindowFrom} disabled={readOnly} />
                   <span className="text-xs text-muted-foreground">to</span>
-                  <TimeSelect value={windowTo} onChange={setWindowTo} />
+                  <TimeSelect value={windowTo} onChange={setWindowTo} disabled={readOnly} />
                 </div>
               </div>
             </div>
@@ -330,6 +356,7 @@ export function EditCampaignForm({
                     key={day}
                     day={DAY_LABELS[day]}
                     active={sendDays[day] ?? false}
+                    disabled={readOnly}
                     onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
                   />
                 ))}
@@ -354,30 +381,35 @@ export function EditCampaignForm({
           </div>
         </div>
 
-        <div className="flex justify-end">
-          <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
-            {saving ? (
-              <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
-            ) : (
-              <>Save changes <ChevronRight className="size-3.5" /></>
-            )}
-          </Button>
-        </div>
+        {!readOnly && (
+          <div className="flex justify-end">
+            <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
+              {saving ? (
+                <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
+              ) : (
+                <>Save changes <ChevronRight className="size-3.5" /></>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className={cn("space-y-6", className)}>
+      <SharedSettingsNotice readOnly={readOnly} />
+
       <div className="space-y-1.5">
         <Label className="text-sm font-medium">Sender name</Label>
-        <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
+        <Input value={senderName} disabled={readOnly} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
       </div>
 
       <div className="space-y-1.5">
         <Label className="text-sm font-medium">Additional context for AI</Label>
         <Textarea
           value={aiPromptContext}
+          disabled={readOnly}
           onChange={(e) => setAiPromptContext(e.target.value)}
           placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
           rows={3}
@@ -401,6 +433,7 @@ export function EditCampaignForm({
               min={1}
               max={500}
               value={dailyLimit}
+              disabled={readOnly}
               onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
               className="h-9 w-24 text-center font-mono tabular-nums"
             />
@@ -416,9 +449,9 @@ export function EditCampaignForm({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <TimeSelect value={windowFrom} onChange={setWindowFrom} />
+              <TimeSelect value={windowFrom} onChange={setWindowFrom} disabled={readOnly} />
               <span className="text-xs text-muted-foreground">to</span>
-              <TimeSelect value={windowTo} onChange={setWindowTo} />
+              <TimeSelect value={windowTo} onChange={setWindowTo} disabled={readOnly} />
             </div>
           </div>
 
@@ -428,7 +461,7 @@ export function EditCampaignForm({
               <Globe className="size-4 text-muted-foreground shrink-0" />
               <p className="text-sm font-medium leading-none">Timezone</p>
             </div>
-            <Select value={timezone} onValueChange={setTimezone}>
+            <Select value={timezone} onValueChange={setTimezone} disabled={readOnly}>
               <SelectTrigger className="h-9 w-full sm:w-45 font-mono">
                 <SelectValue placeholder="Select timezone" />
               </SelectTrigger>
@@ -455,6 +488,7 @@ export function EditCampaignForm({
                   key={day}
                   day={DAY_LABELS[day]}
                   active={sendDays[day] ?? false}
+                  disabled={readOnly}
                   onClick={() => setSendDays((prev) => ({ ...prev, [day]: !prev[day] }))}
                 />
               ))}
@@ -475,15 +509,17 @@ export function EditCampaignForm({
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
-          {saving ? (
-            <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
-          ) : (
-            <>Save changes <ChevronRight className="size-3.5" /></>
-          )}
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex justify-end">
+          <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
+            {saving ? (
+              <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
+            ) : (
+              <>Save changes <ChevronRight className="size-3.5" /></>
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -493,11 +529,13 @@ export function EditCampaignModal({
   onClose,
   campaign,
   onSaved,
+  readOnly = false,
 }: {
   open: boolean;
   onClose: () => void;
   campaign: Campaign;
   onSaved?: (patch: Partial<Campaign>) => void;
+  readOnly?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -510,6 +548,7 @@ export function EditCampaignModal({
         <div className="max-h-[68vh] overflow-y-auto px-6 py-5">
           <EditCampaignForm
             campaign={campaign}
+            readOnly={readOnly}
             onSaved={(patch) => {
               onSaved?.(patch);
               onClose();
