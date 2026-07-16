@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { BulkApproveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -47,6 +48,11 @@ export async function POST(req: NextRequest) {
     }).eq("draft_id", draftId);
 
     await syncApprovedDraftToInstantly(db, draft.lead_id, draft.campaign_id);
+
+    await logLeadEvent(db, draft.lead_id, "draft_approved", "Email draft approved", {
+      actorId: user.id,
+      metadata: { campaign_id: draft.campaign_id, draft_id: draftId, bulk: true },
+    });
 
     approved++;
   }

@@ -2,9 +2,9 @@ import { NextRequest } from "next/server";
 import { verifyAccessToken } from "@/lib/auth/verify-jwt";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { AppRole } from "@/lib/auth/roles";
+import { SERVICE_ROLE_USER_ID } from "@/lib/constants";
 
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const SERVICE_ROLE_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 export type AuthedUser = { id: string; email?: string; role: AppRole; isSuperAdmin: boolean };
 

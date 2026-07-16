@@ -206,12 +206,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const db = createAdminClient();
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
-  const { data: campaign } = await db.from("campaigns").select("id").eq("id", id).maybeSingle();
+  const { data: campaign } = await db.from("campaigns").select("id, name").eq("id", id).maybeSingle();
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
 
   const { data: row } = await db
     .from("campaign_leads")
-    .select("id")
+    .select("id, lead_id, crm_status")
     .eq("id", parsed.data.campaign_lead_id)
     .eq("campaign_id", id)
     .maybeSingle();
@@ -225,6 +225,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .eq("id", parsed.data.campaign_lead_id);
 
   if (error) return fail(500, "INTERNAL", error.message);
+
+  // Moving a card on the kanban is a real pipeline event — log it, but only on
+  // an actual transition (a drag that lands back in the same column is a no-op).
+  if (row.crm_status !== parsed.data.crm_status) {
+    const pretty = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const { logLeadEvent } = await import("@/lib/services/lead-events");
+    await logLeadEvent(
+      db, row.lead_id as string, "status_changed",
+      `Moved from ${pretty(row.crm_status as string)} to ${pretty(parsed.data.crm_status)} in "${campaign.name}"`,
+      { actorId: user.id, metadata: { campaign_id: id, from: row.crm_status, to: parsed.data.crm_status } },
+    );
+  }
 
   return ok({ id: parsed.data.campaign_lead_id, crm_status: parsed.data.crm_status });
 }

@@ -1,3 +1,10 @@
+// Synthetic caller id for the service-role bearer (see lib/auth/api-auth).
+// Deliberately NOT a row in `profiles`, so anything writing it to a column with
+// an FK to profiles must map it to null first — otherwise the insert fails.
+// Lives here rather than in api-auth so plain services can check it without
+// pulling in the whole auth/next-server stack.
+export const SERVICE_ROLE_USER_ID = "00000000-0000-0000-0000-000000000000";
+
 export const APOLLO_TITLES = [
   "purchase manager",
   "procurement manager",

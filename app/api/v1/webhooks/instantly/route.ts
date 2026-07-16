@@ -7,11 +7,34 @@ import { getInstantlyEmail } from "@/lib/services/instantly";
 import { ingestInstantlyEmail } from "@/lib/services/unibox";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import { findActiveLeadIdByEmail } from "@/lib/services/lead-lookup";
+import { logLeadEvent, type LeadEventType } from "@/lib/services/lead-events";
 
 const CRM_BY_EVENT: Record<string, string | undefined> = {
   reply_received:    "replied",
   email_bounced:     "failed",
   lead_unsubscribed: "closed",
+};
+
+// Instantly's webhook vocabulary → the lead's activity timeline. Anything absent
+// here still lands in reply_events; it just isn't worth its own timeline line.
+const LEAD_EVENT_BY_INSTANTLY_EVENT: Record<string, { event: LeadEventType; detail: (step: number | null) => string } | undefined> = {
+  email_sent:        { event: "email_delivered", detail: (s) => (s && s > 1 ? `Follow-up email delivered (step ${s})` : "Email delivered to the lead's inbox") },
+  email_opened:      { event: "email_opened",    detail: () => "Lead opened the email" },
+  email_bounced:     { event: "email_bounced",   detail: () => "Email bounced — the address rejected it" },
+  reply_received:    { event: "reply_received",  detail: () => "Lead replied" },
+  lead_unsubscribed: { event: "unsubscribed",    detail: () => "Lead unsubscribed — outreach stopped for their whole company" },
+};
+
+// Instantly's own AI classifies replies into these; each is a timeline line of
+// its own so the interest history is traceable, not just the latest value.
+const INTEREST_DETAIL_BY_EVENT: Record<string, string | undefined> = {
+  lead_interested:        "Marked interested",
+  lead_meeting_booked:    "Meeting booked",
+  lead_meeting_completed: "Meeting completed",
+  lead_closed:            "Marked closed",
+  lead_out_of_office:     "Out of office",
+  lead_not_interested:    "Marked not interested",
+  lead_wrong_person:      "Wrong person — not the right contact",
 };
 
 const INTEREST_BY_EVENT: Record<string, number | undefined> = {
@@ -92,43 +115,48 @@ export async function POST(req: NextRequest) {
     if (sub) { subId = sub.id; masterId = sub.campaign_id; }
   }
 
-  // 4) Resolve campaign_lead via master + lead_email
+  // Resolved once and reused below: which lead this event is about. Steps 4/6/7
+  // and the activity log all need it, and it cannot change mid-request.
+  const leadId = p.lead_email ? await findActiveLeadIdByEmail(db, p.lead_email) : null;
+
+  // 4) Resolve campaign_lead via master + lead
   let campaignLeadId: string | null = null;
-  if (masterId && p.lead_email) {
-    const leadId = await findActiveLeadIdByEmail(db, p.lead_email);
-    if (leadId) {
-      const { data: cl } = await db
-        .from("campaign_leads")
-        .select("id")
-        .eq("campaign_id", masterId)
-        .eq("lead_id", leadId)
-        .maybeSingle();
-      if (cl) {
-        campaignLeadId = cl.id;
-      } else if (p.event_type === "reply_received") {
-        // We resolved the exact master campaign AND the lead, but they're no
-        // longer linked in campaign_leads — the lead was removed from this
-        // campaign (or the sub-campaign reference is stale) since the message
-        // was sent. The reply_events row below still keeps the raw event, but
-        // this specific "we knew the campaign, still couldn't attribute it"
-        // case is worth a visible signal rather than vanishing silently into
-        // an unmapped row nobody looks at (review §4.3).
-        console.error(
-          `[webhook] reply_received: campaign+lead resolved but no active campaign_leads link — ` +
-          `master_campaign=${masterId} lead_id=${leadId} lead_email=${p.lead_email}`,
-        );
-        await db.from("audit_log").insert({
-          action: "reply_unmapped_stale_campaign_link",
-          entity_type: "reply_event",
-          diff: { master_campaign_id: masterId, lead_id: leadId, lead_email: p.lead_email, instantly_sub_campaign: p.campaign_id ?? null },
-          created_at: new Date().toISOString(),
-        });
-      }
+  if (masterId && leadId) {
+    const { data: cl } = await db
+      .from("campaign_leads")
+      .select("id")
+      .eq("campaign_id", masterId)
+      .eq("lead_id", leadId)
+      .maybeSingle();
+    if (cl) {
+      campaignLeadId = cl.id;
+    } else if (p.event_type === "reply_received") {
+      // We resolved the exact master campaign AND the lead, but they're no
+      // longer linked in campaign_leads — the lead was removed from this
+      // campaign (or the sub-campaign reference is stale) since the message
+      // was sent. The reply_events row below still keeps the raw event, but
+      // this specific "we knew the campaign, still couldn't attribute it"
+      // case is worth a visible signal rather than vanishing silently into
+      // an unmapped row nobody looks at (review §4.3).
+      console.error(
+        `[webhook] reply_received: campaign+lead resolved but no active campaign_leads link — ` +
+        `master_campaign=${masterId} lead_id=${leadId} lead_email=${p.lead_email}`,
+      );
+      await db.from("audit_log").insert({
+        action: "reply_unmapped_stale_campaign_link",
+        entity_type: "reply_event",
+        diff: { master_campaign_id: masterId, lead_id: leadId, lead_email: p.lead_email, instantly_sub_campaign: p.campaign_id ?? null },
+        created_at: new Date().toISOString(),
+      });
     }
   }
 
   // 5) Append event (idempotent — never dropped even if unmapped)
-  await db.from("reply_events").upsert(
+  // ON CONFLICT DO NOTHING ... RETURNING only returns genuinely-inserted rows,
+  // so an empty result means Instantly re-delivered an event we already have.
+  // The activity log below keys off that: without it, every webhook retry would
+  // add another "Reply received" line to the lead's timeline.
+  const { data: insertedEvents } = await db.from("reply_events").upsert(
     {
       event_uid:              eventUid,
       campaign_id:            masterId,
@@ -145,7 +173,8 @@ export async function POST(req: NextRequest) {
       created_at:             new Date().toISOString(),
     },
     { onConflict: "event_uid", ignoreDuplicates: true },
-  );
+  ).select("id");
+  const isFirstDelivery = (insertedEvents?.length ?? 0) > 0;
 
   // 6) Update campaign_leads state (with lead_temperature for interest events)
   if (campaignLeadId) {
@@ -212,21 +241,36 @@ export async function POST(req: NextRequest) {
   }
 
 
+  // 6b) Per-lead activity timeline — the human-readable "what happened to this
+  // lead" feed in the drawer. Logged off the webhook rather than off our own
+  // send call, because this is the point at which the outcome is actually known.
+  if (leadId && isFirstDelivery) {
+    const mapped = LEAD_EVENT_BY_INSTANTLY_EVENT[p.event_type];
+    if (mapped) {
+      await logLeadEvent(db, leadId, mapped.event, mapped.detail(p.step ?? null), {
+        metadata: { campaign_id: masterId, step: p.step ?? null, variant: p.variant ?? null },
+      });
+    }
+    const interestDetail = INTEREST_DETAIL_BY_EVENT[p.event_type];
+    if (interestDetail) {
+      await logLeadEvent(db, leadId, "interest_changed", interestDetail, {
+        metadata: { campaign_id: masterId, interest_status: INTEREST_BY_EVENT[p.event_type] ?? null },
+      });
+    }
+  }
+
   // 7) Org-level hard opt-out: unsubscribe blocks the whole org
-  if (p.event_type === "lead_unsubscribed" && p.lead_email) {
-    const leadId = await findActiveLeadIdByEmail(db, p.lead_email);
-    if (leadId) {
-      const { data: lead } = await db
-        .from("leads")
-        .select("organization_id")
-        .eq("id", leadId)
-        .maybeSingle();
-      if (lead?.organization_id) {
-        await db
-          .from("organizations")
-          .update({ unsubscribed: true })
-          .eq("id", lead.organization_id);
-      }
+  if (p.event_type === "lead_unsubscribed" && leadId) {
+    const { data: lead } = await db
+      .from("leads")
+      .select("organization_id")
+      .eq("id", leadId)
+      .maybeSingle();
+    if (lead?.organization_id) {
+      await db
+        .from("organizations")
+        .update({ unsubscribed: true })
+        .eq("id", lead.organization_id);
     }
   }
 
@@ -248,18 +292,15 @@ export async function POST(req: NextRequest) {
   // A deleted lead's late replies stay in history but must not spawn new AI
   // drafts — the person was removed from outreach (planning.md Phase 5 / Q7).
   let leadWasDeleted = false;
-  if (p.event_type === "reply_received" && p.lead_email) {
-    const activeLeadId = await findActiveLeadIdByEmail(db, p.lead_email);
-    if (!activeLeadId) {
-      const { data: deletedLead } = await db
-        .from("leads")
-        .select("id")
-        .ilike("email", p.lead_email)
-        .eq("is_deleted", true)
-        .limit(1)
-        .maybeSingle();
-      leadWasDeleted = !!deletedLead;
-    }
+  if (p.event_type === "reply_received" && p.lead_email && !leadId) {
+    const { data: deletedLead } = await db
+      .from("leads")
+      .select("id")
+      .ilike("email", p.lead_email)
+      .eq("is_deleted", true)
+      .limit(1)
+      .maybeSingle();
+    leadWasDeleted = !!deletedLead;
   }
 
   if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET && !leadWasDeleted) {

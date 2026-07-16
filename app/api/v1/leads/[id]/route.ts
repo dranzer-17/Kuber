@@ -3,6 +3,8 @@ import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchLeadSchema } from "@/lib/validators/leads";
+import { logLeadEvent } from "@/lib/services/lead-events";
+import { LEAD_STATUS_MAP } from "@/lib/mappers";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -82,9 +84,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const db = createAdminClient();
 
-  if (user.role === "employee") {
-    const { data: owned } = await db.from("leads").select("assigned_to").eq("id", id).maybeSingle();
-    if (!owned || owned.assigned_to !== user.id) return fail(404, "NOT_FOUND", "Lead not found");
+  // Prior state, read before the update: gates the employee scope check and lets
+  // the activity log report real transitions ("from X to Y") rather than echoing
+  // whatever the client submitted.
+  const { data: before } = await db
+    .from("leads")
+    .select("status, assigned_to")
+    .eq("id", id)
+    .maybeSingle();
+  if (!before) return fail(404, "NOT_FOUND", "Lead not found");
+  if (user.role === "employee" && before.assigned_to !== user.id) {
+    return fail(404, "NOT_FOUND", "Lead not found");
   }
 
   const { email, assigned_to, ...rest } = parsed.data;
@@ -130,6 +140,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (error) return fail(500, "INTERNAL", error.message);
   if (!data) return fail(404, "NOT_FOUND", "Lead not found");
+
+  // Log only what genuinely moved — a PATCH that re-sends the current status or
+  // assignee is a no-op edit, and logging it would bury the real events.
+  const statusLabel = (s: string | null) => (s ? LEAD_STATUS_MAP[s] ?? s : "none");
+  if (rest.status && rest.status !== before.status) {
+    await logLeadEvent(
+      db, id, "status_changed",
+      `Status changed from ${statusLabel(before.status)} to ${statusLabel(rest.status)}`,
+      { actorId: user.id, metadata: { from: before.status, to: rest.status } },
+    );
+  }
+  if (assigned_to !== undefined && assigned_to !== before.assigned_to) {
+    if (assigned_to && !before.assigned_to) {
+      await logLeadEvent(db, id, "assigned", "Assigned to an employee", { actorId: user.id, metadata: { assignee_id: assigned_to } });
+    } else if (assigned_to && before.assigned_to) {
+      await logLeadEvent(db, id, "reassigned", "Reassigned to a different employee", { actorId: user.id, metadata: { from: before.assigned_to, to: assigned_to } });
+    } else if (!assigned_to && before.assigned_to) {
+      await logLeadEvent(db, id, "unassigned", "Returned to the pool", { actorId: user.id, metadata: { from: before.assigned_to } });
+    }
+  }
 
   return ok(data);
 }

@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { PatchDraftSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 import { assertDraftAccess } from "@/lib/auth/scope";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -28,6 +29,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const now = new Date().toISOString();
   const isFollowUp = (draft.step_number ?? 1) > 1;
+  // Follow-ups are a separate email in the same thread — say which one moved,
+  // or the timeline reads as the same draft being approved twice.
+  const which = isFollowUp ? ` (follow-up step ${draft.step_number})` : "";
+  const draftMeta = { campaign_id: draft.campaign_id, draft_id: id, step: draft.step_number ?? 1 };
 
   if (parsed.data.action === "approve") {
     if (draft.status !== "draft") return fail(409, "CONFLICT", `Cannot approve a draft with status '${draft.status}'`);
@@ -37,6 +42,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // this naturally no-ops for them — only step 1 drives the primary status.
     await db.from("campaign_leads").update({ crm_status: "approved", updated_at: now }).eq("draft_id", id);
     await syncApprovedDraftToInstantly(db, draft.lead_id, draft.campaign_id);
+    await logLeadEvent(db, draft.lead_id, "draft_approved", `Email draft approved${which}`, { actorId: user.id, metadata: draftMeta });
     return ok({ id, status: "approved" });
   }
 
@@ -45,6 +51,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     await db.from("email_drafts").update({ status: "rejected", rejection_reason: parsed.data.rejection_reason, updated_at: now }).eq("id", id);
     await db.from("campaign_leads").update({ crm_status: "enriched", draft_id: null, updated_at: now }).eq("draft_id", id);
+    await logLeadEvent(db, draft.lead_id, "draft_rejected", `Email draft rejected${which}`, {
+      actorId: user.id,
+      metadata: { ...draftMeta, reason: parsed.data.rejection_reason ?? null },
+    });
     return ok({ id, status: "rejected" });
   }
 
@@ -52,6 +62,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (draft.status === "approved") return fail(409, "CONFLICT", "Cannot edit an approved draft — reopen it first");
 
     await db.from("email_drafts").update({ subject: parsed.data.subject, body: parsed.data.body, status: "draft", updated_at: now }).eq("id", id);
+    await logLeadEvent(db, draft.lead_id, "draft_edited", `Email draft edited${which}`, { actorId: user.id, metadata: draftMeta });
     return ok({ id, status: "draft" });
   }
 
@@ -65,6 +76,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updated_at: now,
     }).eq("id", id);
     await db.from("campaign_leads").update({ crm_status: "draft", updated_at: now }).eq("draft_id", id);
+    await logLeadEvent(db, draft.lead_id, "draft_reopened", `Approved draft reopened for editing${which}`, { actorId: user.id, metadata: draftMeta });
     return ok({ id, status: "draft" });
   }
 

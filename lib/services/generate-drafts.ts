@@ -8,6 +8,17 @@ import {
   getCompanyContext,
   getGenericTemplate,
 } from "@/lib/services/settings";
+import { logLeadEvent } from "@/lib/services/lead-events";
+
+/** Activity-timeline wording for a finished draft. */
+function draftCreatedDetail(stepNumber: number, status: string): string {
+  const what = stepNumber > 1
+    ? `Follow-up email draft generated (step ${stepNumber})`
+    : "Email draft generated";
+  // humanInLoop=false auto-approves; say so, or the timeline shows a draft
+  // being created and sent with no visible approval in between.
+  return status === "approved" ? `${what} and auto-approved` : what;
+}
 
 // Short generic nudge used for follow-up steps (step > 1) on un-enriched leads,
 // mirroring the "brief low-pressure nudge" rule the AI follow-ups also follow.
@@ -282,6 +293,11 @@ export async function generateOneDraft(
         }).eq("id", target.id);
       }
 
+      await logLeadEvent(db, lead.id, "draft_created", draftCreatedDetail(stepNumber, finalStatus), {
+        actorId: userId ?? null,
+        metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, status: finalStatus, generic_template: true },
+      });
+
       return { ok: true, draftId: activeDraftId, status: finalStatus };
     } catch (err) {
       // Mark only the draft row failed — campaign_leads.draft_id stays NULL so
@@ -289,6 +305,9 @@ export async function generateOneDraft(
       // skipping it forever (planning.md Phase 6.5).
       const now = new Date().toISOString();
       await db.from("email_drafts").update({ status: "failed", updated_at: now }).eq("id", activeDraftId);
+      await logLeadEvent(db, lead.id, "draft_failed", "Email draft generation failed", {
+        metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, reason: (err as Error).message },
+      });
       return { ok: false, reason: (err as Error).message };
     }
   }
@@ -391,6 +410,11 @@ export async function generateOneDraft(
       }).eq("id", target.id);
     }
 
+    await logLeadEvent(db, lead.id, "draft_created", draftCreatedDetail(stepNumber, finalStatus), {
+      actorId: userId ?? null,
+      metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, status: finalStatus },
+    });
+
     return { ok: true, draftId: activeDraftId, status: finalStatus };
   } catch (err) {
     // Mark only the draft row failed — campaign_leads.draft_id stays NULL so
@@ -402,6 +426,9 @@ export async function generateOneDraft(
       status: "failed",
       updated_at: now,
     }).eq("id", activeDraftId);
+    await logLeadEvent(db, lead.id, "draft_failed", "Email draft generation failed", {
+      metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, reason: (err as Error).message },
+    });
     return { ok: false, reason: (err as Error).message };
   }
 }

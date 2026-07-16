@@ -324,11 +324,15 @@ export async function sendCampaign(
             ),
           );
 
-          // Clean per-lead activity line for the send.
+          // Clean per-lead activity line for the send. This is the hand-off to
+          // Instantly, NOT proof of delivery — Instantly schedules the actual
+          // send and confirms it later via the email_sent webhook, which logs
+          // its own "Email delivered" line. Worded so the two aren't read as a
+          // duplicate of each other.
           if (sentSlice.length > 0) {
             const { logLeadEvents } = await import("@/lib/services/lead-events");
             await logLeadEvents(db, sentSlice.map((p) => ({
-              leadId: p.leadId, event: "draft_sent" as const, detail: "Outreach email sent",
+              leadId: p.leadId, event: "draft_sent" as const, detail: "Outreach queued for sending",
               metadata: { campaign_id: campaignId },
             })));
           }

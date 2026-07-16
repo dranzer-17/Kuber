@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { logLeadEvents } from "@/lib/services/lead-events";
 
 const AssignCampaignSchema = z.object({
   assigned_to: z.string().uuid().nullable(),   // null = return to the manager pool
@@ -78,6 +79,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .eq("campaign_id", id);
     const leadIds = [...new Set((memberships ?? []).map((m) => m.lead_id as string))];
     if (leadIds.length > 0) {
+      // Prior owners, read before the write: lets the activity log name who each
+      // lead moved away from, and keeps leads the assignee already owned out of
+      // the log entirely rather than reporting a move that never happened.
+      const { data: priorRows } = await db
+        .from("leads")
+        .select("id, assigned_to")
+        .in("id", leadIds)
+        .eq("is_deleted", false);
+
       const { error: leadsErr, count } = await db
         .from("leads")
         .update({ assigned_to, assigned_at: now }, { count: "exact" })
@@ -85,6 +95,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         .eq("is_deleted", false);
       if (leadsErr) return fail(500, "INTERNAL", leadsErr.message);
       leadsReassigned = count ?? leadIds.length;
+
+      await logLeadEvents(db, (priorRows ?? [])
+        .filter((r) => r.assigned_to !== assigned_to)
+        .map((r) => ({
+          leadId: r.id as string,
+          event: r.assigned_to ? ("reassigned" as const) : ("assigned" as const),
+          detail: r.assigned_to
+            ? "Reassigned to a different employee with the campaign"
+            : "Assigned to an employee with the campaign",
+          actorId: caller.id,
+          metadata: { campaign_id: id, from: r.assigned_to, to: assigned_to },
+        })));
     }
   }
 

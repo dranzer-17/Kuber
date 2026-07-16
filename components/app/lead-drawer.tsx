@@ -7,6 +7,7 @@ import {
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
   RotateCcw, Zap, Bot, Settings, Pencil, Phone, Link,
   MapPin, Save, ChevronRight, UserCog,
+  XCircle, Send, MailCheck, MailOpen, Reply, Sparkles, BellOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/lib/app-context";
@@ -160,11 +161,24 @@ const ACTIVITY_ICONS: Record<string, React.ComponentType<{ className?: string }>
   added_to_campaign: Megaphone,
   removed_from_campaign: Megaphone,
   draft_created: Pencil,
+  draft_failed: AlertCircle,
   draft_approved: CheckCircle2,
-  draft_sent: Mail,
-  reply_received: Mail,
+  draft_rejected: XCircle,
+  draft_edited: Pencil,
+  draft_reopened: RotateCcw,
+  draft_sent: Send,
+  email_delivered: MailCheck,
+  email_opened: MailOpen,
+  email_bounced: AlertCircle,
+  reply_received: Reply,
+  interest_changed: Sparkles,
+  unsubscribed: BellOff,
   status_changed: RefreshCw,
 };
+
+// Events that represent something going wrong — tinted amber in the timeline
+// rather than silently reading like normal progress.
+const BAD_ACTIVITY_EVENTS = new Set(["enrichment_failed", "draft_failed", "email_bounced", "unsubscribed"]);
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -181,7 +195,7 @@ function relativeTime(iso: string): string {
 
 function ActivityItem({ event, isLast }: { event: LeadActivityEvent; isLast: boolean }) {
   const Icon = ACTIVITY_ICONS[event.event] ?? Clock;
-  const isBad = event.event === "enrichment_failed";
+  const isBad = BAD_ACTIVITY_EVENTS.has(event.event);
   return (
     <div className="flex gap-2.5 text-xs">
       <div className="flex flex-col items-center shrink-0">

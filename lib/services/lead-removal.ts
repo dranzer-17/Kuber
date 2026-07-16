@@ -1,7 +1,14 @@
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { deleteInstantlyLead } from "@/lib/services/instantly";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 type Db = ReturnType<typeof createAdminClient>;
+
+/** Campaign name off the joined row, which PostgREST may hand back either shape. */
+function campaignName(rel: unknown): string {
+  const c = Array.isArray(rel) ? rel[0] : rel;
+  return (c as { name?: string } | null)?.name ?? "a campaign";
+}
 
 export type LeadRemovalResult = {
   instantly_removed: number;
@@ -42,7 +49,7 @@ export async function removeLeadFromOutreach(db: Db, leadId: string): Promise<Le
 
   const { data: memberships } = await db
     .from("campaign_leads")
-    .select("id, campaign_id, crm_status, instantly_lead_id")
+    .select("id, campaign_id, crm_status, instantly_lead_id, campaigns(name)")
     .eq("lead_id", leadId);
 
   if (!memberships || memberships.length === 0) return result;
@@ -68,6 +75,9 @@ export async function removeLeadFromOutreach(db: Db, leadId: string): Promise<Le
           .update({ crm_status: "closed", updated_at: now })
           .eq("id", m.id);
         result.memberships_closed++;
+        await logLeadEvent(db, leadId, "removed_from_campaign",
+          `Outreach stopped in "${campaignName(m.campaigns)}" — lead deleted`,
+          { metadata: { campaign_id: m.campaign_id, history_kept: true } });
       }
     } else if (PRE_SEND_STATUSES.includes(m.crm_status as string)) {
       // Never sent — remove the membership and its unsent drafts entirely.
@@ -78,6 +88,9 @@ export async function removeLeadFromOutreach(db: Db, leadId: string): Promise<Le
         .neq("status", "sent");
       await db.from("campaign_leads").delete().eq("id", m.id);
       result.memberships_removed++;
+      await logLeadEvent(db, leadId, "removed_from_campaign",
+        `Removed from campaign "${campaignName(m.campaigns)}" — nothing had been sent yet`,
+        { metadata: { campaign_id: m.campaign_id } });
     } else if (m.crm_status !== "closed") {
       // Post-send status without an Instantly id (e.g. replied via unmapped
       // path) — just close it.
@@ -85,6 +98,9 @@ export async function removeLeadFromOutreach(db: Db, leadId: string): Promise<Le
         .update({ crm_status: "closed", updated_at: now })
         .eq("id", m.id);
       result.memberships_closed++;
+      await logLeadEvent(db, leadId, "removed_from_campaign",
+        `Outreach stopped in "${campaignName(m.campaigns)}" — lead deleted`,
+        { metadata: { campaign_id: m.campaign_id, history_kept: true } });
     }
   }
 
