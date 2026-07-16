@@ -23,8 +23,6 @@ export function normalizeTerritory(country: string | null | undefined): Territor
   return "foreign";
 }
 
-type Candidate = { id: string; load: number };
-
 /**
  * Employees ELIGIBLE for automatic assignment (spec §2B/§3): role=employee,
  * is_active=true, AND availability_status='online'. Deactivated users can't be
@@ -53,46 +51,6 @@ async function getExclusionCounts(db: Db): Promise<{ excluded_offline: number; e
   return { excluded_offline: offline ?? 0, excluded_deactivated: deactivated ?? 0 };
 }
 
-/** Current live-lead count per employee — the fairness signal for round-robin picks. */
-async function getLeadLoads(db: Db, employeeIds: string[]): Promise<Map<string, number>> {
-  const loads = new Map<string, number>(employeeIds.map((id) => [id, 0]));
-  if (employeeIds.length === 0) return loads;
-  const { data } = await db
-    .from("leads")
-    .select("assigned_to")
-    .in("assigned_to", employeeIds)
-    .eq("is_deleted", false);
-  for (const row of data ?? []) {
-    const id = row.assigned_to as string;
-    loads.set(id, (loads.get(id) ?? 0) + 1);
-  }
-  return loads;
-}
-
-/**
- * Current live-lead count per employee, scoped to ONE region (review §3.7).
- * A global count would let an employee's unrelated cross-territory
- * assignments (e.g. manually-assigned leads from another region) skew how
- * many NEW leads of THIS region they get next — scoping to the region being
- * routed keeps territory fairness meaningful ("how many India leads does
- * this India rep already have", not "how many leads total").
- */
-async function getTerritoryScopedLoads(db: Db, employeeIds: string[], territory: Territory): Promise<Map<string, number>> {
-  const loads = new Map<string, number>(employeeIds.map((id) => [id, 0]));
-  if (employeeIds.length === 0) return loads;
-  const { data } = await db
-    .from("leads")
-    .select("assigned_to, country")
-    .in("assigned_to", employeeIds)
-    .eq("is_deleted", false);
-  for (const row of data ?? []) {
-    if (normalizeTerritory(row.country as string | null) !== territory) continue;
-    const id = row.assigned_to as string;
-    loads.set(id, (loads.get(id) ?? 0) + 1);
-  }
-  return loads;
-}
-
 /**
  * Candidates for a region (active + online reps in that territory):
  *   india   → india reps only (no sensible fallback — pool if none)
@@ -103,33 +61,39 @@ async function candidatesForRegion(db: Db, region: Territory): Promise<string[]>
 }
 
 /**
- * Stateful picker for a bulk action: least-loaded first, round-robin cursor as
- * the tiebreak. Loads are fetched once and incremented locally so a 500-lead
- * import doesn't issue 500 count queries.
+ * The independently-rotating cursors. Round-robin ignores territory entirely and
+ * rotates every eligible employee through "global"; territory routing rotates
+ * each region's reps through that region's own lane, so India and foreign never
+ * share a position.
  */
-class LoadBalancedPicker {
-  private loads: Map<string, number>;
-  private rrIndex = 0;
+type Lane = "global" | Territory;
 
-  constructor(loads: Map<string, number>) {
-    this.loads = loads;
-  }
-
-  static async create(db: Db): Promise<LoadBalancedPicker> {
-    const all = await getEligibleEmployees(db);
-    return new LoadBalancedPicker(await getLeadLoads(db, all));
-  }
-
-  pick(candidateIds: string[]): string | null {
-    if (candidateIds.length === 0) return null;
-    const ranked: Candidate[] = candidateIds.map((id) => ({ id, load: this.loads.get(id) ?? 0 }));
-    const minLoad = Math.min(...ranked.map((c) => c.load));
-    const tied = ranked.filter((c) => c.load === minLoad);
-    const chosen = tied[this.rrIndex % tied.length];
-    this.rrIndex++;
-    this.loads.set(chosen.id, chosen.load + 1);
-    return chosen.id;
-  }
+/**
+ * The next `count` assignees for `lane`, in order — rotation, not load-balancing.
+ * Deliberately does not consult how many leads anyone already has: the cursor
+ * advances one employee per lead, so N leads across M employees divide evenly and
+ * a remainder falls to whoever the cursor reaches first (8 across 3 → 3/3/2).
+ *
+ * The cursor lives in the database and is advanced under a row lock, so parallel
+ * callers (several enrichments finishing at once) cannot read the same position
+ * and hand the same employee both leads. One call covers a whole batch, so a
+ * 500-lead import costs one round-trip per lane rather than 500.
+ *
+ * Returns [] only when the lane has no candidates at all; callers treat a short
+ * result as "leave in the pool" rather than assigning to undefined.
+ */
+async function pickRoundRobin(db: Db, lane: Lane, candidateIds: string[], count: number): Promise<string[]> {
+  if (candidateIds.length === 0 || count < 1) return [];
+  const { data, error } = await db.rpc("assignment_pick_round_robin", {
+    p_lane: lane,
+    p_candidate_ids: candidateIds,
+    p_count: count,
+  });
+  // Surfaced rather than silently falling back to a local pick: a broken cursor
+  // that quietly degrades to "always the same employee" is the exact failure this
+  // function replaced, and it is invisible until someone audits the lead counts.
+  if (error) throw new Error(`Round-robin pick failed: ${error.message}`);
+  return (data as string[] | null) ?? [];
 }
 
 /** Rich result summary for a bulk assignment (spec §3/§4). */
@@ -246,47 +210,58 @@ export async function bulkAssignByStrategy(
     return summary;
   }
 
-  if (strategy === "territory") {
-    const candidatesByRegion = new Map<Territory, string[]>();
-    const pickersByRegion = new Map<Territory, LoadBalancedPicker>();
-    const usedEmployees = new Set<string>();
-
-    for (const lead of rows) {
-      const prior = (lead.assigned_to as string | null) ?? null;
-      if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
-
-      if (blockedNotReady(lead, "pending")) continue;
-
-      const region = normalizeTerritory(lead.country as string | null);
-      if (!region) { summary.unmatched++; continue; }
-
-      if (!candidatesByRegion.has(region)) {
-        candidatesByRegion.set(region, await candidatesForRegion(db, region));
-      }
-      const candidates = candidatesByRegion.get(region)!;
-      if (!pickersByRegion.has(region)) {
-        pickersByRegion.set(region, new LoadBalancedPicker(await getTerritoryScopedLoads(db, candidates, region)));
-      }
-      const assigneeId = pickersByRegion.get(region)!.pick(candidates);
-      if (!assigneeId) { summary.unmatched++; continue; }
-      usedEmployees.add(assigneeId);
-      await applyAssignment(lead.id, prior, assigneeId);
-    }
-    summary.eligible_employee_count = usedEmployees.size;
-    return summary;
-  }
-
-  // round_robin: one global least-loaded picker across all eligible employees.
-  const candidates = await getEligibleEmployees(db);
-  summary.eligible_employee_count = candidates.length;
-  const picker = await LoadBalancedPicker.create(db);
+  // Both rotating strategies settle which leads are actually in play BEFORE
+  // drawing assignees, so a skipped lead never burns a cursor position and
+  // leaves a gap in the rotation.
+  type Target = { id: string; prior: string | null };
+  const eligibleForRotation: (Target & { region: Territory | null })[] = [];
   for (const lead of rows) {
     const prior = (lead.assigned_to as string | null) ?? null;
     if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
     if (blockedNotReady(lead, "pending")) continue;
-    const assigneeId = picker.pick(candidates);
+    eligibleForRotation.push({
+      id: lead.id as string,
+      prior,
+      region: normalizeTerritory(lead.country as string | null),
+    });
+  }
+
+  if (strategy === "territory") {
+    const byRegion = new Map<Territory, Target[]>();
+    for (const target of eligibleForRotation) {
+      // No country → no region to route by; stays in the manager's pool.
+      if (!target.region) { summary.unmatched++; continue; }
+      const bucket = byRegion.get(target.region) ?? [];
+      bucket.push(target);
+      byRegion.set(target.region, bucket);
+    }
+
+    const eligibleEmployees = new Set<string>();
+    for (const [region, targets] of byRegion) {
+      const candidates = await candidatesForRegion(db, region);
+      for (const id of candidates) eligibleEmployees.add(id);
+      if (candidates.length === 0) { summary.unmatched += targets.length; continue; }
+
+      const picks = await pickRoundRobin(db, region, candidates, targets.length);
+      for (const [i, target] of targets.entries()) {
+        const assigneeId = picks[i];
+        if (!assigneeId) { summary.unmatched++; continue; }
+        await applyAssignment(target.id, target.prior, assigneeId);
+      }
+    }
+    summary.eligible_employee_count = eligibleEmployees.size;
+    return summary;
+  }
+
+  // round_robin: territory is intentionally ignored — every eligible employee is
+  // in one rotation regardless of which region the lead belongs to.
+  const candidates = await getEligibleEmployees(db);
+  summary.eligible_employee_count = candidates.length;
+  const picks = await pickRoundRobin(db, "global", candidates, eligibleForRotation.length);
+  for (const [i, target] of eligibleForRotation.entries()) {
+    const assigneeId = picks[i];
     if (!assigneeId) { summary.unmatched++; continue; }
-    await applyAssignment(lead.id, prior, assigneeId);
+    await applyAssignment(target.id, target.prior, assigneeId);
   }
   return summary;
 }
@@ -327,17 +302,15 @@ export async function resolveAssignee(
     const region = normalizeTerritory(leadCountry);
     if (!region) return null;
     const candidates = await candidatesForRegion(db, region);
-    if (candidates.length === 0) return null;
-    // Region-scoped load (review §3.7) so leads trickling in one at a time
-    // still alternate fairly between same-region reps.
-    const loads = await getTerritoryScopedLoads(db, candidates, region);
-    return new LoadBalancedPicker(loads).pick(candidates);
+    // The region's own cursor, so leads trickling in one at a time still
+    // alternate between same-region reps instead of piling onto one.
+    const [assigneeId] = await pickRoundRobin(db, region, candidates, 1);
+    return assigneeId ?? null;
   }
 
   const candidates = await getEligibleEmployees(db);
-  if (candidates.length === 0) return null;
-  const loads = await getLeadLoads(db, candidates);
-  return new LoadBalancedPicker(loads).pick(candidates);
+  const [assigneeId] = await pickRoundRobin(db, "global", candidates, 1);
+  return assigneeId ?? null;
 }
 
 /** The deferred import choice for a lead, or null when it has no import / no stored choice. */
