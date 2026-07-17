@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import sanitizeHtml from "sanitize-html";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { emailPreview, stripQuotedText, ueTypeToDirection } from "@/lib/email-display";
+import { pickDraftsForInboundMessage } from "@/lib/reply-draft-pick";
 import { findActiveLeadIdByEmail } from "@/lib/services/lead-lookup";
 import {
   type InstantlyEmail,
@@ -911,8 +912,10 @@ export async function getCampaignReplyThreads(db: Db, campaignId: string) {
         .maybeSingle();
       const eventId = row?.reply_event_id as string | null;
       const isLatest = i === receivedMsgs.length - 1;
-      const drafts = (detail.reply_drafts as Array<{ reply_event_id?: string | null }>).filter(
-        (d) => (eventId && d.reply_event_id === eventId) || (!eventId && isLatest),
+      const drafts = pickDraftsForInboundMessage(
+        detail.reply_drafts as Array<{ reply_event_id?: string | null }>,
+        eventId,
+        isLatest,
       );
 
       messages.push({

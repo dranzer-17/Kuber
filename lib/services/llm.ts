@@ -1,174 +1,64 @@
-import { fetchWithRetry } from "@/lib/http";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getActiveKey, markKeyFailed, markKeySucceeded, resolveModel } from "@/lib/services/provider-keys";
+import { LLM_CALL_REGISTRY, PROVIDER_META, resolveLlmTierOrder, type LlmProviderId } from "@/lib/services/providers/registry";
+import type { CompletionOpts } from "@/lib/services/providers/types";
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-
-interface CompletionOpts {
-  system: string;
-  user: string;
-  // Cap the response size. Without this, OpenRouter defaults to the model's
-  // full context (e.g. 65536) and, on low balance, rejects the request with a
-  // 402 "requires more credits, or fewer max_tokens" even though the actual
-  // output is tiny — the exact failure seen in enrichment logs. Extraction
-  // needs a small JSON object; drafting needs a bit more.
-  maxTokens?: number;
-}
-
-const DEFAULT_MAX_TOKENS = 2048;
+export type { CompletionOpts };
 
 export interface LlmResult<T> {
   json: T;
-  tier: 1 | 2;
+  tier: number; // position (1-indexed) in the resolved tier order of the provider that served this
 }
 
-async function parseJsonResponse(text: string): Promise<object> {
-  if (!text.trim()) throw new Error("Empty LLM response");
+/** Exhausts every configured key for one provider (priority order, via
+ *  provider-keys.ts) before giving up on that provider entirely. Only
+ *  returns null when the provider has no usable key at all (no DB row and
+ *  no env fallback) — that's "skip this tier," not a failure to report. */
+async function tryProvider<T>(db: SupabaseClient, provider: LlmProviderId, opts: CompletionOpts): Promise<T | null> {
+  const call = LLM_CALL_REGISTRY[provider];
+  const meta = PROVIDER_META[provider];
+  const tried = new Set<string>();
+  let lastErr: Error | null = null;
 
-  let cleaned = text.trim();
-  // strip markdown fences
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  for (;;) {
+    const resolved = await getActiveKey(db, provider, { exclude: tried });
+    if (!resolved) break;
 
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    // extract first {...} block
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch {
-        // fall through
-      }
-    }
-    throw new Error(`No parseable JSON in LLM response: ${cleaned.slice(0, 120)}`);
-  }
-}
-
-function extractMessageContent(data: unknown): string {
-  const choice = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0];
-  const content = choice?.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && "text" in part) {
-          return String((part as { text?: string }).text ?? "");
-        }
-        return "";
-      })
-      .join("");
-  }
-  return "";
-}
-
-function supportsJsonResponseFormat(model: string): boolean {
-  return model.startsWith("openai/") || /gpt|o1|o3|o4/i.test(model);
-}
-
-function openRouterHeaders(): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-    "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-    "X-Title": "Kuber Polyplast",
-  };
-}
-
-async function callOpenRouter(opts: CompletionOpts): Promise<object> {
-  const model = process.env.LLM_PRIMARY_MODEL ?? "anthropic/claude-sonnet-4-6";
-  const payload: Record<string, unknown> = {
-    model,
-    max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-    messages: [
-      { role: "system", content: opts.system },
-      { role: "user", content: opts.user },
-    ],
-  };
-  if (supportsJsonResponseFormat(model)) {
-    payload.response_format = { type: "json_object" };
-  }
-
-  const res = await fetchWithRetry("llm", OPENROUTER_URL, {
-    method: "POST",
-    headers: openRouterHeaders(),
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw Object.assign(new Error(`OpenRouter ${res.status}: ${err}`), {
-      status: res.status,
-    });
-  }
-
-  const data = await res.json();
-  const content = extractMessageContent(data);
-  return parseJsonResponse(content);
-}
-
-async function callOpenAI(opts: CompletionOpts): Promise<object> {
-  const model = process.env.LLM_FALLBACK_MODEL ?? "gpt-4o-mini";
-  const res = await fetchWithRetry("llm", OPENAI_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw Object.assign(new Error(`OpenAI ${res.status}: ${err}`), {
-      status: res.status,
-    });
-  }
-
-  const data = await res.json();
-  const content = extractMessageContent(data);
-  return parseJsonResponse(content);
-}
-
-export async function complete<T = object>(opts: CompletionOpts): Promise<LlmResult<T>> {
-  const hasOpenRouter = !!process.env.OPENROUTER_API_KEY?.trim();
-  const hasOpenAI = !!process.env.OPENAI_API_KEY?.trim();
-  let openRouterError: Error | null = null;
-
-  if (hasOpenRouter) {
     try {
-      const json = (await callOpenRouter(opts)) as T;
-      return { json, tier: 1 };
+      const model = await resolveModel(db, provider, meta.defaultModel ?? "");
+      const json = (await call(resolved.secret, model, opts)) as T;
+      if (resolved.keyId) await markKeySucceeded(db, resolved.keyId);
+      return json;
     } catch (err) {
-      openRouterError = err instanceof Error ? err : new Error(String(err));
-      // Fall through to the OpenAI fallback for ANY OpenRouter failure. This is
-      // deliberate: transient 429/5xx and credit/auth errors (401/402/403) are
-      // exactly what a second provider exists for. (Previously 429/5xx were
-      // re-thrown WITHOUT trying OpenAI — the inverse of what a fallback is for.)
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      if (!resolved.keyId) break; // env-sourced — nothing left to rotate to
+      await markKeyFailed(db, resolved.keyId, { status: (err as { status?: number }).status, message: lastErr.message });
+      tried.add(resolved.keyId);
     }
   }
 
-  if (hasOpenAI) {
+  if (lastErr) throw lastErr;
+  return null; // provider not configured at all — not an error, just skip this tier
+}
+
+export async function complete<T = object>(opts: CompletionOpts, db?: SupabaseClient): Promise<LlmResult<T>> {
+  const client = db ?? createAdminClient();
+  const tierOrder = await resolveLlmTierOrder(client);
+  const errors: string[] = [];
+
+  for (let i = 0; i < tierOrder.length; i++) {
+    const provider = tierOrder[i];
     try {
-      const json = (await callOpenAI(opts)) as T;
-      return { json, tier: 2 };
+      const json = await tryProvider<T>(client, provider, opts);
+      if (json !== null) return { json, tier: i + 1 };
     } catch (err) {
-      // Both providers failed — surface OpenRouter's (usually richer) error if we have it.
-      throw openRouterError ?? (err instanceof Error ? err : new Error(String(err)));
+      errors.push(`${PROVIDER_META[provider].label}: ${(err as Error).message}`);
     }
   }
 
-  if (openRouterError) throw openRouterError;
-
-  throw new Error("No LLM provider configured — set OPENROUTER_API_KEY or OPENAI_API_KEY");
+  if (errors.length) throw new Error(errors.join(" | "));
+  throw new Error("No LLM provider configured — add a key in Settings > Keys, or set an env var like OPENROUTER_API_KEY");
 }
 
 export interface ExtractionOutput {

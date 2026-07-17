@@ -3,14 +3,7 @@ import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateOrgSchema, OrgListQuerySchema } from "@/lib/validators/organizations";
-
-function normalizeDomain(raw: string): string {
-  return raw
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/\/+$/, "")
-    .toLowerCase();
-}
+import { normalizeDomain } from "@/lib/utils/domain";
 
 // Organizations are enrichment territory — manager-only (planning.md D8).
 // Employees reach org data only through their own leads' drawers
@@ -50,7 +43,7 @@ export async function POST(req: NextRequest) {
   const { name, domain, ...rest } = parsed.data;
   const db = createAdminClient();
 
-  const normalizedDomain = domain ? normalizeDomain(domain) : null;
+  const normalizedDomain = domain ? (normalizeDomain(domain) || null) : null;
 
   // Dedup: try domain first, then name
   if (normalizedDomain) {

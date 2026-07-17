@@ -15,7 +15,9 @@ import { ok } from "@/lib/api-response";
 // they're what lets a fixed key "win" over a stale error.
 const LOOKBACK_HOURS = 6;
 
-type ServiceIssue = { service: string; kind: "credits" | "auth"; message: string };
+// "warning" = degraded but still functioning (a fallback is covering the gap);
+// "critical" = the capability is actually down. Drives banner color (amber vs red).
+type ServiceIssue = { service: string; kind: "credits" | "auth"; message: string; severity: "warning" | "critical" };
 
 export async function GET(req: NextRequest) {
   try { await requireAuth(req); } catch (r) { return r as Response; }
@@ -25,38 +27,54 @@ export async function GET(req: NextRequest) {
 
   const { data: rows } = await db
     .from("enrichment_logs")
-    .select("source, error, created_at")
+    .select("source, event, error, created_at")
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(500);
 
   const issues: ServiceIssue[] = [];
-  const decided = new Set<string>(); // provider keys whose newest relevant row we've already used
+  const seen = new Set<string>();
+  const add = (issue: ServiceIssue) => {
+    if (seen.has(issue.service)) return;
+    seen.add(issue.service);
+    issues.push(issue);
+  };
 
   for (const row of rows ?? []) {
     const err = (row.error ?? "").toLowerCase();
 
-    if (row.source === "firecrawl" && !decided.has("firecrawl")) {
-      decided.add("firecrawl");
-      if (err.includes("402") || err.includes("insufficient")) {
-        issues.push({ service: "Firecrawl", kind: "credits", message: "Firecrawl is out of credits — company websites can't be read. Top up or update the Firecrawl API key." });
-      }
+    // Severity is derived from which event actually fired, not re-guessed
+    // from env vars — with 6 possible LLM tiers (Settings > Keys), a fixed
+    // "is OPENAI_API_KEY set" check can no longer tell whether a fallback is
+    // actually covering the gap. scrape-orgs/route.ts already did that work
+    // and logged the outcome; this just surfaces it.
+    //
+    // Both branches below share the SAME `service` value ("LLM providers")
+    // deliberately — confirmed live that using two different names let a
+    // stale critical SKIPPED_LOW_CREDITS row (from before a fallback was
+    // configured) coexist in the response alongside a much more recent
+    // warning row saying the fallback is actively covering it. Sharing one
+    // key means the newest-first row ordering's dedup-by-service correctly
+    // lets the most recent event win.
+    if (row.event === "PRIMARY_LLM_LOW_CREDITS_FALLBACK_ACTIVE") {
+      add({ service: "LLM providers", kind: "credits", severity: "warning", message: row.error ?? "" });
+    } else if (row.event === "SKIPPED_LOW_CREDITS" && (err.includes("no usable llm provider") || err.includes("openrouter") || err.includes("credit"))) {
+      add({
+        service: "LLM providers",
+        kind: "credits",
+        severity: "critical",
+        message: "No configured LLM provider can generate company profiles right now — add or top up a key in Settings > Keys.",
+      });
+    } else if (row.source === "llm" && err.includes("openai") && (err.includes("401") || err.includes("403") || err.includes("insufficient_quota") || err.includes("429"))) {
+      add({ service: "OpenAI", kind: "credits", severity: "critical", message: "OpenAI is rejecting requests — check its API key / billing." });
     }
-
-    if (row.source === "llm" && !decided.has("llm")) {
-      decided.add("llm");
-      if (err.includes("openrouter") && err.includes("402")) {
-        issues.push({ service: "OpenRouter", kind: "credits", message: "OpenRouter is out of credits — company profiles can't be generated. Top up or update the OpenRouter API key." });
-      } else if (err.includes("openai") && (err.includes("401") || err.includes("insufficient_quota") || err.includes("429"))) {
-        issues.push({ service: "OpenAI", kind: "credits", message: "OpenAI (LLM fallback) is rejecting requests — check its API key / billing." });
-      }
+    // The Firecrawl low-credit skip message ("Firecrawl is out of credits (N
+    // left)") has neither "402" nor "insufficient" in it — match "credit" too.
+    if (row.source === "firecrawl" && (err.includes("402") || err.includes("insufficient") || err.includes("credit"))) {
+      add({ service: "Firecrawl", kind: "credits", severity: "critical", message: "Firecrawl is out of credits — company websites can't be read. Top up or update the Firecrawl API key." });
     }
-
-    if (err.includes("apollo") && !decided.has("apollo")) {
-      decided.add("apollo");
-      if (err.includes("401") || err.includes("403")) {
-        issues.push({ service: "Apollo", kind: "auth", message: "Apollo rejected the API key — lead emails can't be revealed. Update the Apollo master key." });
-      }
+    if (err.includes("apollo") && (err.includes("401") || err.includes("403"))) {
+      add({ service: "Apollo", kind: "auth", severity: "critical", message: "Apollo rejected the API key — lead emails can't be revealed. Update the Apollo master key." });
     }
   }
 

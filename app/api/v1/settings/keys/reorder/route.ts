@@ -1,0 +1,27 @@
+import { NextRequest } from "next/server";
+import { requireSuperAdmin } from "@/lib/auth/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ok, fail } from "@/lib/api-response";
+import { ReorderProviderKeysSchema } from "@/lib/validators/provider-keys";
+
+export async function PUT(req: NextRequest) {
+  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+
+  const body = await req.json().catch(() => null);
+  const parsed = ReorderProviderKeysSchema.safeParse(body);
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  const { provider, orderedIds } = parsed.data;
+
+  const db = createAdminClient();
+  const nowIso = new Date().toISOString();
+  // Sequential updates keep this simple for the tiny row counts expected
+  // here (a handful of keys per provider) — no bulk-upsert RPC needed.
+  for (let i = 0; i < orderedIds.length; i++) {
+    await db.from("provider_keys")
+      .update({ priority: (i + 1) * 10, updated_at: nowIso })
+      .eq("id", orderedIds[i])
+      .eq("provider", provider);
+  }
+
+  return ok({ provider, orderedIds });
+}

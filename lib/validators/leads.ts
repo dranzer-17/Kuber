@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { domainField } from "@/lib/validators/organizations";
 
 export const CreateLeadSchema = z.object({
   first_name: z.string().optional(),
@@ -11,7 +12,7 @@ export const CreateLeadSchema = z.object({
   state: z.string().optional(),
   country: z.string().optional(),
   organization_name: z.string().min(1),
-  organization_domain: z.string().optional(),
+  organization_domain: domainField.optional(),
   organization_industry: z.string().optional(),
   organization_country: z.string().optional(),
   batch_name: z.string().optional(),

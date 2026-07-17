@@ -17,6 +17,7 @@ import {
   type UniboxMessage,
   type UniboxThreadSummary,
 } from "@/lib/api-client";
+import { pickLatestDraftForThread } from "@/lib/reply-draft-pick";
 import { UniboxThreadList } from "@/components/app/unibox/unibox-thread-list";
 import { UniboxThreadView } from "@/components/app/unibox/unibox-thread-view";
 import { UniboxTemperatureBadge } from "@/components/app/unibox/unibox-temperature-badge";
@@ -52,12 +53,7 @@ function parseCampaignIdsParam(sp: URLSearchParams): string[] {
 function pickLatestDraft(messages: UniboxMessage[], drafts: ReplyDraft[]): ReplyDraft | null {
   const received = messages.filter((m) => m.direction === "received");
   const latest = received[received.length - 1];
-  const eventId = latest?.reply_event_id;
-  if (eventId) {
-    const matched = drafts.filter((d) => d.reply_event_id === eventId);
-    if (matched.length > 0) return matched[matched.length - 1];
-  }
-  return drafts[drafts.length - 1] ?? null;
+  return pickLatestDraftForThread(latest?.reply_event_id, drafts);
 }
 
 export function UniboxClient() {

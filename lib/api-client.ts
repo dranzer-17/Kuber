@@ -211,7 +211,7 @@ export async function fetchLead(token: string, id: string): Promise<Lead> {
   return mapDbLead(data);
 }
 
-export type ServiceIssue = { service: string; kind: "credits" | "auth"; message: string };
+export type ServiceIssue = { service: string; kind: "credits" | "auth"; message: string; severity: "warning" | "critical" };
 
 export async function fetchServiceHealth(token: string): Promise<ServiceIssue[]> {
   const data = await apiFetch<{ issues: ServiceIssue[] }>(`/api/v1/service-health`, {}, token);
@@ -226,6 +226,61 @@ export type LeadActivityEvent = {
   campaign_name: string | null;
   created_at: string;
 };
+
+// Settings > Keys (super-admin only) — multi-provider API key management.
+export type ProviderCategory = "llm" | "scrape";
+export type ProviderKeyStatus = "healthy" | "cooling_off" | "dead";
+export type ProviderKey = {
+  id: string; provider: string; label: string; secret_last4: string;
+  priority: number; is_active: boolean; status: ProviderKeyStatus;
+  cooling_off_until: string | null; last_used_at: string | null;
+  last_checked_at: string | null; last_error: string | null;
+  last_error_at: string | null; created_at: string;
+};
+export type ProviderConfig = {
+  id: string; category: ProviderCategory; label: string;
+  modelInputMode: "dropdown" | "freeform" | "none";
+  modelOptions: string[]; defaultModel: string | null; selectedModel: string | null;
+  keys: ProviderKey[];
+};
+// Which LLM provider complete() tries first ("primary") and second
+// ("fallback") — null means "use the default order" (see registry.ts).
+export type LlmTierRoles = { primary: string | null; fallback: string | null };
+export type ProviderKeysData = { providers: ProviderConfig[]; tierRoles: LlmTierRoles; tierOrder: string[] };
+
+export async function fetchProviderKeys(token: string): Promise<ProviderKeysData> {
+  return apiFetch("/api/v1/settings/keys", {}, token);
+}
+
+export async function createProviderKey(token: string, body: { provider: string; label: string; secret: string }): Promise<ProviderKey> {
+  return apiFetch("/api/v1/settings/keys", { method: "POST", body: JSON.stringify(body) }, token);
+}
+
+export async function patchProviderKey(token: string, id: string, body: Partial<{
+  label: string; priority: number; is_active: boolean; status: ProviderKeyStatus;
+}>): Promise<ProviderKey> {
+  return apiFetch(`/api/v1/settings/keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+}
+
+export async function deleteProviderKey(token: string, id: string): Promise<{ id: string }> {
+  return apiFetch(`/api/v1/settings/keys/${id}`, { method: "DELETE" }, token);
+}
+
+export async function reorderProviderKeys(token: string, provider: string, orderedIds: string[]): Promise<void> {
+  await apiFetch("/api/v1/settings/keys/reorder", { method: "PUT", body: JSON.stringify({ provider, orderedIds }) }, token);
+}
+
+export async function checkProviderKey(token: string, id: string): Promise<{ id: string; ok: boolean; remaining: number | null; message: string }> {
+  return apiFetch(`/api/v1/settings/keys/${id}/check`, { method: "POST" }, token);
+}
+
+export async function setProviderModel(token: string, provider: string, model: string | null): Promise<void> {
+  await apiFetch("/api/v1/settings/keys/model", { method: "PUT", body: JSON.stringify({ provider, model }) }, token);
+}
+
+export async function setLlmTierRoles(token: string, body: { primary: string | null; fallback: string | null }): Promise<LlmTierRoles> {
+  return apiFetch("/api/v1/settings/keys/tier", { method: "PUT", body: JSON.stringify(body) }, token);
+}
 
 export async function fetchLeadActivity(token: string, id: string): Promise<LeadActivityEvent[]> {
   const data = await apiFetch<{ events: LeadActivityEvent[] }>(`/api/v1/leads/${id}/activity`, {}, token);

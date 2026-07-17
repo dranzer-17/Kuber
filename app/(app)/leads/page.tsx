@@ -1,10 +1,11 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, fetchServiceHealth, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getBatchColor } from "@/lib/constants";
+import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 
 import { useRef, useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
@@ -820,7 +821,7 @@ export default function LeadsPage() {
               <UserPlus className="size-3.5" /> Assign{checkedIds.size > 0 ? ` (${checkedIds.size})` : ""}
             </Button>
           )}
-          {someChecked && role === "manager" && (
+          {role === "manager" && (
             <Button
               size="sm" className="gap-1.5"
               disabled={!canCreateCampaign}
@@ -860,17 +861,6 @@ export default function LeadsPage() {
             onClick={() => {
               if (!session) return;
               void loadLeads(session.access_token);
-              // Banner lives on Dashboard — on Leads refresh, re-check and toast
-              // if an upstream provider is still out of credits so retries
-              // don't fail silently against a misleading "website unreadable" copy.
-              void fetchServiceHealth(session.access_token)
-                .then((issues) => {
-                  const openrouter = issues.find((i) => i.service === "OpenRouter");
-                  const firecrawl = issues.find((i) => i.service === "Firecrawl");
-                  if (openrouter) toast.error(openrouter.message);
-                  if (firecrawl) toast.error(firecrawl.message);
-                })
-                .catch(() => {});
             }}
           >
             <RefreshCw className={cn("size-3.5", loadingLeads && "animate-spin")} />
@@ -880,6 +870,12 @@ export default function LeadsPage() {
             <Plus className="size-3.5" /> Add leads
           </Button>
         </div>
+      </div>
+
+      {/* Upstream credit/API-key failures — previously only shown on Dashboard,
+          so a stalled queue here (leads stuck in New) had no visible cause. */}
+      <div className="px-8 pt-3">
+        <ServiceHealthBanner />
       </div>
 
       {/* ── Search + Columns toolbar ── */}

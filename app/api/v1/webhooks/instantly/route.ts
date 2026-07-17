@@ -177,16 +177,18 @@ export async function POST(req: NextRequest) {
   const isFirstDelivery = (insertedEvents?.length ?? 0) > 0;
 
   // 6) Update campaign_leads state (with lead_temperature for interest events)
+  let interestApplied = false;
   if (campaignLeadId) {
-    // Fetch current state BEFORE patching — needed for two idempotency guards below:
+    // Fetch current state BEFORE patching — needed for three guards below:
     // (1) only count a lead's FIRST reply toward replied_count (a lead replying twice
-    //     must not push the reply rate above 100%), and
+    //     must not push the reply rate above 100%),
     // (2) only increment hot_count/cold_count when Instantly's classification actually
     //     CHANGES for this lead — not on every duplicate/retried webhook delivery of the
-    //     same event, which would otherwise double-count.
+    //     same event, which would otherwise double-count, and
+    // (3) the cross-campaign echo check below.
     const { data: beforeState } = await db
       .from("campaign_leads")
-      .select("crm_status, interest_status")
+      .select("crm_status, interest_status, last_reply_at")
       .eq("id", campaignLeadId)
       .maybeSingle();
     const wasAlreadyReplied = beforeState?.crm_status === "replied";
@@ -196,13 +198,38 @@ export async function POST(req: NextRequest) {
     if (CRM_BY_EVENT[p.event_type])                    patch.crm_status = CRM_BY_EVENT[p.event_type];
     const interest = INTEREST_BY_EVENT[p.event_type];
     if (interest !== undefined) {
-      patch.interest_status = interest;
-      // Instantly's own AI is the sole source of truth for lead_temperature (team
-      // decision). We no longer run our own LLM classifier on replies — see
-      // app/api/internal/process-reply/route.ts, which now only drafts, never classifies.
-      // This is the ONLY place in the codebase that sets lead_temperature.
-      const temp = INTEREST_TO_TEMPERATURE[interest as number];
-      if (temp) patch.lead_temperature = temp;
+      // Instantly classifies "interest" per LEAD, not per campaign thread — when
+      // a lead replies in one campaign, it re-broadcasts the SAME classification
+      // to every other campaign that lead is currently enrolled in too, even ones
+      // they never said anything of the kind in. Confirmed live: two
+      // lead_not_interested webhooks arrived 1ms apart for the same lead in two
+      // different campaigns, only one of which actually got a negative reply.
+      // Only the campaign whose thread is most recently active is trusted;
+      // older campaign threads keep whatever status they already had. For a
+      // lead in just one campaign (the common case) this is always true.
+      let isFreshestThread = true;
+      if (leadId) {
+        const { data: siblings } = await db
+          .from("campaign_leads")
+          .select("id, last_reply_at")
+          .eq("lead_id", leadId);
+        if (siblings && siblings.length > 1) {
+          const currentTime = beforeState?.last_reply_at ? new Date(beforeState.last_reply_at).getTime() : -Infinity;
+          isFreshestThread = !siblings.some(
+            (s) => s.id !== campaignLeadId && s.last_reply_at && new Date(s.last_reply_at).getTime() > currentTime,
+          );
+        }
+      }
+      if (isFreshestThread) {
+        interestApplied = true;
+        patch.interest_status = interest;
+        // Instantly's own AI is the sole source of truth for lead_temperature (team
+        // decision). We no longer run our own LLM classifier on replies — see
+        // app/api/internal/process-reply/route.ts, which now only drafts, never classifies.
+        // This is the ONLY place in the codebase that sets lead_temperature.
+        const temp = INTEREST_TO_TEMPERATURE[interest as number];
+        if (temp) patch.lead_temperature = temp;
+      }
     }
     if (p.event_type === "lead_unsubscribed") patch.lead_temperature = "unsubscribed";
     if (p.event_type === "reply_received") {
@@ -227,8 +254,9 @@ export async function POST(req: NextRequest) {
 
     // Increment hot_count / cold_count based on Instantly's own classification,
     // guarded so a lead's classification only counts once per actual CHANGE in
-    // interest value — not once per duplicate delivery of the same webhook event.
-    if (interest !== undefined && masterId && interest !== previousInterest) {
+    // interest value — not once per duplicate delivery of the same webhook event,
+    // and only when it was actually applied (not suppressed as a cross-campaign echo).
+    if (interestApplied && masterId && interest !== previousInterest) {
       const temp = INTEREST_TO_TEMPERATURE[interest as number];
       try {
         if (temp === "hot") {
@@ -251,7 +279,11 @@ export async function POST(req: NextRequest) {
         metadata: { campaign_id: masterId, step: p.step ?? null, variant: p.variant ?? null },
       });
     }
-    const interestDetail = INTEREST_DETAIL_BY_EVENT[p.event_type];
+    // Suppressed cross-campaign echoes (see the isFreshestThread check above)
+    // don't get a timeline entry for THIS campaign either — logging "Marked not
+    // interested" here when it never actually applied would just reproduce the
+    // exact confusion this guard exists to prevent.
+    const interestDetail = interestApplied ? INTEREST_DETAIL_BY_EVENT[p.event_type] : undefined;
     if (interestDetail) {
       await logLeadEvent(db, leadId, "interest_changed", interestDetail, {
         metadata: { campaign_id: masterId, interest_status: INTEREST_BY_EVENT[p.event_type] ?? null },

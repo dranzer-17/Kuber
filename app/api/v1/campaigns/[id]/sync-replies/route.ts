@@ -23,6 +23,19 @@ function stripQuotedText(text: string | null | undefined): string | null {
   return kept.join("\n").trim() || null;
 }
 
+/**
+ * Both sides of the reply dedupe must key off the same string. Postgres renders
+ * received_at as "2026-07-16 11:31:18+00" while Instantly's API returns
+ * "2026-07-16T11:31:18.000Z" — slicing the raw text compared " 11:31" against
+ * "T11:31", so the guard never matched and every sync re-processed every reply.
+ * Normalising through Date collapses both spellings onto the same minute.
+ */
+function tsMinute(v: string | null | undefined): string {
+  if (!v) return "";
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? String(v).slice(0, 16) : d.toISOString().slice(0, 16);
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
@@ -44,12 +57,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // 2. Fetch existing reply_received event UIDs so we can skip duplicates
   const { data: existingEvents } = await db
     .from("reply_events")
-    .select("event_uid, lead_email, received_at")
+    .select("event_uid, lead_email, received_at, email_id")
     .eq("campaign_id", masterCampaignId)
     .eq("event_type", "reply_received");
 
   const existingKeys = new Set(
-    (existingEvents ?? []).map((e) => `${e.lead_email}|${String(e.received_at).slice(0, 16)}`),
+    (existingEvents ?? []).map((e) => `${e.lead_email}|${tsMinute(e.received_at)}`),
+  );
+  // The Instantly email id is the reply's real identity. The webhook records it too,
+  // so matching on it is what stops this backfill from minting a second event for a
+  // reply the webhook already ingested — the two paths hash different event_uids, so
+  // the uid constraint alone would not catch it.
+  const existingEmailIds = new Set(
+    (existingEvents ?? []).map((e) => e.email_id).filter((v): v is string => !!v),
   );
 
   let found = 0;
@@ -74,8 +94,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!fromEmail) continue;
 
       const receivedAt = email.timestamp_email ?? new Date().toISOString();
-      const dedupeKey = `${fromEmail}|${receivedAt.slice(0, 16)}`;
-      const isNew = !existingKeys.has(dedupeKey);
+      const dedupeKey = `${fromEmail}|${tsMinute(receivedAt)}`;
+      const isNew = !existingKeys.has(dedupeKey) && !(email.id && existingEmailIds.has(email.id));
 
       // Resolve campaign_lead
       let campaignLeadId: string | null = null;
@@ -146,7 +166,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       // Always mirror into unibox — Outbox reads unibox_emails, not reply_events.
       // Idempotent on instantly_email_id, so safe for already-synced rows that
-      // previously missed ingest (e.g. webhook down / old sync path).
+      // previously missed ingest (e.g. webhook down / old sync path). Passing
+      // replyEventId through here also sets unibox_emails.reply_event_id, so no
+      // separate manual patch is needed.
       try {
         let toIngest = email;
         if (!email.thread_id && email.id) {
@@ -206,6 +228,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       if (!isNew) {
         existingKeys.add(dedupeKey);
+        if (email.id) existingEmailIds.add(email.id);
         continue;
       }
 
@@ -230,6 +253,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       }
 
       existingKeys.add(dedupeKey);
+      if (email.id) existingEmailIds.add(email.id);
       backfilled++;
     }
   }

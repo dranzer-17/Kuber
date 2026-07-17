@@ -167,6 +167,39 @@ function buildUserPrompt(
   return lines.join("\n");
 }
 
+// Bug fix (found while testing the enrichment pipeline): fetchDraftTargets'
+// retry cap and countPendingDrafts' "stop retrying, exhausted" check both
+// work by counting existing `email_drafts` rows with status='failed' for a
+// lead. That means any failure path that returns `{ ok: false }` WITHOUT
+// first creating one of those rows is invisible to both — the lead never
+// accumulates a strike, never hits the 3-attempt cap, and stays "pending"
+// forever. Since campaign_leads.draft_id also never gets set, the batch
+// worker's self-trigger (`after()` in the route) sees the same lead as
+// still-pending on every subsequent call and re-fires itself indefinitely.
+// Confirmed live: one lead stuck in this state produced dozens of
+// self-triggered POSTs in a few minutes with no end in sight.
+//
+// This records a `failed` marker (+ a `draft_failed` activity-log entry, for
+// the same reason a human should see it, not just the retry counter) so
+// early-exit failures count toward the cap exactly like an LLM-extraction
+// failure already does. uq_email_drafts_campaign_lead_step is a PARTIAL
+// unique index (`WHERE status NOT IN ('rejected','failed')`), so a
+// status='failed' insert is exempt from it by construction and can't
+// collide with whatever row caused the original failure — this insert is
+// effectively always safe, not just best-effort.
+async function recordUnattemptedFailure(db: SupabaseClient, target: CampaignLeadTarget, campaignId: string, stepNumber: number, reason: string): Promise<void> {
+  await db.from("email_drafts").insert({
+    lead_id: target.lead_id,
+    campaign_id: campaignId,
+    step_number: stepNumber,
+    status: "failed",
+    created_at: new Date().toISOString(),
+  });
+  await logLeadEvent(db, target.lead_id, "draft_failed", "Email draft generation failed", {
+    metadata: { campaign_id: campaignId, step: stepNumber, reason },
+  });
+}
+
 /** Generate one draft for a campaign lead. Returns draft id on success. */
 export async function generateOneDraft(
   db: SupabaseClient,
@@ -181,8 +214,14 @@ export async function generateOneDraft(
   stepNumber = 1,
 ): Promise<{ ok: true; draftId: string; status: string } | { ok: false; reason: string }> {
   const lead = unwrapLead(target.leads);
-  if (!lead) return { ok: false, reason: "Lead not found" };
-  if (!lead.email) return { ok: false, reason: "Lead has no email" };
+  if (!lead) {
+    await recordUnattemptedFailure(db, target, campaignId, stepNumber, "Lead not found");
+    return { ok: false, reason: "Lead not found" };
+  }
+  if (!lead.email) {
+    await recordUnattemptedFailure(db, target, campaignId, stepNumber, "Lead has no email");
+    return { ok: false, reason: "Lead has no email" };
+  }
 
   // --- Fetch full campaign for attachment + owner resolution ---
   const { data: campaign } = await db
@@ -226,7 +265,18 @@ export async function generateOneDraft(
       .select("id")
       .single();
 
-    if (dErr || !draft) return { ok: false, reason: dErr?.message ?? "Failed to create draft" };
+    if (dErr || !draft) {
+      // The most likely cause is exactly this: the "generating" insert hit
+      // uq_email_drafts_campaign_lead_step because a live (non-rejected,
+      // non-failed) draft already exists for this campaign+lead+step — e.g.
+      // a stale campaign_leads.draft_id was reset to null while the row it
+      // used to point at was left behind. Record the failure anyway so this
+      // lead stops being re-selected forever instead of erroring identically
+      // on every self-triggered retry.
+      const reason = dErr?.message ?? "Failed to create draft";
+      await recordUnattemptedFailure(db, target, campaignId, stepNumber, reason);
+      return { ok: false, reason };
+    }
     draftId = draft.id;
   }
 

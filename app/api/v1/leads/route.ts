@@ -16,7 +16,10 @@ async function upsertOrg(
   industry?: string,
   country?: string,
 ) {
-  const normalizedDomain = domain ? normalizeDomain(domain) : null;
+  // normalizeDomain() returns "" (not null) for unparseable/email-shaped
+  // input — coerce that back to null so an empty string never lands in the
+  // domain column instead of a real null.
+  const normalizedDomain = domain ? (normalizeDomain(domain) || null) : null;
 
   if (normalizedDomain) {
     const { data: existing } = await db

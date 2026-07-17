@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { FollowUpRegenerateSchema } from "@/lib/validators/drafts";
 import { regenerateFollowUpText } from "@/lib/services/followup-regenerate";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 // Deliberately separate from /drafts/[id]/regenerate (the step-1 draft's
 // regenerate endpoint) and from generateOneDraft entirely. Follow-up
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .maybeSingle();
 
   const now = new Date().toISOString();
+  const eventMeta = { campaign_id: id, step: parsed.data.step_number };
 
   if (existing) {
     await db.from("email_drafts").update({
@@ -61,6 +63,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       rejection_reason: "superseded by follow-up regeneration",
       updated_at: now,
     }).eq("id", existing.id);
+    // This route never logged anything before — a regenerated follow-up
+    // silently replaced the old draft with no trace on the activity timeline.
+    await logLeadEvent(db, cl.lead_id, "draft_rejected", `Follow-up email draft superseded by regeneration (step ${parsed.data.step_number})`, {
+      actorId: user.id, metadata: { ...eventMeta, draft_id: existing.id },
+    });
   }
 
   const { data: draft, error } = await db
@@ -80,6 +87,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .single();
 
   if (error || !draft) return fail(500, "INTERNAL", error?.message ?? "Failed to save regenerated draft");
+
+  await logLeadEvent(db, cl.lead_id, "draft_created", `Follow-up email regenerated (step ${parsed.data.step_number})`, {
+    actorId: user.id, metadata: { ...eventMeta, draft_id: draft.id },
+  });
 
   return ok({ draft });
 }

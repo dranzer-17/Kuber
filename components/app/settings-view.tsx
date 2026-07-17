@@ -27,7 +27,12 @@ const TeamView = dynamic(
   { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
 );
 
-type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team";
+const KeysView = dynamic(
+  () => import("@/components/app/keys-view").then((m) => m.KeysView),
+  { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
+);
+
+type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team" | "keys";
 type AiSection = "my-writing" | "my-signature" | "template" | "default" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
@@ -260,7 +265,14 @@ export function SettingsView() {
   const { theme, mode, setTheme, setMode, savingTheme } = useTheme();
   const { role } = useApp();
   const isManager = role === "manager";
-  const navItems = isManager ? MANAGER_NAV_ITEMS : NAV_ITEMS;
+  // Declared here (rather than alongside the other useState calls below) so
+  // navItems — which needs it — can be computed in the same statement order
+  // hooks already run in; moving a useState call is safe as long as it still
+  // runs unconditionally on every render.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const navItems = isManager
+    ? (isSuperAdmin ? [...MANAGER_NAV_ITEMS, { id: "keys" as const, label: "Keys" }] : MANAGER_NAV_ITEMS)
+    : NAV_ITEMS;
   const aiNavItems = isManager ? [...PERSONAL_AI_NAV_ITEMS, ...COMPANY_AI_NAV_ITEMS] : PERSONAL_AI_NAV_ITEMS;
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [section, setSection] = useState<Section>("profile");
@@ -302,8 +314,6 @@ export function SettingsView() {
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving  ] = useState(false);
   const [error,   setError   ] = useState("");
-
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const activeAiNavItem        = aiNavItems.find((i) => i.id === aiSection);
   const activeKnowledgeNavItem = KNOWLEDGE_NAV_ITEMS.find((i) => i.id === knowledgeSection);
@@ -1146,6 +1156,12 @@ export function SettingsView() {
               {section === "team" && role === "manager" && (
                 <div className="-m-8">
                   <TeamView />
+                </div>
+              )}
+
+              {section === "keys" && isSuperAdmin && (
+                <div className="-m-8">
+                  <KeysView />
                 </div>
               )}
 

@@ -1,8 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getActiveKey } from "@/lib/services/provider-keys";
+import type { CreditCheck } from "@/lib/services/providers/types";
+import type { ProviderId } from "@/lib/services/providers/types";
 
 type Db = SupabaseClient;
 
-export type CreditCheck = { ok: boolean; remaining: number | null; message: string };
+export type { CreditCheck };
+
+// Cache each provider's check for this long so an active scrape-orgs
+// self-chain (which can fire every few seconds during a big batch) doesn't
+// hit these credit APIs on every single invocation — one fresh check per
+// window is plenty to catch "we just ran out."
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 // Below these, treat the provider as "not enough to bother trying" — not
 // necessarily literal zero, since a request can still fail on a balance that
@@ -11,6 +20,14 @@ export type CreditCheck = { ok: boolean; remaining: number | null; message: stri
 const FIRECRAWL_MIN_CREDITS = 5;
 const OPENROUTER_MIN_BALANCE_USD = 0.10;
 
+async function getCached(db: Db, key: string): Promise<CreditCheck | null> {
+  const { data } = await db.from("settings").select("value, updated_at").eq("key", key).maybeSingle();
+  if (!data) return null;
+  const age = Date.now() - new Date(data.updated_at).getTime();
+  if (age > CACHE_TTL_MS) return null;
+  try { return JSON.parse(data.value) as CreditCheck; } catch { return null; }
+}
+
 async function setCached(db: Db, key: string, value: CreditCheck): Promise<void> {
   await db.from("settings").upsert(
     { key, value: JSON.stringify(value), updated_at: new Date().toISOString() },
@@ -18,10 +35,10 @@ async function setCached(db: Db, key: string, value: CreditCheck): Promise<void>
   );
 }
 
-async function fetchFirecrawlCredits(): Promise<CreditCheck> {
+async function fetchFirecrawlCredits(secret: string): Promise<CreditCheck> {
   try {
     const res = await fetch("https://api.firecrawl.dev/v2/team/credit-usage", {
-      headers: { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
+      headers: { Authorization: `Bearer ${secret}` },
     });
     if (!res.ok) return { ok: true, remaining: null, message: `Credit check failed (HTTP ${res.status}) — proceeding rather than blocking on an unrelated API hiccup` };
     const json = await res.json() as { success?: boolean; data?: { remainingCredits?: number } };
@@ -38,10 +55,10 @@ async function fetchFirecrawlCredits(): Promise<CreditCheck> {
   }
 }
 
-async function fetchOpenRouterCredits(): Promise<CreditCheck> {
+async function fetchOpenRouterCredits(secret: string): Promise<CreditCheck> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/credits", {
-      headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
+      headers: { Authorization: `Bearer ${secret}` },
     });
     if (!res.ok) return { ok: true, remaining: null, message: `Credit check failed (HTTP ${res.status}) — proceeding rather than blocking on an unrelated API hiccup` };
     const json = await res.json() as { data?: { total_credits?: number; total_usage?: number } };
@@ -59,15 +76,121 @@ async function fetchOpenRouterCredits(): Promise<CreditCheck> {
   }
 }
 
-/** Live, provider-specific credit check. Fails OPEN (ok: true) on any check
- *  error — a broken credit-check call must never itself block real work.
- *  Result is still recorded to `settings` for visibility, but every call
- *  hits the provider API fresh rather than trusting a stale cached value. */
-async function checkCredits(db: Db, settingsKey: string, fetcher: () => Promise<CreditCheck>): Promise<CreditCheck> {
-  const fresh = await fetcher();
+// OpenAI (and Anthropic/Gemini/Mistral/Groq below) expose no "remaining
+// balance" endpoint reachable with a regular API key — the best available
+// signal is whether the key itself is live. A real mid-run quota failure
+// from an actual completion call is caught separately and surfaces via
+// /api/v1/service-health / provider_keys.status, same as the other
+// providers' hard failures.
+async function fetchOpenAICredits(secret: string): Promise<CreditCheck> {
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${secret}` } });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "OpenAI rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `OpenAI key check failed (HTTP ${res.status}) — proceeding rather than blocking on an unrelated API hiccup` };
+    return { ok: true, remaining: null, message: "OpenAI key is valid (balance isn't exposed by this API — real quota failures surface when a call is actually made)" };
+  } catch {
+    return { ok: true, remaining: null, message: "OpenAI key check errored — proceeding" };
+  }
+}
+
+async function fetchAnthropicCredits(secret: string): Promise<CreditCheck> {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/models", {
+      headers: { "x-api-key": secret, "anthropic-version": "2023-06-01" },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "Anthropic rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `Anthropic key check failed (HTTP ${res.status}) — proceeding` };
+    return { ok: true, remaining: null, message: "Anthropic key is valid (balance isn't exposed by this API)" };
+  } catch {
+    return { ok: true, remaining: null, message: "Anthropic key check errored — proceeding" };
+  }
+}
+
+async function fetchGeminiCredits(secret: string): Promise<CreditCheck> {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(secret)}`);
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "Gemini rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `Gemini key check failed (HTTP ${res.status}) — proceeding` };
+    return { ok: true, remaining: null, message: "Gemini key is valid (balance isn't exposed by this API)" };
+  } catch {
+    return { ok: true, remaining: null, message: "Gemini key check errored — proceeding" };
+  }
+}
+
+async function fetchMistralCredits(secret: string): Promise<CreditCheck> {
+  try {
+    const res = await fetch("https://api.mistral.ai/v1/models", { headers: { Authorization: `Bearer ${secret}` } });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "Mistral rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `Mistral key check failed (HTTP ${res.status}) — proceeding` };
+    return { ok: true, remaining: null, message: "Mistral key is valid (balance isn't exposed by this API)" };
+  } catch {
+    return { ok: true, remaining: null, message: "Mistral key check errored — proceeding" };
+  }
+}
+
+async function fetchGroqCredits(secret: string): Promise<CreditCheck> {
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${secret}` } });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "Groq rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `Groq key check failed (HTTP ${res.status}) — proceeding` };
+    return { ok: true, remaining: null, message: "Groq key is valid (balance isn't exposed by this API)" };
+  } catch {
+    return { ok: true, remaining: null, message: "Groq key check errored — proceeding" };
+  }
+}
+
+const FETCHERS: Record<ProviderId, (secret: string) => Promise<CreditCheck>> = {
+  firecrawl: fetchFirecrawlCredits,
+  openrouter: fetchOpenRouterCredits,
+  openai: fetchOpenAICredits,
+  anthropic: fetchAnthropicCredits,
+  gemini: fetchGeminiCredits,
+  mistral: fetchMistralCredits,
+  groq: fetchGroqCredits,
+};
+
+/** Cached, provider-specific credit check against the currently-ACTIVE key
+ *  only (not every stored key) — this is a coarse pre-flight gate, and
+ *  getActiveKey() is already called fresh (uncached) on every real request
+ *  inside complete()/scrapePage(), so rotation freshness never depends on
+ *  this 5-minute cache. */
+async function checkCredits(db: Db, provider: ProviderId, settingsKey: string): Promise<CreditCheck> {
+  const cached = await getCached(db, settingsKey);
+  if (cached) return cached;
+
+  const resolved = await getActiveKey(db, provider);
+  if (!resolved) {
+    const fresh = { ok: false, remaining: null, message: `No usable ${provider} key configured` };
+    await setCached(db, settingsKey, fresh);
+    return fresh;
+  }
+
+  const fresh = await FETCHERS[provider](resolved.secret);
   await setCached(db, settingsKey, fresh);
   return fresh;
 }
 
-export const checkFirecrawlCredits = (db: Db) => checkCredits(db, "credit_check_firecrawl", fetchFirecrawlCredits);
-export const checkOpenRouterCredits = (db: Db) => checkCredits(db, "credit_check_openrouter", fetchOpenRouterCredits);
+export const checkFirecrawlCredits = (db: Db) => checkCredits(db, "firecrawl", "credit_check_firecrawl");
+export const checkOpenRouterCredits = (db: Db) => checkCredits(db, "openrouter", "credit_check_openrouter");
+export const checkOpenAICredits = (db: Db) => checkCredits(db, "openai", "credit_check_openai");
+export const checkAnthropicCredits = (db: Db) => checkCredits(db, "anthropic", "credit_check_anthropic");
+export const checkGeminiCredits = (db: Db) => checkCredits(db, "gemini", "credit_check_gemini");
+export const checkMistralCredits = (db: Db) => checkCredits(db, "mistral", "credit_check_mistral");
+export const checkGroqCredits = (db: Db) => checkCredits(db, "groq", "credit_check_groq");
+
+/** Used by the "Re-check" button on a specific stored key — bypasses the
+ *  currently-active-key resolution and the 5-minute cache entirely, since
+ *  the whole point is to test one specific key right now. */
+export function checkSpecificKey(provider: ProviderId, secret: string): Promise<CreditCheck> {
+  return FETCHERS[provider](secret);
+}

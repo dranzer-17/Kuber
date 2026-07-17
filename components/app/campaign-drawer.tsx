@@ -55,7 +55,7 @@ import {
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
-import { ReplyDraftBox } from "@/components/app/reply-draft-box";
+import { ReplyDraftBox, replyDraftHasContent } from "@/components/app/reply-draft-box";
 import { LeadDrawer } from "@/components/app/lead-drawer";
 import { OrgDrawer } from "@/components/app/org-drawer";
 import { supabase } from "@/lib/supabase";
@@ -654,6 +654,13 @@ export function CampaignDetail({
       .finally(() => setLoading(false));
   }, [loadData]);
 
+  // Refresh reply threads when opening Outbox so Unibox Generate/Save shows up
+  // without remounting the campaign drawer.
+  useEffect(() => {
+    if (viewTab !== "outbox") return;
+    void loadReplies();
+  }, [viewTab, loadReplies]);
+
   useEffect(() => {
     if (viewTab !== "analytics") return;
     let cancelled = false;
@@ -1221,7 +1228,9 @@ export function CampaignDetail({
       for (const draft of msg.reply_drafts) {
         if (draft.status !== "sent") continue;
         outboxMessageItems.push({
-          id: draft.id,
+          // Scoped to the message it answers: a draft id alone is not unique across
+          // the thread, and a repeated key makes React drop a message row.
+          id: `${msg.id}:${draft.id}`,
           sender: "You",
           to: outboxReplyName,
           timestamp: draft.sent_at,
@@ -2315,7 +2324,7 @@ export function CampaignDetail({
                   const lastMsg = selectedThread.messages[selectedThread.messages.length - 1] ?? null;
                   if (!lastMsg) return null;
                   const latestDraft = lastMsg.reply_drafts[lastMsg.reply_drafts.length - 1] ?? null;
-                  const hasDraftReady = !!latestDraft && latestDraft.status !== "generating" && latestDraft.status !== "sent";
+                  const hasDraftReady = !!latestDraft && latestDraft.status !== "generating" && latestDraft.status !== "sent" && latestDraft.status !== "rejected";
                   const isGenerating = latestDraft?.status === "generating" || outboxNewReplyLoading;
 
                   function handleReplyClick() {
@@ -2324,8 +2333,15 @@ export function CampaignDetail({
                       return;
                     }
                     setOutboxReplyOpen(true);
-                    setOutboxReplyStartBlank(true);
-                    if (latestDraft && latestDraft.status === "sent") {
+                    // Prefill saved drafts; only start blank for a new reply after send, or empty drafts
+                    const hasContent = !!(
+                      latestDraft?.subject?.trim() ||
+                      (latestDraft?.body ?? "").replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim()
+                    );
+                    setOutboxReplyStartBlank(
+                      !latestDraft || latestDraft.status === "sent" || latestDraft.status === "rejected" || !hasContent,
+                    );
+                    if (latestDraft && (latestDraft.status === "sent" || latestDraft.status === "rejected")) {
                       void handleStartNewOutboxReply(latestDraft.id);
                     }
                   }
@@ -2355,14 +2371,11 @@ export function CampaignDetail({
                         <div className="mt-3">
                           {hasDraftReady ? (
                             <ReplyDraftBox
-                              key={`${latestDraft!.id}-${outboxReplyStartBlank}`}
+                              key={latestDraft!.id}
                               draft={latestDraft!}
                               token={appSession?.access_token ?? ""}
-                              onChanged={() => {
-                                setOutboxReplyOpen(false);
-                                void loadReplies();
-                              }}
-                              startBlank={outboxReplyStartBlank}
+                              onChanged={() => void loadReplies()}
+                              startBlank={outboxReplyStartBlank && !replyDraftHasContent(latestDraft)}
                             />
                           ) : isGenerating ? (
                             <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">

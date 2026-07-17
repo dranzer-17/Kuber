@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { fetchServiceHealth, type ServiceIssue } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
 
 // Red banner for the dashboard — surfaces paid upstream failures (OpenRouter,
 // Firecrawl, Apollo, OpenAI) so dead API keys / empty credit balances show as
@@ -32,7 +33,12 @@ export function ServiceHealthBanner() {
       {issues.map((issue) => (
         <div
           key={issue.service}
-          className="flex items-start gap-2.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-400"
+          className={cn(
+            "flex items-start gap-2.5 rounded-lg border px-4 py-2.5 text-sm",
+            issue.severity === "warning"
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+              : "border-red-500/30 bg-red-500/10 text-red-400",
+          )}
         >
           <AlertTriangle className="size-4 shrink-0 mt-0.5" />
           <span>

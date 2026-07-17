@@ -1,7 +1,15 @@
 const APP_SUBDOMAINS = /^(app|dashboard|portal|login|my|account|admin|web|mail|crm|api|secure)\./i;
 
 export function normalizeDomain(raw: string): string {
-  return raw
+  const trimmed = raw.trim();
+  // A domain never contains "@" — this almost always means a spreadsheet/form
+  // column got misaligned and an email address landed in a domain field
+  // (e.g. "jmbpmurphy@o2.ie" typed into "Company Domain"). Stripping down to
+  // the part after "@" would still be wrong — that's the person's own email
+  // host, not necessarily the company's — and accepting it is exactly how a
+  // scrape ends up reading a site unrelated to the org. Fail closed instead.
+  if (trimmed.includes("@")) return "";
+  return trimmed
     .replace(/^https?:\/\//i, "")
     .replace(/^www\./i, "")
     .replace(/\/.*$/, "")           // strip path

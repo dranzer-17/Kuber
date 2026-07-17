@@ -6,9 +6,24 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 import { deriveDomainFromEmail } from "@/lib/utils/domain";
 import { autoAssignEnrichedLeads } from "@/lib/services/assignment";
 import { logLeadEvents } from "@/lib/services/lead-events";
-import { checkFirecrawlCredits, checkOpenRouterCredits } from "@/lib/services/provider-credits";
+import {
+  checkFirecrawlCredits, checkOpenRouterCredits, checkOpenAICredits,
+  checkAnthropicCredits, checkGeminiCredits, checkMistralCredits, checkGroqCredits,
+  type CreditCheck,
+} from "@/lib/services/provider-credits";
+import { resolveModel } from "@/lib/services/provider-keys";
+import { PROVIDER_META, resolveLlmTierOrder, type LlmProviderId } from "@/lib/services/providers/registry";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+const LLM_CREDIT_CHECKS: Record<LlmProviderId, (db: SupabaseClient) => Promise<CreditCheck>> = {
+  openrouter: checkOpenRouterCredits,
+  openai: checkOpenAICredits,
+  anthropic: checkAnthropicCredits,
+  gemini: checkGeminiCredits,
+  mistral: checkMistralCredits,
+  groq: checkGroqCredits,
+};
 
 // Raised from 55s to match the other enrichment routes (apollo-search, enrich
 // both run at 300s) — the LLM step alone is allowed up to 90s per attempt
@@ -321,7 +336,7 @@ async function processOneOrg(
   }
 
   if (!markdown) try {
-    const result = await scrapePage(`https://${org.domain}`);
+    const result = await scrapePage(`https://${org.domain}`, db);
     const scrapeDuration = Date.now() - scrapeStart;
 
     if (!result.success) {
@@ -383,7 +398,7 @@ async function processOneOrg(
     return;
   }
 
-  // ── D: LLM extraction via OpenRouter ─────────────────────────────────────
+  // ── D: LLM extraction ──────────────────────────────────────────────────────
   const llmStart = Date.now();
 
   await db.from("organizations").update({
@@ -391,11 +406,19 @@ async function processOneOrg(
     updated_at: new Date().toISOString(),
   }).eq("id", org.id);
 
+  // Log whichever provider is actually configured as primary right now
+  // (admin-configurable via Settings > Keys) rather than hardcoding
+  // "openrouter" — complete() itself resolves the same way, this is purely
+  // for an accurate log line.
+  const [currentPrimaryTier] = await resolveLlmTierOrder(db);
   await insertLog(db, {
     org_id: org.id,
     source: "llm",
     event: "LLM_EXTRACTION_STARTED",
-    payload: { model: process.env.LLM_PRIMARY_MODEL ?? "openai/gpt-4o-mini", input_chars: markdown.length },
+    payload: {
+      model: await resolveModel(db, currentPrimaryTier, PROVIDER_META[currentPrimaryTier].defaultModel ?? ""),
+      input_chars: markdown.length,
+    },
   });
 
   try {
@@ -411,7 +434,7 @@ Rules:
 - If you cannot find real evidence for a field in the provided content, return null for that field. Never invent facts. Never describe yourself or any third party — only describe the company whose website you are reading.`,
       user: `Company name: ${org.name}\nWebsite domain: ${org.domain ?? "unknown"}\n\nWebsite content:\n${markdown.slice(0, 8000)}`,
       maxTokens: 1024, // output is a tiny JSON object; keeps cost + credit floor low
-    });
+    }, db);
 
     const llmDuration = Date.now() - llmStart;
     const hasDescription = !!extracted?.company_description;
@@ -506,17 +529,52 @@ export async function POST(req: NextRequest) {
   // healthy leads stuck needing a manual retry once credit is topped up. Skip
   // the whole batch untouched — nothing claimed, nothing marked failed — and
   // let the next watchdog tick (or self-chain re-trigger below) check again.
-  const [firecrawlCredits, openRouterCredits] = await Promise.all([
+  //
+  // The primary LLM tier alone is NOT a hard blocker when a later tier is a
+  // validated fallback: lib/services/llm.ts `complete()` already fails over
+  // through every configured provider in tier order on ANY error (including
+  // 402), so halting the whole batch here just because the FIRST tier is low
+  // would leave the queue stuck for no reason even though a later tier is
+  // perfectly usable (this exact bug — hardcoded to only check
+  // OpenRouter+OpenAI — is why 275+ orgs once sat in `queued` for 17h while
+  // Firecrawl and OpenAI were both fine). Tier order itself is resolved
+  // fresh here (admin-configurable Primary/Fallback in Settings > Keys), not
+  // a static import, so this gate always reflects the current configuration.
+  // Firecrawl has no fallback, so it still hard-blocks. Providers with no
+  // exposed balance API only validate key liveness (see each check
+  // function's own comment) — a real mid-run 429/insufficient_quota still
+  // surfaces reactively via /api/v1/service-health.
+  const tierOrder = await resolveLlmTierOrder(db);
+  const [firecrawlCredits, ...tierCredits] = await Promise.all([
     checkFirecrawlCredits(db),
-    checkOpenRouterCredits(db),
+    ...tierOrder.map((p) => LLM_CREDIT_CHECKS[p](db)),
   ]);
-  if (!firecrawlCredits.ok || !openRouterCredits.ok) {
-    const reason = [!firecrawlCredits.ok && firecrawlCredits.message, !openRouterCredits.ok && openRouterCredits.message]
-      .filter(Boolean).join(" · ");
+  const primaryCredits = tierCredits[0]; // tierOrder[0] — the current Primary pick, or OpenRouter by default
+  const anyLlmTierUsable = tierCredits.some((c) => c.ok);
+  const usableTierIndex = tierCredits.findIndex((c) => c.ok);
+  const llmBlocking = !anyLlmTierUsable;
+
+  if (!primaryCredits.ok && anyLlmTierUsable) {
+    // Informational, not a skip — logged so /api/v1/service-health can still
+    // tell a manager "top up <primary>" even though another tier is covering.
+    const coveringProvider = PROVIDER_META[tierOrder[usableTierIndex]].label;
+    await insertLog(db, {
+      source: "system",
+      event: "PRIMARY_LLM_LOW_CREDITS_FALLBACK_ACTIVE",
+      payload: { primary: primaryCredits, tierCredits: Object.fromEntries(tierOrder.map((p, i) => [p, tierCredits[i]])) },
+      error: `${primaryCredits.message} — currently falling back to ${coveringProvider} for company profiles`,
+    });
+  }
+
+  if (!firecrawlCredits.ok || llmBlocking) {
+    const reason = [
+      !firecrawlCredits.ok && firecrawlCredits.message,
+      llmBlocking && `No usable LLM provider: ${tierOrder.map((p, i) => `${PROVIDER_META[p].label}: ${tierCredits[i].message}`).join(" · ")}`,
+    ].filter(Boolean).join(" · ");
     await insertLog(db, {
       source: "system",
       event: "SKIPPED_LOW_CREDITS",
-      payload: { firecrawl: firecrawlCredits, openrouter: openRouterCredits },
+      payload: { firecrawl: firecrawlCredits, tierCredits: Object.fromEntries(tierOrder.map((p, i) => [p, tierCredits[i]])) },
       error: reason,
     });
     // Deliberately do NOT self-trigger here — that would spin in a tight loop

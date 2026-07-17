@@ -9,11 +9,19 @@ import { normalizeDomain } from "@/lib/utils/domain";
 
 export const maxDuration = 300;
 
-// Fix D: detect when org domain doesn't match the email domain
+// Fix D: detect when org domain doesn't match the email domain.
+// Exact/registrable-root comparison, not substring — a substring check here
+// previously let "jmbpmurphy@o2.ie" written into the domain column pass as
+// "no mismatch", since user@domain.tld always contains domain.tld as a
+// substring of itself. normalizeDomain() now rejects that shape outright
+// before this ever runs (defense in depth), but this also fixes the same
+// substring flaw for any other accidental near-match.
 function domainMismatch(orgDomain: string | null, email: string | null): boolean {
   if (!orgDomain || !email) return false;
   const emailDomain = email.split("@")[1] ?? "";
-  return !emailDomain.includes(orgDomain) && !orgDomain.includes(emailDomain.split(".").slice(-2).join("."));
+  const emailRoot = emailDomain.split(".").slice(-2).join(".");
+  const orgRoot = orgDomain.split(".").slice(-2).join(".");
+  return emailDomain !== orgDomain && emailRoot !== orgRoot;
 }
 
 // Fix D: reject country values that look like job titles (Excel column misalignment)

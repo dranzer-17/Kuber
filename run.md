@@ -26,10 +26,36 @@ that happens:
 1. Copy the new `https://....ngrok-free.app` URL ngrok prints.
 2. Open `.env.local`, replace the value of `NEXT_PUBLIC_APP_URL` with it.
 3. Stop and restart `npm run dev` (terminal 1) so it picks up the change.
+4. **Re-register the webhook with Instantly:** `node scripts/register-webhook.mjs`
+
+**Step 4 is not optional, and steps 2–3 do not cover it.** Instantly stores the
+webhook address as a full absolute URL on *its* servers — it cannot know your
+tunnel moved. `NEXT_PUBLIC_APP_URL` only affects calls the app makes back to
+itself, so editing it never reaches Instantly. Skip step 4 and replies stop
+arriving completely: nothing errors, the app just looks idle, and replies only
+show up if you press Sync by hand. (This is exactly what happened Jul 9–17 —
+the webhook sat dead for 8 days.)
+
+Check what Instantly currently calls, and whether it is healthy:
+
+```
+curl -s "https://api.instantly.ai/api/v2/webhooks?limit=50" \
+  -H "Authorization: Bearer $INSTANTLY_API_KEY"
+```
+
+`status: 1` is healthy; `status: -1` means Instantly disabled it after failures —
+that does **not** recover on its own once the URL works again, so delete it and
+register a fresh one. Several webhooks can coexist (one URL each), which is how
+two people can both receive events on their own tunnels.
+
+**To stop doing this every restart:** use a reserved ngrok domain, which never
+changes — `ngrok http --url=your-domain.ngrok-free.dev 3000`. Then you register
+once and never touch it again. Deploying to a real fixed domain removes ngrok,
+and this whole step, entirely.
 
 If you're only using the app yourself on this same machine, you can skip
-ngrok entirely and just use `http://localhost:3000` — steps 2/3 above aren't
-needed in that case.
+ngrok entirely and just use `http://localhost:3000` — but note that inbound
+Instantly replies will not reach you without a tunnel.
 
 ## 3. Start the enrichment watchdog
 

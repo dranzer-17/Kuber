@@ -6,6 +6,7 @@ import { FollowUpSaveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/instantly";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { logLeadEvent } from "@/lib/services/lead-events";
 
 // Save for a follow-up: persist + approve + sync to Instantly in one atomic
 // action, entirely separate from /drafts/[id] PATCH (whose "edit" action
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .maybeSingle();
 
   let draftId: string;
+  const eventMeta = { campaign_id: id, step: parsed.data.step_number };
 
   if (existing) {
     const { error } = await db.from("email_drafts").update({
@@ -58,6 +60,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }).eq("id", existing.id);
     if (error) return fail(500, "INTERNAL", error.message);
     draftId = existing.id;
+    // This endpoint is a single atomic "write + approve" action (see the
+    // file comment above) — it never had ANY lead_events logging before,
+    // so follow-up saves were entirely invisible on the activity timeline.
+    await logLeadEvent(db, cl.lead_id, "draft_edited", `Follow-up email edited (step ${parsed.data.step_number})`, {
+      actorId: user.id, metadata: { ...eventMeta, draft_id: draftId },
+    });
   } else {
     const { data: draft, error } = await db
       .from("email_drafts")
@@ -75,7 +83,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .single();
     if (error || !draft) return fail(500, "INTERNAL", error?.message ?? "Failed to save draft");
     draftId = draft.id;
+    await logLeadEvent(db, cl.lead_id, "draft_created", `Follow-up email draft written (step ${parsed.data.step_number})`, {
+      actorId: user.id, metadata: { ...eventMeta, draft_id: draftId },
+    });
   }
+
+  // Both branches above always end with status "approved" — this endpoint
+  // has no separate draft/review stage, unlike the AI-generated flow.
+  await logLeadEvent(db, cl.lead_id, "draft_approved", `Follow-up email approved (step ${parsed.data.step_number})`, {
+    actorId: user.id, metadata: { ...eventMeta, draft_id: draftId },
+  });
 
   const instantlySync = await syncApprovedDraftToInstantly(db, cl.lead_id, id);
 

@@ -467,10 +467,20 @@ export async function getInstantlyLeadStatus(
       }),
     });
     if (!res.ok) return null;
-    const data = await res.json().catch(() => null) as { items?: Array<{ email?: string; interest_value?: number | null; pl_value?: number | null }> } | null;
-    // search is fuzzy, pin to exact email match
-    const match = (data?.items ?? []).find((l) => l.email?.toLowerCase() === leadEmail.toLowerCase());
-    return match ?? null;
+    // The real field is lt_interest_status, not interest_value/pl_value (those
+    // don't exist in this response at all — confirmed live, they were always
+    // silently reading undefined). The campaign_id filter above is also not
+    // reliable on its own: for a lead enrolled in several sub-campaigns it can
+    // return sibling campaigns' rows too, so `campaign` is checked client-side
+    // as well rather than trusting the first email match.
+    const data = await res.json().catch(() => null) as {
+      items?: Array<{ email?: string; campaign?: string; lt_interest_status?: number | null }>;
+    } | null;
+    const match = (data?.items ?? []).find(
+      (l) => l.email?.toLowerCase() === leadEmail.toLowerCase() && l.campaign === instantlyCampaignId,
+    );
+    if (!match) return null;
+    return { interest_value: match.lt_interest_status ?? null, pl_value: null };
   } catch {
     return null;
   }

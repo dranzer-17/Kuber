@@ -31,22 +31,32 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   if (error) return fail(500, "INTERNAL", error.message);
 
-  // Resolve every referenced profile in one pass: actors ("by <name>") plus
-  // assignment targets, so the timeline can say "Assigned to <name>" instead
-  // of the generic "Assigned to an employee" (works for old rows too, since
-  // the ids have always been kept in metadata).
-  const profileIds = new Set<string>();
+  // Assignment events were logged with a generic detail string ("Assigned to
+  // an employee") because the assignee's name isn't known at write time in
+  // every call site (auto-assignment, bulk campaign-assign, etc.) — every one
+  // of them does store the raw assignee id(s) in metadata, though. Resolving
+  // the name here at read time, instead of writing it once at insert time,
+  // means this also fixes every already-logged historical event for free —
+  // no backfill migration needed.
+  const ASSIGNMENT_EVENTS = new Set(["assigned", "reassigned", "unassigned"]);
+  const nameNeededIds = new Set<string>();
   for (const e of events ?? []) {
-    if (e.actor_id) profileIds.add(e.actor_id as string);
-    const m = e.metadata as EventMeta;
-    if (m?.assignee_id) profileIds.add(m.assignee_id);
-    if (m?.to) profileIds.add(m.to);
-    if (m?.from) profileIds.add(m.from);
+    if (e.actor_id) nameNeededIds.add(e.actor_id as string);
+    if (ASSIGNMENT_EVENTS.has(e.event as string)) {
+      const meta = (e.metadata ?? {}) as Record<string, unknown>;
+      // "assigned" events store the target as assignee_id at most call sites,
+      // but as `to` at the campaign-assign route — check both.
+      for (const key of ["assignee_id", "to", "from"]) {
+        const v = meta[key];
+        if (typeof v === "string") nameNeededIds.add(v);
+      }
+    }
   }
-  const profileNames = new Map<string, string>();
-  if (profileIds.size > 0) {
-    const { data: profiles } = await db.from("profiles").select("id, full_name, email").in("id", [...profileIds]);
-    for (const p of profiles ?? []) profileNames.set(p.id as string, (p.full_name || p.email) as string);
+
+  const names = new Map<string, string>();
+  if (nameNeededIds.size > 0) {
+    const { data: profiles } = await db.from("profiles").select("id, full_name, email").in("id", [...nameNeededIds]);
+    for (const p of profiles ?? []) names.set(p.id as string, (p.full_name || p.email) as string);
   }
 
   // Resolve campaign names so the drawer can render them as links.
@@ -59,28 +69,31 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     for (const c of campaigns ?? []) campaignNames.set(c.id as string, c.name as string);
   }
 
-  function preciseDetail(e: { event: string; detail: string | null; metadata: unknown }): string | null {
-    const m = e.metadata as EventMeta;
-    if (e.event === "assigned" && m?.assignee_id) {
-      const name = profileNames.get(m.assignee_id);
-      if (name) return `Assigned to ${name}`;
+  function resolvedDetail(event: string, storedDetail: string | null, metadata: unknown): string {
+    if (!ASSIGNMENT_EVENTS.has(event)) return storedDetail ?? event;
+    const meta = (metadata ?? {}) as Record<string, unknown>;
+    const toId = (meta.assignee_id ?? meta.to) as string | undefined;
+    const fromId = meta.from as string | undefined;
+    const toName = toId ? names.get(toId) : undefined;
+    const fromName = fromId ? names.get(fromId) : undefined;
+
+    if (event === "assigned") return toName ? `Assigned to ${toName}` : (storedDetail ?? event);
+    if (event === "reassigned") {
+      if (toName && fromName) return `Reassigned from ${fromName} to ${toName}`;
+      if (toName) return `Reassigned to ${toName}`;
+      return storedDetail ?? event;
     }
-    if (e.event === "reassigned" && m?.to) {
-      const to = profileNames.get(m.to);
-      const from = m.from ? profileNames.get(m.from) : null;
-      if (to) return from ? `Reassigned from ${from} to ${to}` : `Reassigned to ${to}`;
-    }
-    return e.detail;
+    // unassigned
+    return fromName ? `Returned to the pool (was assigned to ${fromName})` : (storedDetail ?? event);
   }
 
   return ok({
     events: (events ?? []).map((e) => {
-      const m = e.metadata as EventMeta;
-      const campaignId = m?.campaign_id ?? null;
+      const campaignId = (e.metadata as EventMeta)?.campaign_id ?? null;
       return {
         event: e.event,
-        detail: preciseDetail(e),
-        actor_name: e.actor_id ? (profileNames.get(e.actor_id as string) ?? null) : null,
+        detail: resolvedDetail(e.event as string, e.detail, e.metadata),
+        actor_name: e.actor_id ? (names.get(e.actor_id as string) ?? null) : null,
         campaign_id: campaignId,
         campaign_name: campaignId ? (campaignNames.get(campaignId) ?? null) : null,
         created_at: e.created_at,

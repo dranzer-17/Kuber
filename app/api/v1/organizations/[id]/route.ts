@@ -3,6 +3,7 @@ import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchOrgSchema } from "@/lib/validators/organizations";
+import { normalizeDomain } from "@/lib/utils/domain";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -53,9 +54,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const db = createAdminClient();
 
+  // This route previously spread `domain` straight into the update with no
+  // normalization at all — the least-guarded of the four org-domain write
+  // paths (manual "Edit org" form reaches this via PATCH). Route it through
+  // the same hardened normalizeDomain() everything else uses.
+  const updates: Record<string, unknown> = { ...parsed.data, updated_at: new Date().toISOString() };
+  if (parsed.data.domain !== undefined) {
+    updates.domain = normalizeDomain(parsed.data.domain) || null;
+  }
+
   const { data, error } = await db
     .from("organizations")
-    .update({ ...parsed.data, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq("id", id)
     .select()
     .maybeSingle();

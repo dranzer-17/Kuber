@@ -65,3 +65,16 @@ export async function requireManager(request: NextRequest): Promise<AuthedUser> 
   }
   return user;
 }
+
+/** Like requireManager, but 403s unless the caller is also flagged
+ *  is_super_admin — for the handful of routes more sensitive than ordinary
+ *  manager territory (provider API keys). Promotes the inline
+ *  `caller.isSuperAdmin` check already used ad hoc in settings/users/route.ts
+ *  to a reusable guard now that a whole route family needs it. */
+export async function requireSuperAdmin(request: NextRequest): Promise<AuthedUser> {
+  const user = await requireManager(request);
+  if (!user.isSuperAdmin) {
+    throw forbidden("Super admin access required");
+  }
+  return user;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, Paperclip, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,14 @@ const DRAFT_STATUS_STYLE: Record<string, string> = {
   rejected: "bg-red-500/10 text-red-400/70",
 };
 
+/** True when the draft has real subject/body text (ignores empty HTML shells). */
+export function replyDraftHasContent(draft: Pick<ReplyDraft, "subject" | "body"> | null | undefined): boolean {
+  if (!draft) return false;
+  if (draft.subject?.trim()) return true;
+  const text = (draft.body ?? "").replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
+  return text.length > 0;
+}
+
 interface ReplyDraftBoxProps {
   draft: ReplyDraft;
   token: string;
@@ -39,6 +47,7 @@ interface ReplyDraftBoxProps {
 }
 
 export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: ReplyDraftBoxProps) {
+  const [draftId, setDraftId] = useState(draft.id);
   const [status, setStatus] = useState(draft.status);
   const [subject, setSubject] = useState(startBlank ? "" : draft.subject ?? "");
   const [body, setBody] = useState(() => (startBlank ? "" : normalizeReplyBodyHtml(draft.body ?? "")));
@@ -51,6 +60,24 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   const [regenerating, setRegenerating] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Rehydrate when the draft row changes (e.g. after regenerate creates a new
+  // version). Do not depend on subject/body — that would wipe in-progress edits
+  // whenever the parent silently refreshes.
+  useEffect(() => {
+    setDraftId(draft.id);
+    setStatus(draft.status);
+    setError(draft.error);
+    if (replyDraftHasContent(draft)) {
+      setSubject(draft.subject ?? "");
+      setBody(normalizeReplyBodyHtml(draft.body ?? ""));
+      setAiUsed(true);
+    } else if (!startBlank) {
+      setSubject(draft.subject ?? "");
+      setBody(normalizeReplyBodyHtml(draft.body ?? ""));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when draft row identity changes
+  }, [draft.id]);
 
   // Instantly's reply API has no attachment support, so files are shared as a
   // hosted download link appended to the reply body.
@@ -77,9 +104,10 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   async function handleSave() {
     setSaving(true);
     try {
-      const updated = await editReplyDraft(token, draft.id, subject, body);
+      const updated = await editReplyDraft(token, draftId, subject, body);
       setStatus(updated.status);
       toast.success("Reply draft saved");
+      onChanged();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -90,9 +118,10 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   async function handleApprove() {
     setSaving(true);
     try {
-      const updated = await approveReplyDraft(token, draft.id, subject, body);
+      const updated = await approveReplyDraft(token, draftId, subject, body);
       setStatus(updated.status);
       toast.success("Reply approved");
+      onChanged();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -103,7 +132,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   async function handleSend() {
     setSending(true);
     try {
-      await sendReplyDraft(token, draft.id);
+      await sendReplyDraft(token, draftId);
       setStatus("sent");
       toast.success("Reply sent");
       onChanged();
@@ -122,7 +151,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   async function handleReject() {
     setSaving(true);
     try {
-      const updated = await rejectReplyDraft(token, draft.id);
+      const updated = await rejectReplyDraft(token, draftId);
       setStatus(updated.status);
       toast.success("Reply rejected");
       onChanged();
@@ -136,7 +165,8 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
   async function handleRegenerate() {
     setRegenerating(true);
     try {
-      const updated = await regenerateReplyDraft(token, draft.id, regenQuery || undefined);
+      const updated = await regenerateReplyDraft(token, draftId, regenQuery || undefined);
+      setDraftId(updated.id);
       setSubject(updated.subject ?? "");
       setBody(normalizeReplyBodyHtml(updated.body ?? ""));
       setStatus(updated.status);
@@ -145,6 +175,7 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
       setRegenOpen(false);
       setRegenQuery("");
       toast.success(aiUsed ? "Reply regenerated" : "AI reply generated");
+      onChanged();
     } catch (e) {
       toast.error((e as Error).message);
     } finally {

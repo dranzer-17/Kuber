@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { splitQuotedBody, emailPreview } from "@/lib/email-display";
 import type { ReplyDraft, UniboxMessage } from "@/lib/api-client";
 import { sendUniboxReply, regenerateReplyDraft } from "@/lib/api-client";
-import { ReplyDraftBox } from "@/components/app/reply-draft-box";
+import { ReplyDraftBox, replyDraftHasContent } from "@/components/app/reply-draft-box";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -347,14 +347,13 @@ export function UniboxThreadView({
           <div className="pl-0 mt-3">
             {hasDraftReady ? (
               <ReplyDraftBox
-                key={`${latestDraft!.id}-blank`}
+                key={latestDraft!.id}
                 draft={latestDraft!}
                 token={token}
-                startBlank
-                onChanged={() => {
-                  onChanged();
-                  setReplyOpen(false);
-                }}
+                // Prefill whenever the draft already has saved/AI content — same
+                // persistence behavior as Campaign Outbox.
+                startBlank={!replyDraftHasContent(latestDraft)}
+                onChanged={onChanged}
               />
             ) : isGenerating ? (
               <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground py-4">
