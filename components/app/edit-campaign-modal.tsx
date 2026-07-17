@@ -46,10 +46,10 @@ function DayPill({ day, active, onClick, disabled }: { day: string; active: bool
   );
 }
 
-function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+function TimeSelect({ value, onChange, disabled, className }: { value: string; onChange: (v: string) => void; disabled?: boolean; className?: string }) {
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger className="h-9 w-32 tabular-nums">
+      <SelectTrigger className={cn("h-9 w-32 tabular-nums", className)}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="center" className="min-w-32 max-h-56">
@@ -64,14 +64,22 @@ function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v
 /** Shared-settings notice shown on the Options/Sequences forms — a campaign is a
  *  container that can hold leads owned by several employees at once, so these
  *  settings apply to everyone's leads in it, not just the viewer's own. */
-export function SharedSettingsNotice({ readOnly }: { readOnly: boolean }) {
+export function SharedSettingsNotice({ readOnly, className }: { readOnly: boolean; className?: string }) {
+  const Icon = readOnly ? Lock : Info;
   return (
-    <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-600 dark:text-amber-400">
-      {readOnly ? <Lock className="size-4 shrink-0 mt-0.5" /> : <Info className="size-4 shrink-0 mt-0.5" />}
+    <div className={cn("flex items-center gap-2.5 text-[13px] leading-snug text-foreground", className)}>
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15">
+        <Icon className="size-3.5 text-amber-600 dark:text-amber-400" />
+      </span>
       <span>
         {readOnly
           ? "Only managers can edit campaign options. These settings are shared by the whole campaign — every teammate's leads in it send under them."
-          : "Shared campaign settings — changes here apply to every teammate's leads in this campaign, not just your own."}
+          : (
+            <>
+              <span className="font-medium">Shared campaign settings</span>
+              {" — changes here apply to every teammate's leads in this campaign, not just your own."}
+            </>
+          )}
       </span>
     </div>
   );
@@ -198,8 +206,8 @@ export function EditCampaignForm({
           ) : null}
           <div
             className={cn(
-              "flex items-center rounded-lg border border-border bg-secondary/30",
-              isPage ? "w-fit gap-1 px-2 py-1.5" : "w-full flex-1 min-w-0 gap-1.5 px-3 py-2",
+              "flex items-center rounded-lg border border-border bg-secondary/50",
+              isPage ? "w-fit gap-1.5 px-2 py-1.5" : "w-full flex-1 min-w-0 gap-1.5 px-3 py-2",
             )}
           >
             <span className={cn("text-xs text-muted-foreground shrink-0 whitespace-nowrap", !isPage && "w-24")}>
@@ -215,7 +223,7 @@ export function EditCampaignForm({
                 const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
                 setFollowupSteps((prev) => prev.map((s, i) => i === idx ? { ...s, delay: v } : s));
               }}
-              className="h-7 w-12 text-center border-0 bg-transparent p-0 text-sm font-mono font-medium tabular-nums focus-visible:ring-0"
+              className="h-7 w-14 rounded-md border border-border bg-card px-1 py-0 text-center text-sm font-mono font-medium tabular-nums focus-visible:ring-1 focus-visible:ring-offset-0"
             />
             <Select
               value={step.delay_unit}
@@ -274,38 +282,42 @@ export function EditCampaignForm({
   );
 
   if (isPage) {
-    const fieldBlock = "space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm";
+    const fieldBlock = "space-y-2 rounded-xl border border-border bg-card px-5 py-4 shadow-sm";
+    // Fields sit on bg-card blocks — bg-card inputs vanish against them, so
+    // page-variant fields get a secondary fill to read as editable surfaces.
+    const fieldFill = "bg-secondary/70 hover:bg-secondary focus-visible:bg-secondary transition-colors";
 
     return (
       <div className={cn("space-y-6", className)}>
-        <SharedSettingsNotice readOnly={readOnly} />
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch">
           {/* Left: identity & AI */}
-          <div className="space-y-6 lg:col-span-2">
-            <p className="eyebrow -mb-3">Identity &amp; AI</p>
-            <div className={fieldBlock}>
-              <Label className="text-sm font-medium">Sender name</Label>
-              <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
-              <Input value={senderName} disabled={readOnly} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-            </div>
+          <div className="flex flex-col lg:col-span-2">
+            <p className="eyebrow mb-2">Identity &amp; AI</p>
+            <div className="flex flex-1 flex-col gap-6">
+              <div className={fieldBlock}>
+                <Label className="text-sm font-medium">Sender name</Label>
+                <p className="text-xs text-muted-foreground">Shown as the &quot;from&quot; name on outgoing emails</p>
+                <Input value={senderName} disabled={readOnly} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" className={fieldFill} />
+              </div>
 
-            <div className={cn(fieldBlock, "flex flex-1 flex-col")}>
-              <Label className="text-sm font-medium">Additional context for AI</Label>
-              <p className="text-xs text-muted-foreground">Extra guidance the AI uses when writing emails</p>
-              <Textarea
-                value={aiPromptContext}
-                disabled={readOnly}
-                onChange={(e) => setAiPromptContext(e.target.value)}
-                placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
-                className="bg-background flex-1 min-h-32 resize-none"
-              />
+              <div className={cn(fieldBlock, "flex flex-1 flex-col")}>
+                <Label className="text-sm font-medium">Additional context for AI</Label>
+                <p className="text-xs text-muted-foreground">Extra guidance the AI uses when writing emails</p>
+                <Textarea
+                  value={aiPromptContext}
+                  disabled={readOnly}
+                  onChange={(e) => setAiPromptContext(e.target.value)}
+                  placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle."
+                  className={cn("flex-1 min-h-32 resize-none", fieldFill)}
+                />
+              </div>
             </div>
           </div>
 
           {/* Right: schedule & limits — one compact card, no dead space */}
-          <div className="lg:col-span-3">
+          <div className="flex flex-col lg:col-span-3">
           <p className="eyebrow mb-2">Schedule &amp; limits</p>
-          <div className="flex flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="flex flex-1 flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 divide-y divide-border sm:divide-y-0 border-b border-border">
               <div className="flex flex-col justify-center gap-3 px-5 py-4 sm:border-r border-border">
                 <div className="flex items-center gap-2.5">
@@ -322,7 +334,7 @@ export function EditCampaignForm({
                   value={dailyLimit}
                   disabled={readOnly}
                   onChange={(e) => setDailyLimit(Math.max(1, Math.min(500, Number(e.target.value))))}
-                  className="h-9 w-24 text-center font-mono tabular-nums"
+                  className={cn("h-9 w-24 text-center font-mono tabular-nums", fieldFill)}
                 />
               </div>
 
@@ -335,9 +347,9 @@ export function EditCampaignForm({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <TimeSelect value={windowFrom} onChange={setWindowFrom} disabled={readOnly} />
+                  <TimeSelect value={windowFrom} onChange={setWindowFrom} disabled={readOnly} className={fieldFill} />
                   <span className="text-xs text-muted-foreground">to</span>
-                  <TimeSelect value={windowTo} onChange={setWindowTo} disabled={readOnly} />
+                  <TimeSelect value={windowTo} onChange={setWindowTo} disabled={readOnly} className={fieldFill} />
                 </div>
               </div>
             </div>
@@ -350,7 +362,7 @@ export function EditCampaignForm({
                   <p className="text-xs text-muted-foreground mt-1">Days emails will be sent</p>
                 </div>
               </div>
-              <div className="flex items-center justify-center flex-wrap gap-3">
+              <div className="flex items-center flex-wrap gap-2">
                 {DAYS.map((day) => (
                   <DayPill
                     key={day}
@@ -367,39 +379,36 @@ export function EditCampaignForm({
         </div>
 
         {/* Full width: follow-up schedule */}
-        <div>
-          <p className="eyebrow mb-2">Follow-up schedule</p>
-          <div className={cn(fieldBlock, "space-y-3")}>
+        <div className={cn(fieldBlock, "space-y-3")}>
+          <div className="flex items-center gap-2.5">
+            <Clock className="size-4 text-muted-foreground shrink-0" />
             <div>
-              <div className="flex items-center gap-2">
-                <Clock className="size-4 text-muted-foreground shrink-0" />
-                <Label className="text-sm font-medium">Follow-up schedule</Label>
-              </div>
+              <p className="text-sm font-medium leading-none">Follow-up schedule</p>
               <p className="text-xs text-muted-foreground mt-1">Wait time after the previous email before each follow-up sends</p>
             </div>
-            {followupList}
           </div>
+          {followupList}
         </div>
 
-        {!readOnly && (
-          <div className="flex justify-end">
-            <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
+        {/* Footer: shared-settings note on the left balances the Save button */}
+        <div className="flex flex-col gap-4 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <SharedSettingsNotice readOnly={readOnly} className="max-w-2xl" />
+          {!readOnly && (
+            <Button disabled={saving} onClick={() => void handleSave()} className="shrink-0 gap-1.5 self-end sm:self-auto">
               {saving ? (
                 <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
               ) : (
                 <>Save changes <ChevronRight className="size-3.5" /></>
               )}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div className={cn("space-y-6", className)}>
-      <SharedSettingsNotice readOnly={readOnly} />
-
       <div className="space-y-1.5">
         <Label className="text-sm font-medium">Sender name</Label>
         <Input value={senderName} disabled={readOnly} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
@@ -509,17 +518,18 @@ export function EditCampaignForm({
         </div>
       </div>
 
-      {!readOnly && (
-        <div className="flex justify-end">
-          <Button disabled={saving} onClick={() => void handleSave()} className="gap-1.5">
+      <div className="flex flex-col gap-4 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <SharedSettingsNotice readOnly={readOnly} />
+        {!readOnly && (
+          <Button disabled={saving} onClick={() => void handleSave()} className="shrink-0 gap-1.5 self-end sm:self-auto">
             {saving ? (
               <><Loader2 className="size-3.5 animate-spin" /> Saving…</>
             ) : (
               <>Save changes <ChevronRight className="size-3.5" /></>
             )}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

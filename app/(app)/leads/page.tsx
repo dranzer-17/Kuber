@@ -139,7 +139,7 @@ const COLUMN_DEFS = [
   { key: "status",      label: "Status",       defaultVisible: true  },
   { key: "assigned",    label: "Assigned",     defaultVisible: true  },
   { key: "source",      label: "Source",       defaultVisible: false },
-  { key: "added",       label: "Added",        defaultVisible: true  },
+  { key: "added",       label: "Created",      defaultVisible: true  },
   { key: "organization",label: "Organization", defaultVisible: true  },
   { key: "phone",       label: "Phone",        defaultVisible: false },
   { key: "country",     label: "Country",      defaultVisible: false },
@@ -578,6 +578,10 @@ export default function LeadsPage() {
     role,
     loadLeads,
     loadingLeads,
+    leadsTotal,
+    loadMoreLeads,
+    loadingMoreLeads,
+    searchLeads,
     checkedIds,
     setCheckedIds,
     setSelectedLead,
@@ -599,6 +603,8 @@ export default function LeadsPage() {
   );
   const [visibleCols,     setVisibleCols    ] = useState<ColVisibility>(DEFAULT_VISIBILITY);
   const [searchQuery,     setSearchQuery    ] = useState(searchParams.get("q") ?? "");
+  const [searchResults,   setSearchResults  ] = useState<Lead[] | null>(null);
+  const [searchLoading,   setSearchLoading  ] = useState(false);
   const [leadsSort,       setLeadsSort      ] = useState<LeadsSort>(
     (searchParams.get("sort") as LeadsSort) || "newest"
   );
@@ -704,41 +710,51 @@ export default function LeadsPage() {
       .catch(() => {});
   }, [session, leads]);
 
-  const filteredLeads = sortLeads(
-    leads.filter((l) => {
-      if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
-      if (filters.assignees.size > 0) {
-        const matchesAssignee = [...filters.assignees].some((v) =>
-          v === UNASSIGNED_FILTER_VALUE ? !l.assignedTo : l.assignedTo === v
-        );
-        if (!matchesAssignee) return false;
-      }
-      if (filters.sources.size  > 0 && !filters.sources.has(l.source)) return false;
-      if (filters.batchLabels.size > 0 && !filters.batchLabels.has(l.batchLabel ?? "")) return false;
-      if (filters.createdFrom) {
-        const leadDate = new Date(l.createdAt);
-        leadDate.setHours(0, 0, 0, 0);
-        if (leadDate < filters.createdFrom) return false;
-      }
-      if (filters.createdTo) {
-        const to = new Date(filters.createdTo);
-        to.setHours(23, 59, 59, 999);
-        if (new Date(l.createdAt) > to) return false;
-      }
-      return true;
-    }),
-    leadsSort,
-  );
+  // Search runs against the whole DB, not just whatever's currently paged
+  // into `leads` — a lead further back than the loaded window would
+  // otherwise never be findable. Debounced so we're not hitting the API on
+  // every keystroke.
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) { setSearchResults(null); setSearchLoading(false); return; }
+    if (!session) return;
+    setSearchLoading(true);
+    const handle = setTimeout(() => {
+      searchLeads(session.access_token, trimmed)
+        .then((res) => setSearchResults(res.leads))
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchQuery, session, searchLeads]);
 
-  const q = searchQuery.trim().toLowerCase();
-  const displayLeads = q
-    ? sortLeads(
-        filteredLeads.filter((l) =>
-          `${l.firstName} ${l.lastName} ${l.email} ${l.company} ${l.jobTitle}`.toLowerCase().includes(q)
-        ),
-        leadsSort,
-      )
-    : filteredLeads;
+  const matchesFilters = (l: Lead) => {
+    if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
+    if (filters.assignees.size > 0) {
+      const matchesAssignee = [...filters.assignees].some((v) =>
+        v === UNASSIGNED_FILTER_VALUE ? !l.assignedTo : l.assignedTo === v
+      );
+      if (!matchesAssignee) return false;
+    }
+    if (filters.sources.size  > 0 && !filters.sources.has(l.source)) return false;
+    if (filters.batchLabels.size > 0 && !filters.batchLabels.has(l.batchLabel ?? "")) return false;
+    if (filters.createdFrom) {
+      const leadDate = new Date(l.createdAt);
+      leadDate.setHours(0, 0, 0, 0);
+      if (leadDate < filters.createdFrom) return false;
+    }
+    if (filters.createdTo) {
+      const to = new Date(filters.createdTo);
+      to.setHours(23, 59, 59, 999);
+      if (new Date(l.createdAt) > to) return false;
+    }
+    return true;
+  };
+
+  // A search query runs against the whole DB (searchResults), not just the
+  // leads currently paged into the client — see searchLeads in app-context.
+  const q = searchQuery.trim();
+  const displayLeads = sortLeads((q ? (searchResults ?? []) : leads).filter(matchesFilters), leadsSort);
 
   const totalPages = Math.max(1, Math.ceil(displayLeads.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -918,8 +934,8 @@ export default function LeadsPage() {
       )}
 
       {/* ── Content ── */}
-      <div className="flex-1 overflow-auto px-8 py-5">
-        {loadingLeads ? (
+      <div className="flex-1 overflow-auto px-4 py-5">
+        {loadingLeads || (q && searchLoading) ? (
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="divide-y divide-border animate-pulse">
               <div className="flex items-center gap-4 px-4 py-3">
@@ -1019,15 +1035,31 @@ export default function LeadsPage() {
             </div>
           );
         })() : leadsViewMode === "kanban" ? (
-          <KanbanBoard
-            leads={leads}
-            onCardClick={(lead) => setSelectedLead(lead)}
-            onRetryAllFailed={role === "manager" ? handleRetryAllFailed : undefined}
-            retryingAll={retryingAll}
-          />
+          <>
+            <KanbanBoard
+              leads={leads}
+              onCardClick={(lead) => setSelectedLead(lead)}
+              onRetryAllFailed={role === "manager" ? handleRetryAllFailed : undefined}
+              retryingAll={retryingAll}
+            />
+            {leadsTotal !== null && leads.length < leadsTotal && (
+              <div className="flex flex-col items-center gap-1 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => session && loadMoreLeads(session.access_token)}
+                  disabled={loadingMoreLeads}
+                  className="text-xs"
+                >
+                  {loadingMoreLeads ? "Loading…" : `Show more (${leads.length} of ${leadsTotal})`}
+                </Button>
+              </div>
+            )}
+          </>
         ) : (
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-            <Table>
+            {/* Compact cells so all columns (incl. Created) fit without clipping */}
+            <Table className="[&_th]:px-3 [&_td]:px-3 [&_td]:py-3">
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="w-10 pl-4">
@@ -1054,7 +1086,7 @@ export default function LeadsPage() {
                   {visibleCols.country   && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Country</TableHead>}
                   {visibleCols.campaign  && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Campaign</TableHead>}
                   {visibleCols.batch     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Batch</TableHead>}
-                  {visibleCols.added     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Added</TableHead>}
+                  {visibleCols.added     && <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Created</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1104,7 +1136,7 @@ export default function LeadsPage() {
                           </div>
                         </TableCell>
                         {visibleCols.organization && <TableCell><span className="text-sm">{lead.company || "—"}</span></TableCell>}
-                        {visibleCols.email     && <TableCell><span className="font-mono text-xs text-muted-foreground">{lead.email}</span></TableCell>}
+                        {visibleCols.email     && <TableCell><span className="font-mono text-xs text-muted-foreground block max-w-[190px] truncate" title={lead.email}>{lead.email}</span></TableCell>}
                         {visibleCols.phone     && <TableCell><span className="font-mono text-xs text-muted-foreground">{lead.phone || "—"}</span></TableCell>}
                         {visibleCols.job_title && <TableCell><span className="text-sm">{lead.jobTitle}</span></TableCell>}
                         {visibleCols.status    && <TableCell><StatusBadge status={lead.status} /></TableCell>}
@@ -1152,7 +1184,7 @@ export default function LeadsPage() {
                             })() : <span className="text-xs text-muted-foreground">—</span>}
                           </TableCell>
                         )}
-                        {visibleCols.added     && <TableCell><span className="font-mono text-xs text-muted-foreground tabular-nums">{lead.createdAt.slice(0, 10)}</span></TableCell>}
+                        {visibleCols.added     && <TableCell><span className="font-mono text-xs text-muted-foreground tabular-nums whitespace-nowrap">{new Date(lead.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</span></TableCell>}
                       </TableRow>
                     );
                   })

@@ -9,11 +9,13 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { emailPreview } from "@/lib/email-display";
+import { formatChatDate, formatChatTime, startsNewChatDay } from "@/lib/chat-format";
+import { emailPreview, splitQuotedBody } from "@/lib/email-display";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { SearchInput } from "@/components/ui/search-input";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { AppCheckbox } from "@/components/ui/app-checkbox";
@@ -45,7 +47,10 @@ import {
   uploadCampaignLeadAttachment,
   removeCampaignLeadAttachment,
   patchCampaignConfig,
+  fetchCampaignComments,
+  postCampaignComment,
   type CampaignReplyThread,
+  type CampaignComment,
   type ReplyDraft,
 } from "@/lib/api-client";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
@@ -222,7 +227,7 @@ function getSidebarBadge(cl: CampaignLead, isGenerating: boolean): string {
   return "—";
 }
 
-type CampaignViewTab = "analytics" | "leads" | "outbox" | "sequences" | "options";
+type CampaignViewTab = "analytics" | "leads" | "outbox" | "sequences" | "options" | "discussion";
 
 function DraftStatusBadge({
   label,
@@ -248,6 +253,36 @@ function DraftStatusBadge({
 }
 
 /** Gmail/Unibox-style expandable message row — collapsed shows sender + snippet + date, expanded shows the full body. */
+function OutboxQuotedBlock({ quoted, isHtml }: { quoted: string; isHtml: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 pt-2 border-t border-border/50">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((o) => !o)}
+        className="h-auto px-0 py-0 gap-1 text-[11px] font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
+      >
+        <span className="tracking-widest">⋯</span>
+        {open ? "Hide quoted text" : "Show quoted text"}
+      </Button>
+      {open && (
+        <div className="mt-2 pl-3 border-l-2 border-muted-foreground/30 text-muted-foreground/90 text-xs leading-relaxed">
+          {isHtml ? (
+            <div
+              className="[&_p]:mb-1.5 [&_blockquote]:opacity-80"
+              dangerouslySetInnerHTML={{ __html: quoted }}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap">{quoted}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OutboxMessageRow({
   senderName,
   toLabel,
@@ -266,6 +301,8 @@ function OutboxMessageRow({
   onToggle: () => void;
 }) {
   const snippet = emailPreview(bodyText, bodyHtml, 100);
+  const { main, quoted } = splitQuotedBody(bodyHtml, bodyText);
+  const isHtml = !!bodyHtml;
 
   if (!expanded) {
     return (
@@ -311,16 +348,19 @@ function OutboxMessageRow({
         )}
       </Button>
       <div className="px-4 pb-4 pl-[52px] text-sm">
-        {bodyHtml ? (
-          <div
-            className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
-            dangerouslySetInnerHTML={{ __html: bodyHtml }}
-          />
-        ) : bodyText ? (
-          <p className="whitespace-pre-wrap">{bodyText}</p>
+        {main ? (
+          isHtml ? (
+            <div
+              className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
+              dangerouslySetInnerHTML={{ __html: main }}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap">{main}</p>
+          )
         ) : (
           <p className="text-muted-foreground italic">(empty message)</p>
         )}
+        {quoted && <OutboxQuotedBlock quoted={quoted} isHtml={isHtml} />}
       </div>
     </div>
   );
@@ -388,6 +428,12 @@ export function CampaignDetail({
   const [seqRegenQuery, setSeqRegenQuery] = useState("");
   const [seqRegenerating, setSeqRegenerating] = useState(false);
   const [seqStepSaving, setSeqStepSaving] = useState(false);
+  const [comments, setComments] = useState<CampaignComment[]>([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [sendingComment, setSendingComment] = useState(false);
+  const commentsEndRef = useRef<HTMLDivElement | null>(null);
+  const activeCampaignIdRef = useRef(campaign.id);
 
   const [systemPromptUpdatedAt, setSystemPromptUpdatedAt] = useState<string | null>(null);
 
@@ -409,6 +455,61 @@ export function CampaignDetail({
   // only managers may edit them; an employee editing here would silently change
   // what every other teammate's leads in the same campaign send under.
   const isManager = role === "manager";
+
+  const loadComments = useCallback(async (campaignId: string, quiet = false) => {
+    if (!appSession?.access_token) return;
+    if (!quiet) setLoadingComments(true);
+    try {
+      const next = await fetchCampaignComments(appSession.access_token, campaignId);
+      if (activeCampaignIdRef.current !== campaignId) return;
+      setComments((current) => {
+        if (!quiet) return next;
+        const byId = new Map(current.map((comment) => [comment.id, comment]));
+        for (const comment of next) byId.set(comment.id, comment);
+        return [...byId.values()].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
+      });
+    } catch (loadError) {
+      if (!quiet) toast.error((loadError as Error).message || "Could not load the discussion");
+    } finally {
+      if (!quiet && activeCampaignIdRef.current === campaignId) setLoadingComments(false);
+    }
+  }, [appSession?.access_token]);
+
+  async function handleSendComment() {
+    if (!appSession?.access_token || sendingComment || !commentBody.trim()) return;
+    const body = commentBody.trim();
+    setSendingComment(true);
+    try {
+      const comment = await postCampaignComment(appSession.access_token, campaign.id, body);
+      setComments((current) => [...current, comment]);
+      setCommentBody("");
+    } catch (sendError) {
+      toast.error((sendError as Error).message || "Could not send the message");
+    } finally {
+      setSendingComment(false);
+    }
+  }
+
+  useEffect(() => {
+    activeCampaignIdRef.current = campaign.id;
+    setComments([]);
+    setCommentBody("");
+    void loadComments(campaign.id, true);
+  }, [campaign.id, loadComments]);
+
+  useEffect(() => {
+    if (viewTab !== "discussion") return;
+    void loadComments(campaign.id);
+    const interval = window.setInterval(() => void loadComments(campaign.id, true), 10000);
+    return () => window.clearInterval(interval);
+  }, [campaign.id, viewTab, loadComments]);
+
+  useEffect(() => {
+    if (viewTab !== "discussion") return;
+    commentsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [comments, viewTab]);
 
   useEffect(() => {
     setCampaignName(campaign.name);
@@ -481,6 +582,45 @@ export function CampaignDetail({
     const { threads: t } = await fetchCampaignReplies(session.access_token, campaign.id);
     setThreads(t);
   }, [campaign.id]);
+
+  const runSyncReplies = useCallback(async (opts?: { silent?: boolean }) => {
+    const now = Date.now();
+    syncHitTimesRef.current = syncHitTimesRef.current.filter(
+      (t) => now - t < SYNC_RATE_WINDOW_MS,
+    );
+    if (syncHitTimesRef.current.length >= SYNC_RATE_LIMIT) {
+      if (!opts?.silent) toast.warning("Please wait a few seconds before trying again.");
+      return;
+    }
+    syncHitTimesRef.current.push(now);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    setSyncingReplies(true);
+    try {
+      const result = await syncCampaignReplies(session.access_token, campaign.id);
+      await Promise.all([loadReplies(), loadData()]);
+      if (!opts?.silent) {
+        if (result.backfilled > 0) {
+          toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
+        } else {
+          toast.success("Replies are up to date");
+        }
+      }
+    } catch (e) {
+      if (!opts?.silent) toast.error((e as Error).message);
+    } finally {
+      setSyncingReplies(false);
+    }
+  }, [campaign.id, loadData, loadReplies]);
+
+  // Pull missed Instantly replies when opening Outbox — webhooks often miss in local/ngrok.
+  useEffect(() => {
+    if (viewTab !== "outbox") return;
+    void runSyncReplies({ silent: true });
+    // intentionally only when switching into Outbox
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewTab, campaign.id]);
 
   useEffect(() => {
     setOutboxReplyOpen(false);
@@ -1076,14 +1216,16 @@ export function CampaignDetail({
         bodyHtml: null,
         bodyText: stripQuotedLines(msg.reply_body) ?? "",
       });
-      const latestDraft = msg.reply_drafts[msg.reply_drafts.length - 1] ?? null;
-      if (latestDraft?.status === "sent") {
+      // Show every sent reply — not only the latest draft. A newer draft/regen
+      // must not hide earlier outbound mail from the thread.
+      for (const draft of msg.reply_drafts) {
+        if (draft.status !== "sent") continue;
         outboxMessageItems.push({
-          id: latestDraft.id,
+          id: draft.id,
           sender: "You",
           to: outboxReplyName,
-          timestamp: latestDraft.sent_at,
-          bodyHtml: latestDraft.body,
+          timestamp: draft.sent_at,
+          bodyHtml: draft.body,
           bodyText: null,
         });
       }
@@ -1204,6 +1346,7 @@ export function CampaignDetail({
     { value: "outbox" as const,    label: "Outbox",    icon: Send,   count: outboxActionableCount || undefined },
     { value: "sequences" as const, label: "Sequences", icon: Layers },
     { value: "options" as const,   label: "Options",   icon: Gauge },
+    { value: "discussion" as const, label: "Discussion", icon: MessageSquare, count: comments.length },
   ];
 
   // Computed for sequences tab (follow-up steps only)
@@ -1314,43 +1457,18 @@ export function CampaignDetail({
         )}
       </div>
 
-      {/* ── Section rail + content — two-pane layout replacing the old top tab bar ── */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
-        {/* ── Section navigation rail ─────────────────────────────────────── */}
-        <nav className="w-44 shrink-0 border-r border-border bg-card/40 flex flex-col gap-0.5 p-2 overflow-y-auto">
-          {campaignTabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = viewTab === tab.value;
-            return (
-              <Button
-                key={tab.value}
-                type="button"
-                variant="ghost"
-                onClick={() => setViewTab(tab.value)}
-                className={cn(
-                  "h-auto w-full justify-start gap-2.5 rounded-lg px-3 py-2 text-sm font-medium",
-                  active
-                    ? "swatch-bar bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary"
-                    : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
-                )}
-              >
-                <Icon className="size-4 shrink-0" />
-                <span className="flex-1 text-left">{tab.label}</span>
-                {typeof tab.count === "number" && tab.count > 0 && (
-                  <span className={cn(
-                    "font-mono text-[10px] font-semibold tabular-nums rounded-full px-1.5 py-0.5 shrink-0",
-                    active ? "bg-primary/20 text-primary" : "bg-secondary text-muted-foreground",
-                  )}>
-                    {tab.count}
-                  </span>
-                )}
-              </Button>
-            );
-          })}
-        </nav>
+      {/* ── Section tabs — horizontal, directly under the campaign name ── */}
+      <div className="shrink-0 border-b border-border px-6 pt-5 pb-3">
+        <SegmentedTabs
+          value={viewTab}
+          onValueChange={setViewTab}
+          size="lg"
+          options={campaignTabs}
+        />
+      </div>
 
-        {/* ── Section content ──────────────────────────────────────────────── */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* ── Section content ──────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
 
       {/* ── Analytics ─────────────────────────────────────────────────────── */}
       {viewTab === "analytics" && (
@@ -1763,34 +1881,7 @@ export function CampaignDetail({
                   size="icon"
                   disabled={syncingReplies}
                   title="Sync replies"
-                  onClick={async () => {
-                    const now = Date.now();
-                    syncHitTimesRef.current = syncHitTimesRef.current.filter(
-                      (t) => now - t < SYNC_RATE_WINDOW_MS,
-                    );
-                    if (syncHitTimesRef.current.length >= SYNC_RATE_LIMIT) {
-                      toast.warning("Please wait a few seconds before trying again.");
-                      return;
-                    }
-                    syncHitTimesRef.current.push(now);
-
-                    const { data: { session } } = await supabase.auth.getSession();
-                    if (!session) return;
-                    setSyncingReplies(true);
-                    try {
-                      const result = await syncCampaignReplies(session.access_token, campaign.id);
-                      await loadReplies();
-                      if (result.backfilled > 0) {
-                        toast.success(`Synced ${result.backfilled} missed repl${result.backfilled === 1 ? "y" : "ies"} from Instantly`);
-                      } else {
-                        toast.success("Replies are up to date");
-                      }
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    } finally {
-                      setSyncingReplies(false);
-                    }
-                  }}
+                  onClick={() => void runSyncReplies()}
                   className="size-7 shrink-0 bg-secondary/30 text-muted-foreground hover:text-primary disabled:opacity-50"
                 >
                   <RefreshCw className={cn("size-3", syncingReplies && "animate-spin")} />
@@ -2267,7 +2358,10 @@ export function CampaignDetail({
                               key={`${latestDraft!.id}-${outboxReplyStartBlank}`}
                               draft={latestDraft!}
                               token={appSession?.access_token ?? ""}
-                              onChanged={() => void loadReplies()}
+                              onChanged={() => {
+                                setOutboxReplyOpen(false);
+                                void loadReplies();
+                              }}
                               startBlank={outboxReplyStartBlank}
                             />
                           ) : isGenerating ? (
@@ -2348,8 +2442,6 @@ export function CampaignDetail({
               </div>
             ) : (
               <div className="max-w-2xl mx-auto space-y-4">
-                <SharedSettingsNotice readOnly={!isManager} />
-
                 {/* Header */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -2445,6 +2537,10 @@ export function CampaignDetail({
                     </p>
                   </div>
                 )}
+
+                <div className="border-t border-border pt-4">
+                  <SharedSettingsNotice readOnly={!isManager} />
+                </div>
               </div>
             )}
           </div>
@@ -2465,7 +2561,116 @@ export function CampaignDetail({
         </div>
       )}
 
+      {/* ── Discussion ────────────────────────────────────────────────────── */}
+      {viewTab === "discussion" && (
+        <div className="flex-1 min-h-0 flex flex-col bg-secondary/20">
+          <div className="flex-1 overflow-y-auto">
+            <div className="w-full max-w-3xl mx-auto px-6 py-6">
+              {loadingComments ? (
+                <div className="min-h-[320px] flex items-center justify-center text-muted-foreground">
+                  <Loader2 className="size-5 animate-spin" />
+                </div>
+              ) : comments.length === 0 ? (
+                <div className="min-h-[320px] flex flex-col items-center justify-center text-center px-5">
+                  <div className="size-11 rounded-full border border-border bg-card flex items-center justify-center text-primary mb-3">
+                    <MessageSquare className="size-5" />
+                  </div>
+                  <p className="text-sm font-semibold">Start the campaign discussion</p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-sm leading-relaxed">
+                    Notes here are visible to managers and employees who can access this campaign.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {comments.map((comment, index) => {
+                    const own = comment.author_id === appSession?.user.id;
+                    const showDate = startsNewChatDay(
+                      comment.created_at,
+                      comments[index - 1]?.created_at,
+                    );
+                    return (
+                      <div key={comment.id} className="space-y-3">
+                        {showDate && (
+                          <div className="flex items-center justify-center py-1">
+                            <span className="rounded-full border border-border bg-card px-3 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
+                              {formatChatDate(comment.created_at)}
+                            </span>
+                          </div>
+                        )}
+                        <div className={cn("flex gap-3", own && "flex-row-reverse")}>
+                          <Avatar name={comment.author_name} size="sm" />
+                          <div className={cn("min-w-0 max-w-[72%]", own && "text-right")}>
+                            <div className={cn(
+                              "mb-1 flex items-baseline",
+                              own && "justify-end",
+                            )}>
+                              <span className="text-[11px] font-semibold truncate">
+                                {own ? "You" : comment.author_name}
+                              </span>
+                            </div>
+                            <div className={cn(
+                              "inline-flex max-w-full flex-col rounded-xl px-3.5 py-2.5 text-left text-sm leading-relaxed",
+                              own
+                                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                                : "bg-card border border-border text-foreground rounded-tl-sm",
+                            )}>
+                              <span className="whitespace-pre-wrap wrap-break-word">{comment.body}</span>
+                              <span className={cn(
+                                "mt-1 self-end whitespace-nowrap text-[10px] leading-none",
+                                own ? "text-primary-foreground/75" : "text-muted-foreground",
+                              )}>
+                                {formatChatTime(comment.created_at)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={commentsEndRef} />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="shrink-0 border-t border-border bg-card">
+            <div className="w-full max-w-3xl mx-auto px-6 py-4">
+              <Textarea
+                value={commentBody}
+                onChange={(event) => setCommentBody(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
+                    void handleSendComment();
+                  }
+                }}
+                maxLength={2000}
+                rows={3}
+                placeholder="Write a message to the campaign team…"
+                className="min-h-[76px] resize-none bg-background text-sm"
+              />
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <span className="text-[10px] text-muted-foreground">
+                  Ctrl/⌘ + Enter to send
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleSendComment()}
+                  disabled={!commentBody.trim() || sendingComment}
+                  className="h-8 gap-1.5 px-3 text-xs"
+                >
+                  {sendingComment
+                    ? <Loader2 className="size-3 animate-spin" />
+                    : <Send className="size-3" />}
+                  Send
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
+      )}
+
       </div>
 
       {/* ── Shared modals ─────────────────────────────────────────────────── */}

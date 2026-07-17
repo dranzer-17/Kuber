@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Switch } from "@/components/ui/switch";
+import { Stepper } from "@/components/ui/stepper";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads";
 import { isCampaignEligible, CAMPAIGN_ACTION_HELP, getMostCommonCountry } from "@/lib/leads";
@@ -81,6 +82,13 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   return { value, label };
 });
 
+/** Inputs default to bg-card, which is also the Dialog surface — fields placed
+ *  directly on the modal would camouflage. This fill keeps them visibly
+ *  editable: gray on the white modal in light mode, lighter gray in dark mode.
+ *  (Inputs nested inside bg-secondary/30 section cards keep the default
+ *  bg-card fill, which already stands out there.) */
+const FIELD_FILL = "bg-secondary/70 hover:bg-secondary focus-visible:bg-secondary transition-colors";
+
 function TimeSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
     <Select value={value} onValueChange={onChange}>
@@ -128,6 +136,16 @@ export function CreateCampaignModal({
   ]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  const STEPS = ["Identity", "AI & Review", "Schedule", "Follow-ups", "Attachment"];
+  const [step, setStep] = useState(0);
+
+  function goNext() {
+    if (step === 0 && !name.trim()) { setError("Campaign name is required."); return; }
+    setError("");
+    setStep((s) => Math.min(s + 1, STEPS.length - 1));
+  }
+  function goBack() { setError(""); setStep((s) => Math.max(s - 1, 0)); }
 
   const [employees, setEmployees] = useState<Profile[]>([]);
   const [assignTo, setAssignTo] = useState("");
@@ -211,6 +229,7 @@ export function CreateCampaignModal({
     setCreating(false); setError("");
     setAttachment(null); setUploading(false); setUploadError("");
     setAssignTo("");
+    setStep(0);
   }
 
   function handleClose() { reset(); onClose(); }
@@ -300,20 +319,21 @@ export function CreateCampaignModal({
           <DialogTitle className="font-display text-xl">Configure campaign</DialogTitle>
         </DialogHeader>
 
-        <div className="max-h-[68vh] space-y-6 overflow-y-auto px-6 py-5">
-          <div>
-            <p className="eyebrow mb-2">Identity</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium">
-                  Campaign name <span className="text-destructive">*</span>
-                </Label>
-                <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Plastics Outreach" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-sm font-medium">Sender name</Label>
-                <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" />
-              </div>
+        <div className="max-h-[68vh] min-h-96 space-y-6 overflow-y-auto px-6 py-5">
+          <Stepper steps={STEPS} current={step} className="pb-4 border-b border-border" />
+
+          {/* ── Step 1: Identity ─────────────────────────────────────────── */}
+          {step === 0 && (<>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">
+                Campaign name <span className="text-destructive">*</span>
+              </Label>
+              <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Plastics Outreach" className={FIELD_FILL} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Sender name</Label>
+              <Input value={senderName} onChange={(e) => setSenderName(e.target.value)} placeholder="Kuber Polyplast" className={FIELD_FILL} />
             </div>
           </div>
 
@@ -321,7 +341,7 @@ export function CreateCampaignModal({
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">Assign entire campaign to (optional)</Label>
               <Select value={assignTo || "keep"} onValueChange={(v) => setAssignTo(v === "keep" ? "" : v)}>
-                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                <SelectTrigger className={FIELD_FILL}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="keep">Keep current lead owners</SelectItem>
                   {employees.map((e) => (
@@ -338,7 +358,10 @@ export function CreateCampaignModal({
               </p>
             </div>
           )}
+          </>)}
 
+          {/* ── Step 2: AI & Review ──────────────────────────────────────── */}
+          {step === 1 && (<>
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">Additional context for AI</Label>
             <Textarea
@@ -346,6 +369,7 @@ export function CreateCampaignModal({
               onChange={(e) => setAiPromptContext(e.target.value)}
               placeholder="e.g. Mention our new biodegradable masterbatch line. Focus on sustainability angle. Avoid mentioning pricing."
               rows={3}
+              className={FIELD_FILL}
             />
           </div>
 
@@ -361,10 +385,11 @@ export function CreateCampaignModal({
               <Switch checked={humanInLoop} onCheckedChange={setHumanInLoop} />
             </div>
           </div>
+          </>)}
 
-          <div>
-            <p className="eyebrow mb-2">Schedule</p>
-            <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden divide-y divide-border">
+          {/* ── Step 3: Schedule ─────────────────────────────────────────── */}
+          {step === 2 && (
+          <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden divide-y divide-border">
               <div className="flex items-center justify-between gap-4 px-5 py-4">
                 <div className="flex items-center gap-2.5">
                   <Clock className="size-4 text-muted-foreground shrink-0" />
@@ -450,7 +475,12 @@ export function CreateCampaignModal({
                 ))}
               </div>
             </div>
+          </div>
+          )}
 
+          {/* ── Step 4: Follow-ups ───────────────────────────────────────── */}
+          {step === 3 && (
+          <div className="rounded-lg border border-border bg-secondary/30 shadow-sm overflow-hidden">
             <div className="px-5 py-4 space-y-3">
               <div className="flex items-center gap-2.5">
                 <Clock className="size-4 text-muted-foreground shrink-0" />
@@ -460,22 +490,22 @@ export function CreateCampaignModal({
                 </div>
               </div>
               <div className="space-y-2">
-                {followupSteps.map((step, idx) => (
-                  <div key={idx} className="flex items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2">
+                {followupSteps.map((fu, idx) => (
+                  <div key={idx} className="flex items-center gap-2 rounded-lg border border-border bg-secondary/50 px-3 py-2">
                     <span className="text-xs text-muted-foreground shrink-0 w-24">Follow-up {idx + 1} after</span>
                     <Input
                       type="number"
                       min={1}
                       max={365}
-                      value={step.delay}
+                      value={fu.delay}
                       onChange={(e) => {
                         const v = Math.max(1, Math.min(365, Number(e.target.value) || 1));
                         setFollowupSteps((prev) => prev.map((s, i) => (i === idx ? { ...s, delay: v } : s)));
                       }}
-                      className="h-7 w-16 text-center border-0 bg-transparent p-0 text-sm font-mono font-medium tabular-nums focus-visible:ring-0"
+                      className="h-7 w-14 rounded-md border border-border bg-card px-1 py-0 text-center text-sm font-mono font-medium tabular-nums focus-visible:ring-1 focus-visible:ring-offset-0"
                     />
                     <Select
-                      value={step.delay_unit}
+                      value={fu.delay_unit}
                       onValueChange={(unit) =>
                         setFollowupSteps((prev) =>
                           prev.map((s, i) => (i === idx ? { ...s, delay_unit: unit as "minutes" | "hours" | "days" } : s)),
@@ -523,12 +553,12 @@ export function CreateCampaignModal({
                 )}
               </div>
             </div>
-            </div>
           </div>
+          )}
 
-          <div>
-            <p className="eyebrow mb-2">Attachment</p>
-            <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
+          {/* ── Step 5: Attachment ───────────────────────────────────────── */}
+          {step === 4 && (<>
+          <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-3">
             <div className="flex items-start gap-2">
               <Paperclip className="size-4 text-muted-foreground mt-0.5" />
               <div>
@@ -579,24 +609,33 @@ export function CreateCampaignModal({
             )}
 
             {uploadError && <p className="text-xs text-red-400">{uploadError}</p>}
-            </div>
           </div>
 
           <p className="text-xs text-muted-foreground">
             Drafts will be generated in the background. Review and certify them from the campaign view.
           </p>
+          </>)}
 
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
 
-        <div className="border-t border-border bg-card/30 px-6 py-4 flex justify-end">
-          <Button disabled={!name.trim() || creating || uploading || leads.length === 0} onClick={handleCreate} className="gap-1.5">
-            {creating ? (
-              <><Loader2 className="size-3.5 animate-spin" /> Creating…</>
-            ) : (
-              <>Create campaign <ChevronRight className="size-3.5" /></>
-            )}
+        <div className="border-t border-border bg-card/30 px-6 py-4 flex items-center justify-between">
+          <Button type="button" variant="outline" className="bg-card" onClick={goBack} disabled={step === 0}>
+            Back
           </Button>
+          {step < STEPS.length - 1 ? (
+            <Button type="button" onClick={goNext} className="gap-1.5">
+              Continue <ChevronRight className="size-3.5" />
+            </Button>
+          ) : (
+            <Button disabled={!name.trim() || creating || uploading || leads.length === 0} onClick={handleCreate} className="gap-1.5">
+              {creating ? (
+                <><Loader2 className="size-3.5 animate-spin" /> Creating…</>
+              ) : (
+                <>Create campaign <ChevronRight className="size-3.5" /></>
+              )}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

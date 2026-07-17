@@ -883,7 +883,9 @@ export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: n
 
 /** Build campaign replies thread shape from unibox data (Phase 2). */
 export async function getCampaignReplyThreads(db: Db, campaignId: string) {
-  const { threads } = await getThreads(db, { campaign_id: campaignId, tab: "primary", limit: 500 });
+  // No Unibox primary/others tab filter — campaign Outbox should show every
+  // inbound reply for the campaign, including messages Instantly puts in Others.
+  const { threads } = await getThreads(db, { campaign_id: campaignId, limit: 500 });
   const out = [];
 
   for (const t of threads) {

@@ -26,7 +26,7 @@ export type Lead = {
   score: LeadScore;
   source: LeadSource;
   campaign: string;
-  campaigns: { id: string; name: string; crm_status: string }[];
+  campaigns: { id: string; name: string; crm_status: string; added_at?: string | null }[];
   createdAt: string;
   orgId: string | null;
   enrichmentStage: EnrichmentStage | null;

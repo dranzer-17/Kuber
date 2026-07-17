@@ -34,8 +34,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const campaignList = (cls ?? []).map((cl) => {
     const camp = Array.isArray(cl.campaigns) ? cl.campaigns[0] : cl.campaigns as { id: string; name: string } | null;
-    return camp ? { id: camp.id, name: camp.name, crm_status: cl.crm_status } : null;
-  }).filter(Boolean) as { id: string; name: string; crm_status: string }[];
+    return camp ? { id: camp.id, name: camp.name, crm_status: cl.crm_status, added_at: cl.created_at } : null;
+  }).filter(Boolean) as { id: string; name: string; crm_status: string; added_at: string }[];
 
   // Org-level enrichment fans out to every lead under that org regardless of
   // owner (review §3.4) — surface a lightweight "shared" signal (counts only,

@@ -1,23 +1,31 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Fragment } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Building2, Globe2, Mail, Megaphone, Users, X,
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
   RotateCcw, Zap, Bot, Settings, Pencil, Phone, Link,
-  MapPin, Save, ChevronRight, UserCog,
+  MapPin, Save, ChevronRight, UserCog, Check, MessageSquare,
   XCircle, Send, MailCheck, MailOpen, Reply, Sparkles, BellOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatChatDate, formatChatTime, startsNewChatDay } from "@/lib/chat-format";
 import { useApp } from "@/lib/app-context";
-import type { Lead, EnrichmentStage } from "@/lib/leads";
-import { Avatar, PipelineStepper, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
-import { fetchLead, fetchLeadActivity, fetchUsers, patchLead, rescrapeOrg, fetchServiceHealth, type Profile, type LeadActivityEvent } from "@/lib/api-client";
+import type { Lead, EnrichmentStage, LeadStatus } from "@/lib/leads";
+import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
+import {
+  fetchLead, fetchLeadActivity, fetchLeadComments, fetchUsers, patchLead,
+  postLeadComment, rescrapeOrg, fetchServiceHealth,
+  type Profile, type LeadActivityEvent, type LeadComment,
+} from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -73,15 +81,138 @@ const SOURCE_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function Section({
-  icon: Icon, label, children,
-}: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
+// ClickUp-style property row: muted label on the left, value on the right.
+function FieldRow({
+  icon: Icon, label, children, align = "center",
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  children: React.ReactNode;
+  align?: "center" | "start";
+}) {
   return (
-    <div className="rounded-xl border border-border bg-secondary/30 p-4 space-y-1.5">
-      <div className="flex items-center gap-1.5 eyebrow">
-        <Icon className="size-3" /> {label}
+    <div className={cn(
+      "flex gap-3 py-2.5 min-w-0 h-full",
+      align === "start" ? "items-start" : "items-center",
+    )}>
+      <div className={cn(
+        "flex items-center gap-2 w-32 shrink-0 text-muted-foreground",
+        align === "start" && "mt-0.5",
+      )}>
+        <Icon className="size-3.5" />
+        <span className="text-[11px] font-medium uppercase tracking-wide">{label}</span>
       </div>
-      <div className="text-sm leading-relaxed">{children}</div>
+      <div className="flex-1 min-w-0 text-sm">{children}</div>
+    </div>
+  );
+}
+
+// Campaign pill list — one pill per campaign with a colored status dot;
+// collapses to 3 rows with a "+N more" toggle so 5–6 campaigns don't blow
+// up the layout.
+const CRM_STATUS_DOTS: Record<string, string> = {
+  draft:      "bg-zinc-400",
+  pending:    "bg-amber-400",
+  generating: "bg-amber-400",
+  approved:   "bg-blue-400",
+  sent:       "bg-sky-400",
+  replied:    "bg-green-400",
+  failed:     "bg-red-400",
+};
+
+function CampaignPills({ campaigns, onOpen }: {
+  campaigns: { id: string; name: string; crm_status: string; added_at?: string | null }[];
+  onOpen: (campaignId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? campaigns : campaigns.slice(0, 3);
+  const hidden = campaigns.length - 3;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {visible.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          onClick={() => onOpen(c.id)}
+          title={`Open campaign "${c.name}"`}
+          className="group flex items-center justify-between gap-2 rounded-lg border border-border bg-secondary/40 pl-2.5 pr-2 py-1.5 min-w-0 text-left cursor-pointer hover:border-muted-foreground/50 hover:bg-secondary/70 transition-colors"
+        >
+          <span className="min-w-0">
+            <span className="flex items-center gap-1 min-w-0">
+              <span className="truncate text-xs font-medium group-hover:text-blue-400 transition-colors">{c.name}</span>
+              <ChevronRight className="size-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+            </span>
+            {c.added_at && (
+              <span className="block text-[10px] text-muted-foreground mt-0.5">
+                Added {formatDate(c.added_at)}
+              </span>
+            )}
+          </span>
+          <span className="flex items-center gap-1.5 shrink-0">
+            <span className={cn("size-1.5 rounded-full", CRM_STATUS_DOTS[c.crm_status] ?? "bg-muted-foreground/50")} />
+            <span className="font-mono text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {c.crm_status}
+            </span>
+          </span>
+        </button>
+      ))}
+      {campaigns.length > 3 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="self-start px-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? "Show less" : `+${hidden} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Compact horizontal pipeline — replaces the tall vertical stepper so the
+// whole modal fits on screen without scrolling.
+const H_STAGES: LeadStatus[] = ["New", "Enriched"];
+
+function HorizontalStepper({ currentStatus }: { currentStatus: LeadStatus }) {
+  const mapped: LeadStatus =
+    currentStatus === "Input Required" || currentStatus === "New" || currentStatus === "Enriching" ? "New" : "Enriched";
+  const current = H_STAGES.indexOf(mapped);
+  return (
+    <div className="flex items-center gap-2 w-full">
+      {H_STAGES.map((stage, i) => {
+        const done = i <= current;
+        const active = i === current;
+        return (
+          <Fragment key={stage}>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <div className={cn(
+                "size-4.5 rounded-full border-2 flex items-center justify-center shrink-0",
+                done ? "bg-primary border-primary" : "border-border",
+              )}>
+                {done
+                  ? <Check className="size-2.5 text-primary-foreground" strokeWidth={3} />
+                  : <span className="text-[9px] font-bold text-muted-foreground/40">{i + 1}</span>}
+              </div>
+              <span className={cn(
+                "font-display text-[11px] font-semibold uppercase tracking-wide",
+                active ? "text-foreground" : done ? "text-muted-foreground" : "text-muted-foreground/40",
+              )}>
+                {stage}
+              </span>
+            </div>
+            {i < H_STAGES.length - 1 && (
+              <div className={cn("h-px flex-1 min-w-6", done && !active ? "bg-primary" : "bg-border")} />
+            )}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -193,9 +324,33 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function ActivityItem({ event, isLast }: { event: LeadActivityEvent; isLast: boolean }) {
+function ActivityItem({ event, isLast, onCampaignClick }: {
+  event: LeadActivityEvent;
+  isLast: boolean;
+  onCampaignClick?: (campaignId: string) => void;
+}) {
   const Icon = ACTIVITY_ICONS[event.event] ?? Clock;
   const isBad = BAD_ACTIVITY_EVENTS.has(event.event);
+
+  // If the event references a campaign, render its name as a link — either
+  // inline (when the detail text quotes the name) or appended after the text.
+  const detailText = event.detail ?? event.event;
+  const canLink = !!(event.campaign_id && event.campaign_name && onCampaignClick);
+  const quoted = canLink ? `"${event.campaign_name}"` : "";
+  const inline = canLink && detailText.includes(quoted);
+  const [before, after] = inline ? detailText.split(quoted) : [detailText, ""];
+
+  const campaignLink = canLink && (
+    <button
+      type="button"
+      onClick={() => onCampaignClick!(event.campaign_id!)}
+      className="text-blue-400 hover:underline font-medium"
+      title={`Open campaign "${event.campaign_name}"`}
+    >
+      {inline ? quoted : event.campaign_name}
+    </button>
+  );
+
   return (
     <div className="flex gap-2.5 text-xs">
       <div className="flex flex-col items-center shrink-0">
@@ -208,10 +363,13 @@ function ActivityItem({ event, isLast }: { event: LeadActivityEvent; isLast: boo
         {!isLast && <div className="w-px flex-1 bg-border/60 mt-1 min-h-[12px]" />}
       </div>
       <div className={cn("min-w-0", !isLast && "pb-3")}>
-        <p className="font-medium leading-snug text-foreground">{event.detail ?? event.event}</p>
-        <div className="flex items-center gap-2 mt-0.5 text-muted-foreground">
+        <p className="font-medium leading-snug text-foreground">
+          {inline ? <>{before}{campaignLink}{after}</> : detailText}
+        </p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-muted-foreground">
           <span>{relativeTime(event.created_at)}</span>
           {event.actor_name && <span>· by {event.actor_name}</span>}
+          {canLink && !inline && <span>· in {campaignLink}</span>}
         </div>
       </div>
     </div>
@@ -232,11 +390,17 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   onLeadUpdated?: (updated: Lead) => void;
   onOrgClick?: (orgId: string) => void;
 }) {
-  const { role } = useApp();
+  const { role, session } = useApp();
+  const router = useRouter();
   const [freshLead,   setFreshLead  ] = useState<Lead | null>(null);
   const [loadingLead, setLoadingLead] = useState(false);
   const [enrichData,  setEnrichData ] = useState<EnrichStatus | null>(null);
   const [activity,    setActivity   ] = useState<LeadActivityEvent[]>([]);
+  const [railMode,    setRailMode   ] = useState<"activity" | "discussion">("activity");
+  const [comments,    setComments   ] = useState<LeadComment[]>([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [sendingComment,  setSendingComment ] = useState(false);
   const [retrying,    setRetrying   ] = useState(false);
   const [editing,     setEditing    ] = useState(false);
   const [saving,      setSaving     ] = useState(false);
@@ -248,6 +412,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   });
   const [employees,   setEmployees  ] = useState<Profile[]>([]);
   const [reassigning, setReassigning] = useState(false);
+  const commentsEndRef = useRef<HTMLDivElement | null>(null);
 
   // Tracks the lead id the drawer is currently showing so in-flight fetches
   // can't update state / call onLeadUpdated after the user has closed it.
@@ -298,6 +463,44 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       setActivity(events);
     } catch { /* non-fatal */ }
   }, []);
+
+  const loadComments = useCallback(async (leadId: string, quiet = false) => {
+    if (!quiet) setLoadingComments(true);
+    try {
+      const tok = await getToken();
+      if (!tok) return;
+      const next = await fetchLeadComments(tok, leadId);
+      if (activeLeadIdRef.current !== leadId) return;
+      setComments((current) => {
+        if (!quiet) return next;
+        const byId = new Map(current.map((comment) => [comment.id, comment]));
+        for (const comment of next) byId.set(comment.id, comment);
+        return [...byId.values()].sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+        );
+      });
+    } catch (error) {
+      if (!quiet) toast.error((error as Error).message || "Could not load the discussion");
+    } finally {
+      if (!quiet && activeLeadIdRef.current === leadId) setLoadingComments(false);
+    }
+  }, []);
+
+  async function handleSendComment() {
+    if (!display || sendingComment || !commentBody.trim()) return;
+    const body = commentBody.trim();
+    setSendingComment(true);
+    try {
+      const tok = await getToken();
+      const comment = await postLeadComment(tok, display.id, body);
+      setComments((current) => [...current, comment]);
+      setCommentBody("");
+    } catch (error) {
+      toast.error((error as Error).message || "Could not send the message");
+    } finally {
+      setSendingComment(false);
+    }
+  }
 
   function populateForm(l: Lead) {
     setForm({
@@ -368,17 +571,44 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   }
 
   useEffect(() => {
-    if (!lead) { setFreshLead(null); setEnrichData(null); setActivity([]); setEditing(false); return; }
+    if (!lead) {
+      setFreshLead(null);
+      setEnrichData(null);
+      setActivity([]);
+      setComments([]);
+      setCommentBody("");
+      setRailMode("activity");
+      setEditing(false);
+      return;
+    }
     setFreshLead(null);
     setEnrichData(null);
     setActivity([]);
+    setComments([]);
+    setCommentBody("");
+    setRailMode("activity");
     setEditing(false);
     setSaveError("");
     populateForm(lead);
     void fetchFresh(lead);
     void fetchActivity(lead.id);
+    // Quiet prefetch so the Discussion tab / chat icon can show a message
+    // count without the user having to open the tab first.
+    void loadComments(lead.id, true);
     if (lead.orgId) void fetchEnrichStatus(lead.orgId);
   }, [lead?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!lead || railMode !== "discussion") return;
+    void loadComments(lead.id);
+    const interval = window.setInterval(() => void loadComments(lead.id, true), 10000);
+    return () => window.clearInterval(interval);
+  }, [lead?.id, railMode, loadComments]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (railMode !== "discussion") return;
+    commentsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [comments, railMode]);
 
   useEffect(() => {
     if (!lead) return;
@@ -428,40 +658,58 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
         onClick={onClose}
       />
 
-      {/* Drawer */}
+      {/* Modal */}
       <div className={cn(
-        "fixed top-0 right-0 z-50 h-full w-[520px] max-w-[95vw] bg-card border-l border-border shadow-2xl",
-        "flex flex-col transition-transform duration-300 ease-in-out",
-        open ? "translate-x-0" : "translate-x-full pointer-events-none",
+        "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
+        "w-[1240px] max-w-[96vw] h-[86vh] max-h-[880px]",
+        "bg-card border border-border rounded-2xl shadow-2xl overflow-hidden",
+        "flex transition-all duration-200 ease-out",
+        open ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none",
       )}>
         {display && (
           <>
-            {/* Header */}
-            <div className="swatch-bar-top flex items-start gap-3 p-5 border-b border-border shrink-0">
+            {/* ── Left column: header + details ── */}
+            <div className="flex-1 min-w-0 flex flex-col min-h-0">
+
+            {/* Header — just the person */}
+            <div className="swatch-bar-top flex items-center gap-3 px-6 pt-10 pb-4 shrink-0">
               <Avatar name={`${display.firstName} ${display.lastName}`} size="md" />
-              <div className="flex-1 min-w-0">
-                <p className="eyebrow">Lead · {display.id.slice(0, 8)}</p>
-                <h2 className="font-display text-lg font-semibold truncate mt-0.5">{display.firstName} {display.lastName}</h2>
-                <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                  <StatusBadge status={display.status} />
-                  <ScoreBadge score={display.score} />
-                  <span className="font-mono text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border border-border">
-                    {display.source}
-                  </span>
-                </div>
-              </div>
+              <h2 className="flex-1 min-w-0 font-display text-xl font-semibold truncate">
+                {display.firstName} {display.lastName}
+              </h2>
               <div className="flex items-center gap-1 shrink-0">
                 {!editing ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => { populateForm(display); setEditing(true); setSaveError(""); }}
-                    className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
-                    title="Edit lead"
-                  >
-                    <Pencil className="size-3.5" />
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setRailMode("discussion")}
+                      className={cn(
+                        "relative size-7 rounded-lg text-muted-foreground hover:text-foreground",
+                        railMode === "discussion" && "bg-secondary text-foreground",
+                      )}
+                      title="Open lead discussion"
+                      aria-label="Open lead discussion"
+                    >
+                      <MessageSquare className="size-3.5" />
+                      {comments.length > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] rounded-full bg-primary text-primary-foreground font-mono text-[9px] font-bold tabular-nums flex items-center justify-center px-0.5 leading-none">
+                          {comments.length > 99 ? "99+" : comments.length}
+                        </span>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { populateForm(display); setEditing(true); setSaveError(""); }}
+                      className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+                      title="Edit lead"
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                  </>
                 ) : (
                   <>
                     <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setEditing(false); setSaveError(""); }}>
@@ -473,65 +721,70 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                     </Button>
                   </>
                 )}
+                {/* Close lives in the activity rail; this one only shows when
+                    the rail is hidden on very small screens */}
                 <Button
                   type="button" variant="ghost" size="icon" onClick={onClose}
-                  className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+                  className="size-7 rounded-lg text-muted-foreground hover:text-foreground sm:hidden"
                 >
                   <X className="size-4" />
                 </Button>
               </div>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+            {/* Details — flex column sized to fit without scrolling;
+                only the enrichment section scrolls internally if its text is long */}
+            <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-y-auto px-6 pb-5 gap-4">
 
               {/* ── Edit mode ── */}
               {editing && (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {saveError && (
                     <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
                       <AlertCircle className="size-3.5 shrink-0" /> {saveError}
                     </div>
                   )}
-                  <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="eyebrow px-1">Personal</legend>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">First name</Label>
-                        <Input className="h-8 text-sm" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <fieldset className="rounded-xl border border-border p-4 space-y-3">
+                      <legend className="eyebrow px-1">Personal</legend>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">First name</Label>
+                          <Input className="h-8 text-sm" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Last name</Label>
+                          <Input className="h-8 text-sm" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
+                        </div>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Last name</Label>
-                        <Input className="h-8 text-sm" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
+                        <Label className="text-xs flex items-center gap-1.5"><Mail className="size-3" /> Email</Label>
+                        <Input className="h-8 text-sm" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
                       </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs flex items-center gap-1.5"><Mail className="size-3" /> Email</Label>
-                      <Input className="h-8 text-sm" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs flex items-center gap-1.5"><Phone className="size-3" /> Phone</Label>
-                      <Input className="h-8 text-sm" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-                    </div>
-                  </fieldset>
-                  <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                    <legend className="eyebrow px-1">Professional</legend>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Job title</Label>
-                      <Input className="h-8 text-sm" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Headline</Label>
-                      <Input className="h-8 text-sm" placeholder="e.g. VP Procurement at Acme" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs flex items-center gap-1.5"><Link className="size-3" /> LinkedIn URL</Label>
-                      <Input className="h-8 text-sm" placeholder="linkedin.com/in/..." value={form.linkedin_url} onChange={(e) => setForm((f) => ({ ...f, linkedin_url: e.target.value }))} />
-                    </div>
-                  </fieldset>
-                  <fieldset className="rounded-xl border border-border p-4 space-y-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs flex items-center gap-1.5"><Phone className="size-3" /> Phone</Label>
+                        <Input className="h-8 text-sm" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+                      </div>
+                    </fieldset>
+                    <fieldset className="rounded-xl border border-border p-4 space-y-3">
+                      <legend className="eyebrow px-1">Professional</legend>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Job title</Label>
+                        <Input className="h-8 text-sm" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Headline</Label>
+                        <Input className="h-8 text-sm" placeholder="e.g. VP Procurement at Acme" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs flex items-center gap-1.5"><Link className="size-3" /> LinkedIn URL</Label>
+                        <Input className="h-8 text-sm" placeholder="linkedin.com/in/..." value={form.linkedin_url} onChange={(e) => setForm((f) => ({ ...f, linkedin_url: e.target.value }))} />
+                      </div>
+                    </fieldset>
+                  </div>
+                  <fieldset className="rounded-xl border border-border p-4">
                     <legend className="eyebrow px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <div className="space-y-1.5">
                         <Label className="text-xs">City</Label>
                         <Input className="h-8 text-sm" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
@@ -540,125 +793,152 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         <Label className="text-xs">State</Label>
                         <Input className="h-8 text-sm" value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
                       </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Country</Label>
-                      <Input className="h-8 text-sm" value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} />
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Country</Label>
+                        <Input className="h-8 text-sm" value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} />
+                      </div>
                     </div>
                   </fieldset>
                 </div>
               )}
 
-              {/* ── View mode ── */}
+              {/* ── View mode — ClickUp-style property rows, two columns ── */}
               {!editing && <>
 
-              {/* Organization — clickable row that opens OrgDrawer */}
-              {display.company && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => display.orgId && onOrgClick?.(display.orgId)}
-                  disabled={!display.orgId || !onOrgClick}
-                  className="w-full h-auto flex-col items-stretch justify-start rounded-xl border-border bg-secondary/30 p-4 text-left font-normal hover:border-muted-foreground/50 hover:bg-secondary/50 group disabled:cursor-default disabled:hover:border-border disabled:hover:bg-secondary/30"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 eyebrow">
-                      <Building2 className="size-3" /> Organization
+              {/* Paired property rows — left/right cells share one grid row so
+                  dividers stay perfectly aligned across both columns */}
+              {(() => {
+                const leftFields: React.ReactNode[] = [
+                  <FieldRow key="status" icon={Zap} label="Status">
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={display.status} />
+                      {display.score !== "—" && <ScoreBadge score={display.score} />}
                     </div>
-                    {display.orgId && onOrgClick && (
-                      <ChevronRight className="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    )}
-                  </div>
-                  <div className="text-sm leading-relaxed mt-1.5">
-                    <p className="font-medium">{display.company}</p>
-                    {display.domain && (
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-blue-400 hover:underline">{display.domain}</a>
-                        {display.domainSource === "email_inferred" && (
-                          <span className="text-[9px] font-medium uppercase tracking-wide text-amber-500/80 border border-amber-500/30 rounded px-1 py-0.5">Inferred from email</span>
+                  </FieldRow>,
+                  <FieldRow key="pipeline" icon={Users} label="Pipeline">
+                    <HorizontalStepper currentStatus={display.status} />
+                  </FieldRow>,
+                ];
+                if (role === "manager") {
+                  leftFields.push(
+                    <FieldRow key="owner" icon={UserCog} label="Owner">
+                      <Select
+                        value={display.assignedTo ?? "unassigned"}
+                        onValueChange={(v) => void handleReassign(v === "unassigned" ? null : v)}
+                        disabled={reassigning}
+                      >
+                        <SelectTrigger className="bg-transparent border-0 shadow-none h-7 px-0 text-sm font-medium hover:text-foreground focus:ring-0 w-auto gap-1.5">
+                          <SelectValue placeholder="Unassigned" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
+                          {employees.map((e) => (
+                            <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FieldRow>,
+                  );
+                }
+                leftFields.push(
+                  <FieldRow key="org" icon={Building2} label="Organization" align="start">
+                    {display.company ? (
+                      <div className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => display.orgId && onOrgClick?.(display.orgId)}
+                          disabled={!display.orgId || !onOrgClick}
+                          className="group flex items-center gap-1 font-medium hover:text-blue-400 transition-colors disabled:hover:text-foreground max-w-full"
+                        >
+                          <span className="truncate">{display.company}</span>
+                          {display.orgId && onOrgClick && (
+                            <ChevronRight className="size-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                          )}
+                        </button>
+                        {display.domain && (
+                          <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                            <a href={/^https?:\/\//i.test(display.domain) ? display.domain : `https://${display.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-blue-400 hover:underline truncate">{display.domain}</a>
+                            {display.domainSource === "email_inferred" && (
+                              <span className="text-[9px] font-medium uppercase tracking-wide text-amber-500/80 border border-amber-500/30 rounded px-1 py-0.5 shrink-0">Inferred</span>
+                            )}
+                          </div>
                         )}
                       </div>
+                    ) : (
+                      <span className="text-muted-foreground/50 italic text-xs">No organization</span>
                     )}
+                  </FieldRow>,
+                  <FieldRow key="campaigns" icon={Megaphone} label="Campaigns" align="start">
+                    {display.campaigns && display.campaigns.length > 0 ? (
+                      <CampaignPills
+                        campaigns={display.campaigns}
+                        onOpen={(campaignId) => {
+                          onClose();
+                          router.push(`/campaigns/${campaignId}`);
+                        }}
+                      />
+                    ) : (
+                      <span className="text-muted-foreground/50 italic text-xs">Not in any campaign</span>
+                    )}
+                  </FieldRow>,
+                );
+
+                const rightFields: React.ReactNode[] = [
+                  <FieldRow key="email" icon={Mail} label="Email">
+                    {display.email
+                      ? <span className="font-mono text-xs truncate block">{display.email}</span>
+                      : <span className="text-muted-foreground/50 italic text-xs">Not yet enriched</span>}
+                  </FieldRow>,
+                ];
+                if (display.phone) {
+                  rightFields.push(
+                    <FieldRow key="phone" icon={Phone} label="Phone">
+                      <span className="font-mono text-xs">{display.phone}</span>
+                    </FieldRow>,
+                  );
+                }
+                if (display.jobTitle) {
+                  rightFields.push(
+                    <FieldRow key="title" icon={Pencil} label="Job title">
+                      <span className="truncate block">{display.jobTitle}</span>
+                    </FieldRow>,
+                  );
+                }
+                if (display.country) {
+                  rightFields.push(
+                    <FieldRow key="country" icon={MapPin} label="Country">
+                      {display.country}
+                    </FieldRow>,
+                  );
+                }
+                rightFields.push(
+                  <FieldRow key="source" icon={Globe2} label="Source">
+                    <span className="inline-flex items-center font-mono text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border border-border">
+                      {display.source}
+                    </span>
+                  </FieldRow>,
+                  <FieldRow key="created" icon={Clock} label="Created">
+                    {formatDate(display.createdAt)}
+                  </FieldRow>,
+                );
+
+                const rowCount = Math.max(leftFields.length, rightFields.length);
+                return (
+                  <div className="shrink-0">
+                    {Array.from({ length: rowCount }).map((_, i) => (
+                      <div key={i} className="grid grid-cols-2 gap-x-12 border-b border-border/40 last:border-0">
+                        <div className="min-w-0">{leftFields[i]}</div>
+                        <div className="min-w-0">{rightFields[i]}</div>
+                      </div>
+                    ))}
                   </div>
-                </Button>
-              )}
+                );
+              })()}
 
-              {/* Contact */}
-              <Section icon={Mail} label="Contact">
-                {display.jobTitle && (
-                  <p><span className="text-muted-foreground">Title: </span>{display.jobTitle}</p>
-                )}
-                <p>
-                  <span className="text-muted-foreground">Email: </span>
-                  {display.email
-                    ? <span className="font-mono text-xs">{display.email}</span>
-                    : <span className="text-muted-foreground/50 italic">Not yet enriched</span>}
-                </p>
-                {display.phone && (
-                  <p><span className="text-muted-foreground">Phone: </span><span className="font-mono text-xs">{display.phone}</span></p>
-                )}
-                {display.country && (
-                  <p><span className="text-muted-foreground">Country: </span>{display.country}</p>
-                )}
-              </Section>
-
-              {/* Pipeline */}
-              <Section icon={Users} label="Pipeline stage">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={display.status} />
-                    <span className="text-xs text-muted-foreground">Current stage</span>
-                  </div>
-                  <PipelineStepper currentStatus={display.status} />
-                </div>
-              </Section>
-
-              {/* Owner (manager-only reassignment — review §3.2) */}
-              {role === "manager" && (
-                <Section icon={UserCog} label="Owner">
-                  <Select
-                    value={display.assignedTo ?? "unassigned"}
-                    onValueChange={(v) => void handleReassign(v === "unassigned" ? null : v)}
-                    disabled={reassigning}
-                  >
-                    <SelectTrigger className="bg-card"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned (pool)</SelectItem>
-                      {employees.map((e) => (
-                        <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Section>
-              )}
-
-              {/* Meta */}
-              <div className="grid grid-cols-2 gap-3">
-                <Section icon={Globe2} label="Source">
-                  <p className="font-medium">{display.source}</p>
-                  <p className="font-mono text-[11px] text-muted-foreground mt-0.5">Added {display.createdAt}</p>
-                </Section>
-                <Section icon={Megaphone} label="Campaign">
-                  {display.campaigns && display.campaigns.length > 0 ? (
-                    <div className="flex flex-col gap-1.5 mt-0.5">
-                      {display.campaigns.map((c) => (
-                        <div key={c.id} className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium truncate">{c.name}</p>
-                          <span className="font-mono text-[10px] font-semibold uppercase tracking-wide text-muted-foreground border border-border rounded px-1.5 py-0.5 shrink-0">
-                            {c.crm_status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-muted-foreground/60 text-xs">Not assigned</p>
-                  )}
-                </Section>
-              </div>
-
-              {/* ── Company Enrichment ── */}
-              <div className="swatch-bar rounded-xl border border-border overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 bg-secondary/30 border-b border-border">
+              {/* ── Company Enrichment — fills the rest of the modal; scrolls
+                     internally only when descriptions are very long ── */}
+              <div className="border-t border-border pt-4 flex-1 min-h-0 flex flex-col">
+                <div className="flex items-center justify-between pb-3 shrink-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Building2 className="size-3 text-muted-foreground" />
                     <span className="eyebrow">Company Enrichment</span>
@@ -701,22 +981,11 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   </div>
                 </div>
 
-                <div className="p-4 space-y-4">
-                  {/* Org-level enrichment fans out to every lead under that org
-                      regardless of owner (review §3.4) — flag it here so a
-                      change from someone else's trigger isn't a surprise. */}
-                  {!!display.orgShared && display.orgShared.otherOwnerCount > 0 && (
-                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-                      <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
-                      <span>
-                        This company profile is shared with {display.orgShared.otherLeadCount} other lead{display.orgShared.otherLeadCount === 1 ? "" : "s"} across {display.orgShared.otherOwnerCount} other owner{display.orgShared.otherOwnerCount === 1 ? "" : "s"} — enrichment updates here apply to all of them, however triggered.
-                      </span>
-                    </div>
-                  )}
+                <div className="space-y-3 flex-1 min-h-0 overflow-y-auto pr-1">
                   {currentStage === "done" && (
-                    <>
+                    <div className="grid grid-cols-2 gap-4">
                       {(enrichData?.company_description ?? display.companyDescription) && (
-                        <div>
+                        <div className="min-w-0">
                           <p className="eyebrow mb-1">What they do</p>
                           <p className="text-sm text-muted-foreground leading-relaxed">
                             {enrichData?.company_description ?? display.companyDescription}
@@ -724,14 +993,14 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         </div>
                       )}
                       {(enrichData?.sells_to ?? display.sellsTo) && (
-                        <div>
+                        <div className="min-w-0">
                           <p className="eyebrow mb-1">Who they sell to</p>
                           <p className="text-sm text-muted-foreground leading-relaxed">
                             {enrichData?.sells_to ?? display.sellsTo}
                           </p>
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
                   {/* Friendly, non-technical status — the raw upstream error
                       (HTTP 402 dumps etc.) stays server-side in enrichment_logs.
@@ -759,28 +1028,170 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                       No organization linked to this lead.
                     </p>
                   )}
-                </div>
 
-                {/* ── Clean lead activity timeline (Problem 8) ── */}
-                <div className="border-t border-border">
-                  <div className="px-4 pt-4">
-                    <Section icon={Clock} label="Activity">
-                      {activity.length === 0 ? (
-                        <p className="text-xs text-muted-foreground py-1">No activity yet.</p>
-                      ) : (
-                        <div>
-                          {activity.map((ev, i) => (
-                            <ActivityItem key={i} event={ev} isLast={i === activity.length - 1} />
-                          ))}
-                        </div>
-                      )}
-                    </Section>
-                  </div>
+                  {/* Org-level enrichment fans out to every lead under that org
+                      regardless of owner (review §3.4) — quiet footnote so a
+                      change from someone else's trigger isn't a surprise. */}
+                  {!!display.orgShared && display.orgShared.otherOwnerCount > 0 && (
+                    <p className="text-[11px] text-foreground/70 leading-relaxed pt-2 border-t border-border/40">
+                      This company profile is shared with {display.orgShared.otherLeadCount} other lead{display.orgShared.otherLeadCount === 1 ? "" : "s"} across {display.orgShared.otherOwnerCount} other owner{display.orgShared.otherOwnerCount === 1 ? "" : "s"} — enrichment updates here apply to all of them, however triggered.
+                    </p>
+                  )}
                 </div>
               </div>
 
               </> /* end view mode */}
 
+            </div>
+
+            </div>{/* end left column */}
+
+            {/* ── Right: activity / internal discussion rail ── */}
+            <div className="w-[340px] max-lg:w-[280px] max-sm:hidden shrink-0 border-l border-border bg-secondary/20 flex flex-col min-h-0">
+              <div className="flex items-center pl-3 pr-3 py-2.5 border-b border-border shrink-0">
+                <div className="flex-1">
+                  <SegmentedTabs
+                    value={railMode}
+                    onValueChange={setRailMode}
+                    size="sm"
+                    options={[
+                      { value: "activity",   label: "Activity",   icon: Clock },
+                      { value: "discussion", label: "Discussion", icon: MessageSquare, count: comments.length },
+                    ]}
+                  />
+                </div>
+                <Button
+                  type="button" variant="ghost" size="icon" onClick={onClose}
+                  className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
+                  aria-label="Close lead"
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+
+              {railMode === "activity" ? (
+                <div className="flex-1 overflow-y-auto p-5">
+                  {activity.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-1">No activity yet.</p>
+                  ) : (
+                    <div>
+                      {activity.map((ev, i) => (
+                        <ActivityItem
+                          key={i}
+                          event={ev}
+                          isLast={i === activity.length - 1}
+                          onCampaignClick={(campaignId) => {
+                            onClose();
+                            router.push(`/campaigns/${campaignId}`);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {loadingComments ? (
+                      <div className="h-full flex items-center justify-center text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                      </div>
+                    ) : comments.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center px-5">
+                        <div className="size-9 rounded-full border border-border bg-card flex items-center justify-center text-muted-foreground mb-3">
+                          <MessageSquare className="size-4" />
+                        </div>
+                        <p className="text-sm font-medium">Start the discussion</p>
+                        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                          Notes here are visible to managers and employees who can access this lead.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {comments.map((comment, index) => {
+                          const own = comment.author_id === session?.user.id;
+                          const showDate = startsNewChatDay(
+                            comment.created_at,
+                            comments[index - 1]?.created_at,
+                          );
+                          return (
+                            <div key={comment.id} className="space-y-3">
+                              {showDate && (
+                                <div className="flex items-center justify-center py-1">
+                                  <span className="rounded-full border border-border bg-card px-3 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
+                                    {formatChatDate(comment.created_at)}
+                                  </span>
+                                </div>
+                              )}
+                              <div className={cn("flex gap-2.5", own && "flex-row-reverse")}>
+                                <Avatar name={comment.author_name} size="sm" />
+                                <div className={cn("min-w-0 max-w-[82%]", own && "text-right")}>
+                                  <div className={cn(
+                                    "mb-1 flex items-baseline",
+                                    own && "justify-end",
+                                  )}>
+                                    <span className="text-[11px] font-semibold truncate">
+                                      {own ? "You" : comment.author_name}
+                                    </span>
+                                  </div>
+                                  <div className={cn(
+                                    "inline-flex max-w-full flex-col rounded-xl px-3 py-2 text-left text-xs leading-relaxed",
+                                    own
+                                      ? "bg-primary text-primary-foreground rounded-tr-sm"
+                                      : "bg-card border border-border text-foreground rounded-tl-sm",
+                                  )}>
+                                    <span className="whitespace-pre-wrap wrap-break-word">{comment.body}</span>
+                                    <span className={cn(
+                                      "mt-1 self-end whitespace-nowrap text-[9px] leading-none",
+                                      own ? "text-primary-foreground/75" : "text-muted-foreground",
+                                    )}>
+                                      {formatChatTime(comment.created_at)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div ref={commentsEndRef} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0 border-t border-border bg-card p-3">
+                    <Textarea
+                      value={commentBody}
+                      onChange={(event) => setCommentBody(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                          event.preventDefault();
+                          void handleSendComment();
+                        }
+                      }}
+                      maxLength={2000}
+                      rows={3}
+                      placeholder="Write a message to the team…"
+                      className="min-h-[72px] resize-none bg-background text-xs"
+                    />
+                    <div className="flex items-center justify-between gap-2 mt-2">
+                      <span className="text-[10px] text-muted-foreground">
+                        Ctrl/⌘ + Enter to send
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void handleSendComment()}
+                        disabled={!commentBody.trim() || sendingComment}
+                        className="h-7 gap-1.5 px-2.5 text-xs"
+                      >
+                        {sendingComment
+                          ? <Loader2 className="size-3 animate-spin" />
+                          : <Send className="size-3" />}
+                        Send
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </>
         )}

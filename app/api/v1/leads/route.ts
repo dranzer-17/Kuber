@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
   const parsed = LeadListQuerySchema.safeParse(sp);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
-  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, page, limit } = parsed.data;
+  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, q: search, page, limit } = parsed.data;
   const db = createAdminClient();
 
   let q = db
@@ -114,6 +114,32 @@ export async function GET(req: NextRequest) {
   if (import_id) q = q.eq("import_id", import_id);
   if (created_after) q = q.gte("created_at", created_after);
 
+  if (search) {
+    // Escape ilike wildcards so literal % / _ in the search text aren't
+    // treated as wildcards, and strip characters that are structurally
+    // significant to PostgREST's .or() mini-DSL (commas separate
+    // conditions, parens group them) so a search string can't be crafted
+    // into an unintended filter.
+    const escaped = search.replace(/[%_]/g, (c) => `\\${c}`).replace(/[,()]/g, " ").trim();
+    // Match org name against the whole phrase (e.g. searching a company
+    // name), but match person fields word-by-word so "Richard Wise" finds
+    // first_name=Richard/last_name=Wise even though neither column holds
+    // the full string on its own.
+    const { data: matchingOrgs } = await db.from("organizations").select("id").ilike("name", `%${escaped}%`);
+    const orgIds = (matchingOrgs ?? []).map((o) => o.id as string);
+    const words = escaped.split(/\s+/).filter(Boolean).slice(0, 5);
+    for (const word of words) {
+      const orParts = [
+        `first_name.ilike.%${word}%`,
+        `last_name.ilike.%${word}%`,
+        `email.ilike.%${word}%`,
+        `title.ilike.%${word}%`,
+      ];
+      if (orgIds.length) orParts.push(`organization_id.in.(${orgIds.join(",")})`);
+      q = q.or(orParts.join(","));
+    }
+  }
+
   q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
 
   const { data, error, count } = await q;
@@ -125,7 +151,7 @@ export async function GET(req: NextRequest) {
       ...l,
       campaign_list: cls
         .filter((cl) => cl.campaigns)
-        .map((cl) => ({ id: cl.campaigns!.id, name: cl.campaigns!.name, crm_status: cl.crm_status })),
+        .map((cl) => ({ id: cl.campaigns!.id, name: cl.campaigns!.name, crm_status: cl.crm_status, added_at: cl.created_at })),
     };
   });
 

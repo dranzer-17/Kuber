@@ -74,7 +74,7 @@ export interface DbLead {
   assigned_to: string | null;
   imports: { id: string; label: string; color: string } | null;
   campaign_name?: string | null;
-  campaign_list?: { id: string; name: string; crm_status: string }[];
+  campaign_list?: { id: string; name: string; crm_status: string; added_at?: string | null }[];
   // Set only by the single-lead GET route (review §3.4) — see lib/mappers.ts.
   org_shared?: { other_lead_count: number; other_owner_count: number } | null;
   organizations: {
@@ -191,11 +191,12 @@ export async function fetchLeadsCount(token: string): Promise<number> {
   return data.total;
 }
 
-export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string }): Promise<{ leads: Lead[]; total: number }> {
+export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string; q?: string }): Promise<{ leads: Lead[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.page) qs.set("page", String(params.page));
   if (params?.organization_id) qs.set("organization_id", params.organization_id);
+  if (params?.q) qs.set("q", params.q);
   const data = await apiFetch<{ leads: DbLead[]; total: number }>(`/api/v1/leads?${qs}`, {}, token);
   return { leads: data.leads.map(mapDbLead), total: data.total };
 }
@@ -217,11 +218,64 @@ export async function fetchServiceHealth(token: string): Promise<ServiceIssue[]>
   return data.issues;
 }
 
-export type LeadActivityEvent = { event: string; detail: string | null; actor_name: string | null; created_at: string };
+export type LeadActivityEvent = {
+  event: string;
+  detail: string | null;
+  actor_name: string | null;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  created_at: string;
+};
 
 export async function fetchLeadActivity(token: string, id: string): Promise<LeadActivityEvent[]> {
   const data = await apiFetch<{ events: LeadActivityEvent[] }>(`/api/v1/leads/${id}/activity`, {}, token);
   return data.events;
+}
+
+export type LeadComment = {
+  id: string;
+  body: string;
+  author_id: string;
+  author_name: string;
+  created_at: string;
+};
+
+export async function fetchLeadComments(token: string, id: string): Promise<LeadComment[]> {
+  const data = await apiFetch<{ comments: LeadComment[] }>(`/api/v1/leads/${id}/comments`, {}, token);
+  return data.comments;
+}
+
+export async function postLeadComment(token: string, id: string, body: string): Promise<LeadComment> {
+  const data = await apiFetch<{ comment: LeadComment }>(
+    `/api/v1/leads/${id}/comments`,
+    { method: "POST", body: JSON.stringify({ body }) },
+    token,
+  );
+  return data.comment;
+}
+
+export type CampaignComment = LeadComment;
+
+export async function fetchCampaignComments(token: string, id: string): Promise<CampaignComment[]> {
+  const data = await apiFetch<{ comments: CampaignComment[] }>(
+    `/api/v1/campaigns/${id}/comments`,
+    {},
+    token,
+  );
+  return data.comments;
+}
+
+export async function postCampaignComment(
+  token: string,
+  id: string,
+  body: string,
+): Promise<CampaignComment> {
+  const data = await apiFetch<{ comment: CampaignComment }>(
+    `/api/v1/campaigns/${id}/comments`,
+    { method: "POST", body: JSON.stringify({ body }) },
+    token,
+  );
+  return data.comment;
 }
 
 export async function patchLead(token: string, id: string, body: {

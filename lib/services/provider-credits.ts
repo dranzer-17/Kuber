@@ -4,26 +4,12 @@ type Db = SupabaseClient;
 
 export type CreditCheck = { ok: boolean; remaining: number | null; message: string };
 
-// Cache each provider's check for this long so an active scrape-orgs
-// self-chain (which can fire every few seconds during a big batch) doesn't
-// hit these credit APIs on every single invocation — one fresh check per
-// window is plenty to catch "we just ran out."
-const CACHE_TTL_MS = 5 * 60 * 1000;
-
 // Below these, treat the provider as "not enough to bother trying" — not
 // necessarily literal zero, since a request can still fail on a balance that
 // technically isn't empty (Firecrawl charges whole credits per scrape;
 // OpenRouter's error in practice appears well before the balance hits $0).
 const FIRECRAWL_MIN_CREDITS = 5;
 const OPENROUTER_MIN_BALANCE_USD = 0.10;
-
-async function getCached(db: Db, key: string): Promise<CreditCheck | null> {
-  const { data } = await db.from("settings").select("value, updated_at").eq("key", key).maybeSingle();
-  if (!data) return null;
-  const age = Date.now() - new Date(data.updated_at).getTime();
-  if (age > CACHE_TTL_MS) return null;
-  try { return JSON.parse(data.value) as CreditCheck; } catch { return null; }
-}
 
 async function setCached(db: Db, key: string, value: CreditCheck): Promise<void> {
   await db.from("settings").upsert(
@@ -73,11 +59,11 @@ async function fetchOpenRouterCredits(): Promise<CreditCheck> {
   }
 }
 
-/** Cached, provider-specific credit check. Fails OPEN (ok: true) on any check
- *  error — a broken credit-check call must never itself block real work. */
+/** Live, provider-specific credit check. Fails OPEN (ok: true) on any check
+ *  error — a broken credit-check call must never itself block real work.
+ *  Result is still recorded to `settings` for visibility, but every call
+ *  hits the provider API fresh rather than trusting a stale cached value. */
 async function checkCredits(db: Db, settingsKey: string, fetcher: () => Promise<CreditCheck>): Promise<CreditCheck> {
-  const cached = await getCached(db, settingsKey);
-  if (cached) return cached;
   const fresh = await fetcher();
   await setCached(db, settingsKey, fresh);
   return fresh;

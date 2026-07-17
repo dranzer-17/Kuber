@@ -570,7 +570,13 @@ export async function POST(req: NextRequest) {
   // the same org before either marked it 'scraping', causing duplicate
   // Firecrawl/LLM spend. claim_queued_orgs uses FOR UPDATE SKIP LOCKED so
   // concurrent callers always get disjoint batches.
-  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: 5 });
+  //
+  // Raised from 5 to 15 now that Step 3 below processes the batch
+  // concurrently instead of one org at a time — 15 concurrent scrape+LLM
+  // calls comfortably clears in well under the 300s maxDuration, and keeps
+  // the self-chain firing at a similar cadence rather than ballooning
+  // per-batch wall time.
+  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: 15 });
   if (claimError) {
     return Response.json({ error: claimError.message }, { status: 500 });
   }
@@ -593,31 +599,42 @@ export async function POST(req: NextRequest) {
     payload: { batch_size: orgs.length, org_ids: orgs.map((o) => o.id) },
   });
 
-  // ── Step 3: Process each org sequentially ─────────────────────────────────
+  // ── Step 3: Process the claimed orgs concurrently ─────────────────────────
+  // Each org's scrape+LLM extraction is independent I/O against a different
+  // domain — claim_queued_orgs already guarantees disjoint batches across
+  // concurrent invocations (FOR UPDATE SKIP LOCKED), so there's no shared
+  // state between orgs in this batch either. Running them one at a time was
+  // the single biggest throughput bottleneck: 5 orgs sequentially could take
+  // 5x as long as running them together, for no correctness benefit.
   const failedOrgIds: string[] = [];
-  for (const org of orgs) {
-    processed++;
-    const beforeStage = "queued";
+  const results = await Promise.allSettled(orgs.map(async (org) => {
     try {
       const outcome = await processOneOrg(db, org);
-      if (outcome === "merged") {
-        succeeded++;
-      } else {
-        // Check if it completed (vs failed inside processOneOrg)
-        const { data: updated } = await db
-          .from("organizations")
-          .select("enrichment_stage")
-          .eq("id", org.id)
-          .single();
-        if (updated?.enrichment_stage === "done") succeeded++;
-        else { failed++; failedOrgIds.push(org.id); }
-      }
+      if (outcome === "merged") return { orgId: org.id, ok: true };
+      // Check if it completed (vs failed inside processOneOrg)
+      const { data: updated } = await db
+        .from("organizations")
+        .select("enrichment_stage")
+        .eq("id", org.id)
+        .single();
+      return { orgId: org.id, ok: updated?.enrichment_stage === "done" };
     } catch {
-      failed++;
-      failedOrgIds.push(org.id);
       await markFailed(db, org.id, "SCRAPE_FAILED", "Unexpected error in processOneOrg").catch(() => {});
+      return { orgId: org.id, ok: false };
     }
-    void beforeStage; // suppress unused warning
+  }));
+
+  for (const result of results) {
+    processed++;
+    // allSettled can only reject if the .map callback itself threw outside
+    // its own try/catch, which it doesn't — but guard anyway rather than
+    // assume.
+    if (result.status === "fulfilled" && result.value.ok) {
+      succeeded++;
+    } else {
+      failed++;
+      failedOrgIds.push(result.status === "fulfilled" ? result.value.orgId : "unknown");
+    }
   }
 
   // Enrichment succeeded → autoAssignEnrichedLeads already ran inline. But leads

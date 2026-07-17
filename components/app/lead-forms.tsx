@@ -906,11 +906,11 @@ type ParseResult = {
   skipped_duplicate_in_db: number;
 };
 
-const EXCEL_STEPS = ["Upload file", "Map columns", "Batch & assign", "Review & import"];
+const EXCEL_STEPS = ["Upload file", "Map columns", "Batch", "Assign", "Review & import"];
 
 export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  type Stage = "upload" | "map" | "batch" | "result";
+  type Stage = "upload" | "map" | "batch" | "assign" | "result";
   const [stage,       setStage      ] = useState<Stage>("upload");
   const [fileName,    setFileName   ] = useState("");
   const [headers,     setHeaders    ] = useState<string[]>([]);
@@ -1034,7 +1034,11 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   const emailMapped     = !!mapping.email;
   const firstNameMapped = !!mapping.first_name;
   const domainMapped    = !!mapping.organization_domain;
-  const currentStepIndex = stage === "upload" ? 0 : stage === "map" ? 1 : showConfirm ? 3 : 2;
+  const currentStepIndex =
+    stage === "upload" ? 0
+    : stage === "map"  ? 1
+    : stage === "batch" ? 2
+    : showConfirm ? 4 : 3;
 
   function handleFormSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -1043,9 +1047,13 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
       setStage("batch");
       return;
     }
+    if (stage === "batch") {
+      if (!batchName.trim()) { setBatchNameError(true); return; }
+      setBatchNameError(false);
+      setStage("assign");
+      return;
+    }
     if (importing) return;
-    if (!batchName.trim()) { setBatchNameError(true); return; }
-    setBatchNameError(false);
     setShowConfirm(true);
   }
 
@@ -1074,7 +1082,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
         </div>
       )}
 
-      {(stage === "map" || stage === "batch") && (
+      {(stage === "map" || stage === "batch" || stage === "assign") && (
         <form className="space-y-4" onSubmit={handleFormSubmit}>
           <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3">
             <FileText className="size-4 text-muted-foreground shrink-0" />
@@ -1143,6 +1151,22 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
                 error={batchNameError}
               />
 
+              {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" className="bg-card" onClick={() => setStage("map")}>Back</Button>
+                  <Button type="submit">
+                    Continue
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {stage === "assign" && (
+            <>
               <AssignStrategyPicker
                 employees={employees}
                 mode={assignMode}
@@ -1150,13 +1174,18 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
                 assignTo={assignTo}
                 onAssignToChange={setAssignTo}
               />
+              {employees.length === 0 && (
+                <p className="text-xs text-muted-foreground rounded-lg border border-border bg-secondary/30 px-3 py-2.5">
+                  No active employees to assign to — the batch will land in the pool (unassigned).
+                </p>
+              )}
 
               {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
 
               <div className="flex items-center justify-between gap-3 pt-2">
                 <p className="text-xs text-muted-foreground">{rows.length} rows will be processed</p>
                 <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" className="bg-card" onClick={() => setStage("map")}>Back</Button>
+                  <Button type="button" variant="outline" size="sm" className="bg-card" onClick={() => setStage("batch")}>Back</Button>
                   <Button type="submit" disabled={importing}>
                     Preview & Import
                   </Button>

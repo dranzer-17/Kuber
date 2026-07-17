@@ -26,6 +26,9 @@ type AppContextValue = {
   leadsTotal: number | null;
   loadLeads: (token: string) => Promise<void>;
   loadingLeads: boolean;
+  loadMoreLeads: (token: string) => Promise<void>;
+  loadingMoreLeads: boolean;
+  searchLeads: (token: string, query: string) => Promise<{ leads: Lead[]; total: number }>;
 
   // Campaigns
   campaigns: Campaign[];
@@ -102,6 +105,7 @@ export function AppProvider({
   const [leads,            setLeads          ] = useState<Lead[]>([]);
   const [leadsTotal,       setLeadsTotal     ] = useState<number | null>(initialLeadsTotal);
   const [loadingLeads,     setLoadingLeads   ] = useState(false);
+  const [loadingMoreLeads, setLoadingMoreLeads] = useState(false);
   const [campaigns,        setCampaigns      ] = useState<Campaign[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
@@ -152,14 +156,79 @@ export function AppProvider({
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
+  // Supabase's project-level API row cap silently truncates a single request
+  // no matter what `limit` we pass it (no error — it just hands back fewer
+  // rows than asked, while `count` still reports the true total). Paging in
+  // fixed-size chunks and stopping once a page comes back short is what lets
+  // us actually reach `total`, whatever that per-request cap happens to be.
+  const LEADS_PAGE_SIZE = 500;
+
+  // Offset pagination (page/limit) drifts under concurrent writes: a row
+  // fetched on page 1 can reappear on page 2 if a newer lead got inserted
+  // in between (it shifts everything after it down by one in the
+  // created_at-desc ordering). Dedupe by id while merging pages rather than
+  // trying to hold the underlying table still — the alternative is keyset
+  // pagination, which isn't worth it for an admin list view like this.
+  const fetchLeadsUpTo = useCallback(async (token: string, count: number) => {
+    const seen = new Set<string>();
+    const all: Lead[] = [];
+    let total = 0;
+    for (let page = 1; all.length < count; page++) {
+      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page });
+      for (const lead of res.leads) {
+        if (seen.has(lead.id)) continue;
+        seen.add(lead.id);
+        all.push(lead);
+      }
+      total = res.total;
+      if (res.leads.length < LEADS_PAGE_SIZE) break; // server had no more to give
+    }
+    return { leads: all, total };
+  }, []);
+
+  // Re-fetches however many leads are already loaded (not just the first
+  // page) so the 30s background poll refreshes statuses without discarding
+  // anything loadMoreLeads had pulled in.
   const loadLeads = useCallback(async (token: string) => {
     setLoadingLeads(true);
     try {
-      const { leads: list, total } = await fetchLeads(token, { limit: 2000 });
+      const targetCount = Math.max(leads.length, LEADS_PAGE_SIZE);
+      const { leads: list, total } = await fetchLeadsUpTo(token, targetCount);
       setLeads(list);
       setLeadsTotal(total);
     } catch { /* silently ignore */ }
     finally { setLoadingLeads(false); }
+  }, [leads.length, fetchLeadsUpTo]);
+
+  const loadMoreLeads = useCallback(async (token: string) => {
+    setLoadingMoreLeads(true);
+    try {
+      const targetCount = leads.length + LEADS_PAGE_SIZE;
+      const { leads: list, total } = await fetchLeadsUpTo(token, targetCount);
+      setLeads(list);
+      setLeadsTotal(total);
+    } catch { /* silently ignore */ }
+    finally { setLoadingMoreLeads(false); }
+  }, [leads.length, fetchLeadsUpTo]);
+
+  // Runs the search against the DB (not the client-loaded `leads` subset) so
+  // it finds a match anywhere in the table, not just among the leads already
+  // paged in. Independent of `leads` state — never touches it.
+  const searchLeads = useCallback(async (token: string, query: string): Promise<{ leads: Lead[]; total: number }> => {
+    const seen = new Set<string>();
+    const all: Lead[] = [];
+    let total = 0;
+    for (let page = 1; ; page++) {
+      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page, q: query });
+      for (const lead of res.leads) {
+        if (seen.has(lead.id)) continue;
+        seen.add(lead.id);
+        all.push(lead);
+      }
+      total = res.total;
+      if (res.leads.length < LEADS_PAGE_SIZE || all.length >= total) break;
+    }
+    return { leads: all, total };
   }, []);
 
   const loadCampaigns = useCallback(async (token: string) => {
@@ -209,6 +278,9 @@ export function AppProvider({
     leadsTotal,
     loadLeads,
     loadingLeads,
+    loadMoreLeads,
+    loadingMoreLeads,
+    searchLeads,
     campaigns,
     setCampaigns,
     loadCampaigns,

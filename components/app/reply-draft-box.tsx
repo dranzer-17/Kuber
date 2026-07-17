@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, CheckCircle2, Paperclip, Sparkles } from "lucide-react";
+import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, Paperclip, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -70,22 +70,9 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
     }
   }
 
-  if (status === "sent") {
-    return (
-      <div className="flex items-end gap-2 justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-3">
-          <div
-            className="text-sm leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0 [&_p:last-child]:leading-snug"
-            dangerouslySetInnerHTML={{ __html: draft.body ?? "" }}
-          />
-        </div>
-        <div className="flex items-center gap-1.5 pr-1">
-          <CheckCircle2 className="size-3 text-green-400" />
-          <p className="font-mono text-[10px] uppercase tracking-wide text-green-400">Sent</p>
-        </div>
-      </div>
-    );
-  }
+  // Parent thread (Outbox / Unibox) owns the mail-style row after send —
+  // do not flash a chat bubble here.
+  if (status === "sent") return null;
 
   async function handleSave() {
     setSaving(true);
