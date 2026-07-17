@@ -2633,8 +2633,9 @@ export function CampaignDetail({
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-border bg-card">
-            <div className="w-full max-w-3xl mx-auto px-6 py-4">
+          {/* Floating composer — no full-width bar, the input is its own card. */}
+          <div className="shrink-0 w-full max-w-3xl mx-auto px-6 pb-6 pt-2">
+            <div className="rounded-2xl border border-border bg-card shadow-lg shadow-black/5 focus-within:border-primary/40 transition-colors">
               <Textarea
                 value={commentBody}
                 onChange={(event) => setCommentBody(event.target.value)}
@@ -2647,9 +2648,9 @@ export function CampaignDetail({
                 maxLength={2000}
                 rows={3}
                 placeholder="Write a message to the campaign team…"
-                className="min-h-[76px] resize-none bg-background text-sm"
+                className="min-h-[76px] resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0 px-4 pt-3"
               />
-              <div className="flex items-center justify-between gap-2 mt-2">
+              <div className="flex items-center justify-between gap-2 px-4 pb-3">
                 <span className="text-[10px] text-muted-foreground">
                   Ctrl/⌘ + Enter to send
                 </span>

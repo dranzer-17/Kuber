@@ -1157,37 +1157,40 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                       </div>
                     )}
                   </div>
-                  <div className="shrink-0 border-t border-border bg-card p-3">
-                    <Textarea
-                      value={commentBody}
-                      onChange={(event) => setCommentBody(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                          event.preventDefault();
-                          void handleSendComment();
-                        }
-                      }}
-                      maxLength={2000}
-                      rows={3}
-                      placeholder="Write a message to the team…"
-                      className="min-h-[72px] resize-none bg-background text-xs"
-                    />
-                    <div className="flex items-center justify-between gap-2 mt-2">
-                      <span className="text-[10px] text-muted-foreground">
-                        Ctrl/⌘ + Enter to send
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => void handleSendComment()}
-                        disabled={!commentBody.trim() || sendingComment}
-                        className="h-7 gap-1.5 px-2.5 text-xs"
-                      >
-                        {sendingComment
-                          ? <Loader2 className="size-3 animate-spin" />
-                          : <Send className="size-3" />}
-                        Send
-                      </Button>
+                  {/* Floating composer — no full-width bar, the input is its own card. */}
+                  <div className="shrink-0 px-3 pb-3 pt-1">
+                    <div className="rounded-xl border border-border bg-card shadow-lg shadow-black/5 focus-within:border-primary/40 transition-colors">
+                      <Textarea
+                        value={commentBody}
+                        onChange={(event) => setCommentBody(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                            event.preventDefault();
+                            void handleSendComment();
+                          }
+                        }}
+                        maxLength={2000}
+                        rows={3}
+                        placeholder="Write a message to the team…"
+                        className="min-h-[72px] resize-none border-0 bg-transparent text-xs shadow-none focus-visible:ring-0 px-3 pt-2.5"
+                      />
+                      <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
+                        <span className="text-[10px] text-muted-foreground">
+                          Ctrl/⌘ + Enter to send
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void handleSendComment()}
+                          disabled={!commentBody.trim() || sendingComment}
+                          className="h-7 gap-1.5 px-2.5 text-xs"
+                        >
+                          {sendingComment
+                            ? <Loader2 className="size-3 animate-spin" />
+                            : <Send className="size-3" />}
+                          Send
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </>
