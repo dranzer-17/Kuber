@@ -8,7 +8,7 @@ import {
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
   RotateCcw, Zap, Bot, Settings, Pencil, Phone, Link,
   MapPin, Save, ChevronRight, UserCog, Check, MessageSquare,
-  XCircle, Send, MailCheck, MailOpen, Reply, Sparkles, BellOff,
+  XCircle, Send, MailCheck, MailOpen, Reply, Sparkles, BellOff, ArrowUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatChatDate, formatChatTime, startsNewChatDay } from "@/lib/chat-format";
@@ -1180,15 +1180,16 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         </span>
                         <Button
                           type="button"
-                          size="sm"
+                          size="icon"
                           onClick={() => void handleSendComment()}
                           disabled={!commentBody.trim() || sendingComment}
-                          className="h-7 gap-1.5 px-2.5 text-xs"
+                          aria-label="Send message"
+                          title="Send message"
+                          className="size-7 rounded-full"
                         >
                           {sendingComment
                             ? <Loader2 className="size-3 animate-spin" />
-                            : <Send className="size-3" />}
-                          Send
+                            : <ArrowUp className="size-3.5" strokeWidth={2.5} />}
                         </Button>
                       </div>
                     </div>

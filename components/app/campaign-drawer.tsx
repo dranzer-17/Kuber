@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Megaphone, Users, Send, MessageSquare, Clock, Gauge,
+  Megaphone, Users, Send, MessageSquare, Clock, Gauge, ArrowUp,
   Globe, Calendar, ExternalLink, Loader2, CheckCircle2, RotateCcw, RefreshCw, Check, Save, History, ChevronDown, ArrowLeft,
   List, LayoutGrid, BarChart2, Flame, Snowflake, ThumbsDown, Layers, Paperclip, X, Sparkles, Pencil, Reply,
 } from "lucide-react";
@@ -2656,15 +2656,16 @@ export function CampaignDetail({
                 </span>
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
                   onClick={() => void handleSendComment()}
                   disabled={!commentBody.trim() || sendingComment}
-                  className="h-8 gap-1.5 px-3 text-xs"
+                  aria-label="Send message"
+                  title="Send message"
+                  className="size-8 rounded-full"
                 >
                   {sendingComment
-                    ? <Loader2 className="size-3 animate-spin" />
-                    : <Send className="size-3" />}
-                  Send
+                    ? <Loader2 className="size-3.5 animate-spin" />
+                    : <ArrowUp className="size-4" strokeWidth={2.5} />}
                 </Button>
               </div>
             </div>
