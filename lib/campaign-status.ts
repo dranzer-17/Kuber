@@ -35,6 +35,37 @@ export function isFailedDraft(cl: CampaignLeadLike): boolean {
   return unwrapDraft(cl.email_drafts)?.status === "failed";
 }
 
+/**
+ * Recomputes the campaign-card / analytics-tab summary numbers (leads, sent,
+ * replied, hot, cold) from a set of campaign_leads rows. Used to give an
+ * employee their OWN scoped counts — the campaigns table's total_leads /
+ * sent_count / replied_count / hot_count / cold_count columns are campaign-wide
+ * and were never meant to be shown to an employee as-is (spec §5: a campaign
+ * is a shared container, an employee only sees/counts their own leads in it).
+ */
+export type CampaignStatsRow = CampaignLeadLike & { lead_temperature?: string | null };
+
+export function computeCampaignStats(rows: CampaignStatsRow[]): {
+  total_leads: number;
+  sent_count: number;
+  replied_count: number;
+  hot_count: number;
+  cold_count: number;
+} {
+  let sent_count = 0;
+  let replied_count = 0;
+  let hot_count = 0;
+  let cold_count = 0;
+  for (const r of rows) {
+    const bucket = campaignBucket(r);
+    if (bucket === "sent" || bucket === "replied") sent_count++;
+    if (bucket === "replied") replied_count++;
+    if (r.lead_temperature === "hot") hot_count++;
+    if (r.lead_temperature === "cold") cold_count++;
+  }
+  return { total_leads: rows.length, sent_count, replied_count, hot_count, cold_count };
+}
+
 export const CAMPAIGN_KANBAN_COLS: {
   id: CampaignKanbanBucket;
   label: string;

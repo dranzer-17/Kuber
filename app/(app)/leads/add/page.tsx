@@ -15,7 +15,7 @@ export default function AddLeadsPage() {
 
   useEffect(() => {
     if (loadingSession) return;
-    if (role === "manager" || role === "employee") setShowAddLeads(true);
+    if (role === "manager") setShowAddLeads(true);
     router.replace("/leads");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingSession, role]);

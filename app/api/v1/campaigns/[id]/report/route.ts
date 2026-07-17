@@ -36,10 +36,16 @@ export async function GET(
 
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
 
-  const { data: rows } = await db
+  // A campaign is a shared container across employees (spec §5) — an
+  // employee's report must only reflect their own leads, never the whole
+  // campaign (confirmed live: an employee with 2 of a campaign's 7 leads was
+  // seeing the full campaign-wide funnel/draft-generation numbers).
+  let rowsQuery = db
     .from("campaign_leads")
-    .select("id, crm_status, draft_id, email_drafts(status)")
+    .select("id, crm_status, draft_id, email_drafts(status), leads!inner(assigned_to)")
     .eq("campaign_id", id);
+  if (user.role === "employee") rowsQuery = rowsQuery.eq("leads.assigned_to", user.id);
+  const { data: rows } = await rowsQuery;
 
   const leads = rows ?? [];
   const bucketCounts: Record<CampaignKanbanBucket, number> = {
@@ -72,8 +78,11 @@ export async function GET(
   }
 
   const replied = leads.filter((r) => r.crm_status === "replied").length;
-  const sentTotal = Math.max(sent, campaign.sent_count ?? 0);
-  const repliedTotal = Math.max(replied, campaign.replied_count ?? 0);
+  // campaign.sent_count / replied_count are campaign-wide counters — only a
+  // safe floor for a manager (who sees the whole campaign); falling back to
+  // them for an employee would leak the other employees' numbers back in.
+  const sentTotal = user.role === "employee" ? sent : Math.max(sent, campaign.sent_count ?? 0);
+  const repliedTotal = user.role === "employee" ? replied : Math.max(replied, campaign.replied_count ?? 0);
 
   const attempted = succeeded + failed;
   const successRate = attempted > 0 ? Math.round((succeeded / attempted) * 100) : 0;

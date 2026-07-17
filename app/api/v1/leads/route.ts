@@ -1,6 +1,6 @@
 import { NextRequest, after } from "next/server";
 import crypto from "crypto";
-import { requireAuth } from "@/lib/auth/api-auth";
+import { requireAuth, requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
@@ -161,24 +161,24 @@ export async function GET(req: NextRequest) {
   return ok({ leads, total: count, page, limit });
 }
 
+// Manual lead-add is a manager/super-admin action, same as every other
+// lead-add path (Apollo search, Excel import, bulk-assign) — employees are
+// execution-only and cannot add leads (spec §1).
 export async function POST(req: NextRequest) {
-  let user: { id: string; role: "manager" | "employee" };
-  try { user = await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, assigned_to: requestedAssignedTo, ...leadFields } = parsed.data;
-  // Employees always work their own leads — force self-assignment regardless of
-  // what was sent, rather than letting one employee assign leads to another.
-  // Managers keep full control (assign to anyone, or leave unassigned).
-  const assigned_to = user.role === "employee" ? user.id : (requestedAssignedTo ?? null);
+  const assigned_to = requestedAssignedTo ?? null;
   const db = createAdminClient();
 
   // A manager-supplied assignee must be a real, active user — same check the
   // Apollo/Excel import paths perform.
-  if (user.role === "manager" && assigned_to) {
+  if (assigned_to) {
     const { data: assignee } = await db
       .from("profiles")
       .select("id, is_active")

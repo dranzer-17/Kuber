@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { CreateCampaignSchema } from "@/lib/validators/campaigns";
 import { buildDefaultCampaignSteps } from "@/lib/constants";
 import { getAccessibleCampaignIds } from "@/lib/auth/scope";
+import { computeCampaignStats } from "@/lib/campaign-status";
 
 
 export async function GET(req: NextRequest) {
@@ -15,8 +16,7 @@ export async function GET(req: NextRequest) {
 
   // A campaign is a container that may hold leads from several employees
   // (spec §5). An employee sees any campaign that contains at least one lead
-  // assigned to them (getAccessibleCampaignIds resolves that); the per-lead
-  // filtering happens in the campaign-detail route.
+  // assigned to them (getAccessibleCampaignIds resolves that).
   if (user.role === "employee") {
     const ids = await getAccessibleCampaignIds(db, user);
     if (ids.length === 0) return ok({ campaigns: [] });
@@ -27,7 +27,39 @@ export async function GET(req: NextRequest) {
       .in("id", ids)
       .order("created_at", { ascending: false });
     if (error) return fail(500, "INTERNAL", error.message);
-    return ok({ campaigns: data });
+
+    // The row's own total_leads/sent_count/replied_count/hot_count/cold_count
+    // are campaign-wide — an employee must only see counts for THEIR OWN leads
+    // in each campaign, never a co-worker's (confirmed live: an employee with
+    // 2 of a campaign's 7 leads was seeing the full 7/7/2/29% campaign-wide
+    // stats on their card and Analytics tab). Recompute from campaign_leads
+    // scoped to this employee and overlay onto each row before returning.
+    const { data: ownRows } = await db
+      .from("campaign_leads")
+      .select("campaign_id, crm_status, lead_temperature, email_drafts(status), leads!inner(assigned_to)")
+      .in("campaign_id", ids)
+      .eq("leads.assigned_to", user.id);
+
+    const byCampaign = new Map<string, typeof ownRows>();
+    for (const row of ownRows ?? []) {
+      const list = byCampaign.get(row.campaign_id as string) ?? [];
+      list.push(row);
+      byCampaign.set(row.campaign_id as string, list);
+    }
+
+    const scoped = (data ?? []).map((c) => {
+      const stats = computeCampaignStats(byCampaign.get(c.id as string) ?? []);
+      return {
+        ...c,
+        total_leads: stats.total_leads,
+        sent_count: stats.sent_count,
+        replied_count: stats.replied_count,
+        hot_count: stats.hot_count,
+        cold_count: stats.cold_count,
+      };
+    });
+
+    return ok({ campaigns: scoped });
   }
 
   const { data, error } = await db

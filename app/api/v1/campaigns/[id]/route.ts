@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { PatchCampaignSchema } from "@/lib/validators/campaigns";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { deleteCampaignInstantly } from "@/lib/services/campaign-lifecycle";
+import { computeCampaignStats } from "@/lib/campaign-status";
 
 export const maxDuration = 60;
 
@@ -28,12 +29,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (error) return fail(500, "INTERNAL", error.message);
   if (!campaign) return fail(404, "NOT_FOUND", "Campaign not found");
 
-  const { data: memberships } = await db
+  // A campaign is a container that may hold leads from several employees
+  // (spec §5) — an employee sees only their own leads' memberships, and the
+  // card/analytics totals below must reflect only those, not the whole
+  // campaign (confirmed live: an employee with 2 of 7 leads was seeing the
+  // full campaign-wide 7/7/2/29% stats).
+  let membershipsQuery = db
     .from("campaign_leads")
-    .select("id, crm_status, lead_id, draft_id, interest_status")
+    .select("id, crm_status, lead_id, draft_id, interest_status, lead_temperature, email_drafts(status), leads!inner(assigned_to)")
     .eq("campaign_id", id);
+  if (user.role === "employee") membershipsQuery = membershipsQuery.eq("leads.assigned_to", user.id);
+  const { data: memberships } = await membershipsQuery;
 
-  return ok({ ...campaign, memberships: memberships ?? [] });
+  const scopedCampaign = user.role === "employee"
+    ? { ...campaign, ...computeCampaignStats(memberships ?? []) }
+    : campaign;
+
+  return ok({ ...scopedCampaign, memberships: memberships ?? [] });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
