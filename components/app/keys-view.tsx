@@ -18,12 +18,15 @@ import {
 } from "@/components/ui/select";
 import {
   fetchProviderKeys, createProviderKey, patchProviderKey, deleteProviderKey,
-  checkProviderKey, setProviderModel, setLlmTierRoles, setSendingAccounts,
-  type ProviderConfig, type ProviderKey, type LlmTierRoles,
+  checkProviderKey, setProviderModel, setSendingAccounts,
+  type ProviderConfig, type ProviderKey,
 } from "@/lib/api-client";
 
 const OTHER_MODEL = "__other__";
-type TierRole = "primary" | "fallback";
+
+// Keys UI only surfaces these LLM providers. Others stay in the backend
+// registry as deep fallbacks but aren't managed from this page.
+const VISIBLE_LLM_PROVIDERS = ["openrouter", "openai", "anthropic"] as const;
 
 function statusMeta(status: ProviderKey["status"]): { label: string; dot: string; text: string } {
   if (status === "healthy") return { label: "Healthy", dot: "bg-emerald-400", text: "text-emerald-400" };
@@ -50,17 +53,20 @@ function ConfigSummary({ provider }: { provider: ProviderConfig }) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
         <span className="size-1.5 rounded-full bg-muted-foreground/40" aria-hidden />
-        Not configured
+        No key yet
       </span>
     );
   }
   return (
     <span className={cn(
       "inline-flex items-center gap-1.5 text-xs",
-      dead > 0 ? "text-destructive" : "text-muted-foreground",
+      dead > 0 ? "text-destructive" : "text-emerald-500",
     )}>
       <span className={cn("size-1.5 rounded-full", dead > 0 ? "bg-destructive" : "bg-emerald-400")} aria-hidden />
-      {active.length} key{active.length !== 1 ? "s" : ""}{dead > 0 ? ` · ${dead} dead` : ""}
+      Key added
+      <span className="text-muted-foreground">
+        · {active.length} active{dead > 0 ? ` · ${dead} dead` : ""} · •••{active[0]?.secret_last4}
+      </span>
     </span>
   );
 }
@@ -68,11 +74,8 @@ function ConfigSummary({ provider }: { provider: ProviderConfig }) {
 export function KeysView() {
   const { session } = useApp();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
-  const [tierRoles, setTierRoles] = useState<LlmTierRoles>({ primary: null, fallback: null });
-  const [tierOrder, setTierOrder] = useState<string[]>([]);
   const [sendingAccounts, setAccounts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savingRole, setSavingRole] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<ProviderConfig | null>(null);
 
@@ -82,8 +85,6 @@ export function KeysView() {
     try {
       const data = await fetchProviderKeys(session.access_token);
       setProviders(data.providers);
-      setTierRoles(data.tierRoles);
-      setTierOrder(data.tierOrder);
       setAccounts(data.sendingAccounts);
     } catch (e) {
       toast.error((e as Error).message);
@@ -94,46 +95,21 @@ export function KeysView() {
 
   useEffect(() => { void load(true); }, [load]);
 
-  // Clicking an already-active role clears it (back to default order).
-  // Clicking a provider's OTHER role moves it there and clears whichever role
-  // it previously held, so a provider can never hold both — the server also
-  // rejects primary === fallback as defense in depth, but this keeps the
-  // common case from ever hitting that rejection.
-  async function handleSetRole(providerId: string, role: TierRole) {
-    if (!session) return;
-    const settingThisRole = tierRoles[role] !== providerId;
-    let primary = tierRoles.primary;
-    let fallback = tierRoles.fallback;
-
-    if (role === "primary") {
-      primary = settingThisRole ? providerId : null;
-      if (settingThisRole && fallback === providerId) fallback = null;
-    } else {
-      fallback = settingThisRole ? providerId : null;
-      if (settingThisRole && primary === providerId) primary = null;
-    }
-
-    setSavingRole(true);
-    try {
-      await setLlmTierRoles(session.access_token, { primary, fallback });
-      toast.success("Provider order updated");
-      await load();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSavingRole(false);
-    }
-  }
-
-  const llmProviders = useMemo(() => providers.filter((p) => p.category === "llm"), [providers]);
+  const llmProviders = useMemo(
+    () => VISIBLE_LLM_PROVIDERS
+      .map((id) => providers.find((p) => p.id === id))
+      .filter((p): p is ProviderConfig => !!p),
+    [providers],
+  );
   const serviceProviders = useMemo(() => providers.filter((p) => p.category === "service"), [providers]);
-  const labelById = useMemo(() => new Map(providers.map((p) => [p.id, p.label])), [providers]);
 
   // Only providers the admin has actually set up appear in the list; the rest
-  // live behind "Add provider". Showing all six unconfigured cards made the
-  // page read as six broken integrations rather than one working one.
+  // live behind "Add provider".
   const configuredLlm = llmProviders.filter((p) => p.keys.length > 0 || p.envFallback);
   const availableLlm = llmProviders.filter((p) => p.keys.length === 0 && !p.envFallback);
+
+  // First configured provider with an active key is primary; the rest are fallbacks.
+  const primaryId = configuredLlm.find((p) => p.keys.some((k) => k.is_active))?.id ?? null;
 
   if (loading) {
     return <p className="text-sm text-muted-foreground px-5 py-10 text-center">Loading provider keys…</p>;
@@ -183,7 +159,7 @@ export function KeysView() {
             <p className="text-xs text-muted-foreground mt-1">
               {configuredLlm.length === 0
                 ? "None configured yet — drafts can't be generated until you add one."
-                : <>Tried in order: {tierOrder.filter((id) => configuredLlm.some((p) => p.id === id)).map((id) => labelById.get(id) ?? id).join(" → ")}</>}
+                : "OpenRouter, OpenAI, and Anthropic only. The first with a key is primary; the rest are automatic fallbacks."}
             </p>
           </div>
           <Button
@@ -216,9 +192,11 @@ export function KeysView() {
               <ProviderRow
                 key={p.id}
                 provider={p}
-                tierRole={tierRoles.primary === p.id ? "primary" : tierRoles.fallback === p.id ? "fallback" : null}
-                onSetRole={handleSetRole}
-                savingRole={savingRole}
+                roleBadge={
+                  p.keys.some((k) => k.is_active)
+                    ? (p.id === primaryId ? "primary" : "fallback")
+                    : null
+                }
                 onManage={() => setEditing(p)}
               />
             ))}
@@ -246,25 +224,37 @@ export function KeysView() {
 }
 
 /** A single provider line. Same shape for services and LLMs so the page reads
- *  as one list; the Primary/Fallback toggles are the only LLM-specific part. */
-function ProviderRow({ provider, tierRole, onSetRole, savingRole, onManage }: {
+ *  as one list; LLM rows may also show an automatic primary/fallback badge. */
+function ProviderRow({ provider, roleBadge, onManage }: {
   provider: ProviderConfig;
-  tierRole?: TierRole | null;
-  onSetRole?: (providerId: string, role: TierRole) => Promise<void>;
-  savingRole?: boolean;
+  roleBadge?: "primary" | "fallback" | null;
   onManage: () => void;
 }) {
   const model = provider.selectedModel || provider.defaultModel;
+  const hasKeys = provider.keys.length > 0;
 
   return (
     <div className="flex items-center gap-4 px-5 py-3.5 min-w-0">
-      <div className="shrink-0 size-8 rounded-md bg-secondary/60 flex items-center justify-center">
-        <KeyRound className="size-4 text-muted-foreground" />
+      <div className={cn(
+        "shrink-0 size-8 rounded-md flex items-center justify-center",
+        hasKeys ? "bg-emerald-500/10 text-emerald-500" : "bg-secondary/60 text-muted-foreground",
+      )}>
+        <KeyRound className="size-4" />
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 min-w-0">
           <p className="text-sm font-semibold truncate">{provider.label}</p>
+          {roleBadge && (
+            <span className={cn(
+              "shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+              roleBadge === "primary"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                : "border-border bg-secondary/60 text-muted-foreground",
+            )}>
+              {roleBadge === "primary" ? "Primary" : "Fallback"}
+            </span>
+          )}
           {provider.modelInputMode !== "none" && model && (
             <span className="shrink-0 font-mono text-[10px] text-muted-foreground bg-secondary/60 rounded px-1.5 py-0.5 truncate max-w-[14rem]">
               {model}
@@ -281,29 +271,8 @@ function ProviderRow({ provider, tierRole, onSetRole, savingRole, onManage }: {
         </div>
       </div>
 
-      {onSetRole && (
-        <div className="hidden sm:flex items-center gap-1 shrink-0">
-          {(["primary", "fallback"] as const).map((role) => {
-            const active = tierRole === role;
-            return (
-              <Button
-                key={role}
-                size="sm"
-                variant={active ? "default" : "outline"}
-                className="h-7 px-2.5 text-[11px] capitalize"
-                disabled={savingRole}
-                onClick={() => void onSetRole(provider.id, role)}
-                title={active ? `Click to clear ${role}` : `Set as ${role}`}
-              >
-                {role}
-              </Button>
-            );
-          })}
-        </div>
-      )}
-
-      <Button size="sm" variant="ghost" className="shrink-0 h-8" onClick={onManage}>
-        Manage
+      <Button size="sm" variant={hasKeys ? "outline" : "ghost"} className="shrink-0 h-8" onClick={onManage}>
+        {hasKeys ? <><Pencil className="size-3.5 mr-1.5" /> Update</> : "Manage"}
       </Button>
     </div>
   );

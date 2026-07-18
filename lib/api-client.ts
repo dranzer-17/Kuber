@@ -693,6 +693,7 @@ export type MySettings = {
   sender_name: string | null;
   theme: string | null;
   theme_mode: string | null;
+  is_super_admin: boolean;
   defaults: {
     draft_prompt: string;
     reply_prompt: string;

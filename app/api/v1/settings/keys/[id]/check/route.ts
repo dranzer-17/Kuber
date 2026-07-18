@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { checkSpecificKey } from "@/lib/services/provider-credits";
@@ -10,7 +10,7 @@ import type { ProviderId } from "@/lib/services/providers/types";
 // active key" resolution and the 5-minute cache entirely (the whole point of
 // the Re-check button is to test this exact key immediately).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();

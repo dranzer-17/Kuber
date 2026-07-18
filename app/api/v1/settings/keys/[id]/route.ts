@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchProviderKeySchema } from "@/lib/validators/provider-keys";
@@ -7,7 +7,7 @@ import { PatchProviderKeySchema } from "@/lib/validators/provider-keys";
 const KEY_SELECT = "id, provider, label, secret_last4, priority, is_active, status, cooling_off_until, last_used_at, last_checked_at, last_error, last_error_at, created_at";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
@@ -28,7 +28,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const db = createAdminClient();

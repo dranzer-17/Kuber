@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { ReorderProviderKeysSchema } from "@/lib/validators/provider-keys";
 
 export async function PUT(req: NextRequest) {
-  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = ReorderProviderKeysSchema.safeParse(body);

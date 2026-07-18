@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
-import { requireSuperAdmin } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateProviderKeySchema } from "@/lib/validators/provider-keys";
@@ -19,7 +19,7 @@ type ProviderKeyRow = {
 const KEY_SELECT = "id, provider, label, secret_last4, priority, is_active, status, cooling_off_until, last_used_at, last_checked_at, last_error, last_error_at, created_at";
 
 export async function GET(req: NextRequest) {
-  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  try { await requireManager(req); } catch (r) { return r as Response; }
 
   const db = createAdminClient();
   const [{ data: keys }, { data: settings }, tierRoles, tierOrder, sendingAccounts] = await Promise.all([
@@ -63,8 +63,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let caller: Awaited<ReturnType<typeof requireSuperAdmin>>;
-  try { caller = await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  let caller: Awaited<ReturnType<typeof requireManager>>;
+  try { caller = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateProviderKeySchema.safeParse(body);

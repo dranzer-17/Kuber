@@ -19,7 +19,7 @@ type Db = ReturnType<typeof createAdminClient>;
 // is nullable — null means "inherit the company default". The response carries
 // both the raw personal values and the resolved effective ones so the UI can
 // show "Using company default" states without a second round-trip.
-async function buildResponse(db: Db, userId: string) {
+async function buildResponse(db: Db, userId: string, isSuperAdmin: boolean) {
   const [personal, globalPrompt, replyPrompts, signature, client] = await Promise.all([
     getUserSettings(db, userId),
     getSystemPrompt(db),
@@ -35,6 +35,8 @@ async function buildResponse(db: Db, userId: string) {
     sender_name:  personal?.sender_name ?? null,
     theme:        personal?.theme ?? null,
     theme_mode:   personal?.theme_mode ?? null,
+    // Already resolved by requireAuth — no extra profile round-trip.
+    is_super_admin: isSuperAdmin,
     defaults: {
       draft_prompt: globalPrompt,
       reply_prompt: replyPrompts.drafter,
@@ -52,7 +54,7 @@ export async function GET(req: NextRequest) {
   }
 
   const db = createAdminClient();
-  return ok(await buildResponse(db, user.id));
+  return ok(await buildResponse(db, user.id, user.isSuperAdmin));
 }
 
 export async function PATCH(req: NextRequest) {
@@ -83,5 +85,5 @@ export async function PATCH(req: NextRequest) {
     if (error) return fail(500, "INTERNAL", error.message);
   }
 
-  return ok(await buildResponse(db, user.id));
+  return ok(await buildResponse(db, user.id, user.isSuperAdmin));
 }

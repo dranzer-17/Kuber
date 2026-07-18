@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AvailabilityToggle } from "@/components/ui/availability-toggle";
-import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo, fetchUsers, fetchMyAvailability, setMyAvailability, type AvailabilityStatus } from "@/lib/api-client";
+import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettings, removeLogo, uploadLogo, fetchMyAvailability, setMyAvailability, type AvailabilityStatus } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/branding";
@@ -271,7 +271,7 @@ export function SettingsView() {
   // runs unconditionally on every render.
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const navItems = isManager
-    ? (isSuperAdmin ? [...MANAGER_NAV_ITEMS, { id: "keys" as const, label: "Keys" }] : MANAGER_NAV_ITEMS)
+    ? [...MANAGER_NAV_ITEMS, { id: "keys" as const, label: "Keys" }]
     : NAV_ITEMS;
   const aiNavItems = isManager ? [...PERSONAL_AI_NAV_ITEMS, ...COMPANY_AI_NAV_ITEMS] : PERSONAL_AI_NAV_ITEMS;
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -341,11 +341,11 @@ export function SettingsView() {
         const logoPromise = isManager
           ? fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }))
           : Promise.resolve({ logo_path: null, logo_url: null });
-        const usersPromise = isManager
-          ? fetchUsers(token).catch(() => [])
-          : Promise.resolve([]);
 
         const my = await myPromise;
+        // Keys nav depends on this — set it from /me/settings immediately so we
+        // don't wait on company settings / logo (or a full Team users list).
+        setIsSuperAdmin(my.is_super_admin);
         setMyDraftPrompt(my.draft_prompt ?? "");
         setMyReplyPrompt(my.reply_prompt ?? "");
         setMySignature(my.signature ?? "");
@@ -369,9 +369,6 @@ export function SettingsView() {
         const l = await logoPromise;
         setLogoPath(l.logo_path);
         setLogoUrl(l.logo_url);
-
-        const users = await usersPromise;
-        setIsSuperAdmin(users.find((u) => u.id === session?.user?.id)?.is_super_admin ?? false);
       } catch (e) {
         setError((e as Error).message);
         setLoading(false);
@@ -1159,7 +1156,7 @@ export function SettingsView() {
                 </div>
               )}
 
-              {section === "keys" && isSuperAdmin && (
+              {section === "keys" && isManager && (
                 <div className="-m-8">
                   <KeysView />
                 </div>

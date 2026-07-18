@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
-import { requireSuperAdmin } from "@/lib/auth/api-auth";
+import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { SetProviderModelSchema } from "@/lib/validators/provider-keys";
 import { PROVIDER_META } from "@/lib/services/providers/registry";
 
 export async function PUT(req: NextRequest) {
-  let caller: Awaited<ReturnType<typeof requireSuperAdmin>>;
-  try { caller = await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  let caller: Awaited<ReturnType<typeof requireManager>>;
+  try { caller = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = SetProviderModelSchema.safeParse(body);
