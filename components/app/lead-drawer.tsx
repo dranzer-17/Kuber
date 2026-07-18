@@ -311,17 +311,41 @@ const ACTIVITY_ICONS: Record<string, React.ComponentType<{ className?: string }>
 // rather than silently reading like normal progress.
 const BAD_ACTIVITY_EVENTS = new Set(["enrichment_failed", "draft_failed", "email_bounced", "unsubscribed"]);
 
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  const diff = Date.now() - then;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
+// Activity is an audit trail, so entries carry a calendar-anchored timestamp
+// ("yesterday at 05:42 PM") rather than an elapsed-only label ("1d ago") —
+// elapsed labels lose the time of day, which is what you need when
+// reconstructing the order things actually happened in.
+function activityTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+
+  const time = d.toLocaleTimeString("en-US", {
+    hour: "2-digit", minute: "2-digit", hour12: true,
+  });
+
+  // Compare calendar days in local time — a diff in hours would call 11pm
+  // yesterday "today" when read at 1am.
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const dayDelta = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000);
+
+  if (dayDelta === 0) return `today at ${time}`;
+  if (dayDelta === 1) return `yesterday at ${time}`;
+
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const date = d.toLocaleDateString("en-US", {
+    month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }),
+  });
+  return `${date} at ${time}`;
+}
+
+// Full timestamp for the hover tooltip, so an exact value is always reachable.
+function fullTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", {
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: true,
+  });
 }
 
 function ActivityItem({ event, isLast, onCampaignClick }: {
@@ -367,7 +391,7 @@ function ActivityItem({ event, isLast, onCampaignClick }: {
           {inline ? <>{before}{campaignLink}{after}</> : detailText}
         </p>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-muted-foreground">
-          <span>{relativeTime(event.created_at)}</span>
+          <span title={fullTimestamp(event.created_at)}>{activityTimestamp(event.created_at)}</span>
           {event.actor_name && <span>· by {event.actor_name}</span>}
           {canLink && !inline && <span>· in {campaignLink}</span>}
         </div>
