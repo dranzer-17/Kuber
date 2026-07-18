@@ -287,12 +287,25 @@ export async function fetchLeadActivity(token: string, id: string): Promise<Lead
   return data.events;
 }
 
+export type CommentReactionUser = {
+  id: string;
+  name: string;
+};
+
+export type CommentReactionGroup = {
+  emoji: string;
+  count: number;
+  reacted_by_me: boolean;
+  users: CommentReactionUser[];
+};
+
 export type LeadComment = {
   id: string;
   body: string;
   author_id: string;
   author_name: string;
   created_at: string;
+  reactions: CommentReactionGroup[];
 };
 
 export async function fetchLeadComments(token: string, id: string): Promise<LeadComment[]> {
@@ -307,6 +320,20 @@ export async function postLeadComment(token: string, id: string, body: string): 
     token,
   );
   return data.comment;
+}
+
+export async function toggleLeadCommentReaction(
+  token: string,
+  leadId: string,
+  commentId: string,
+  emoji: string,
+): Promise<CommentReactionGroup[]> {
+  const data = await apiFetch<{ reactions: CommentReactionGroup[] }>(
+    `/api/v1/leads/${leadId}/comments/${commentId}/reactions`,
+    { method: "POST", body: JSON.stringify({ emoji }) },
+    token,
+  );
+  return data.reactions;
 }
 
 export type CampaignComment = LeadComment;
@@ -331,6 +358,20 @@ export async function postCampaignComment(
     token,
   );
   return data.comment;
+}
+
+export async function toggleCampaignCommentReaction(
+  token: string,
+  campaignId: string,
+  commentId: string,
+  emoji: string,
+): Promise<CommentReactionGroup[]> {
+  const data = await apiFetch<{ reactions: CommentReactionGroup[] }>(
+    `/api/v1/campaigns/${campaignId}/comments/${commentId}/reactions`,
+    { method: "POST", body: JSON.stringify({ emoji }) },
+    token,
+  );
+  return data.reactions;
 }
 
 export async function patchLead(token: string, id: string, body: {

@@ -11,15 +11,16 @@ import {
   XCircle, Send, MailCheck, MailOpen, Reply, Sparkles, BellOff, ArrowUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatChatDate, formatChatTime, startsNewChatDay } from "@/lib/chat-format";
+import { formatChatDate, startsNewChatDay } from "@/lib/chat-format";
 import { useApp } from "@/lib/app-context";
 import type { Lead, EnrichmentStage, LeadStatus } from "@/lib/leads";
 import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
 import {
   fetchLead, fetchLeadActivity, fetchLeadComments, fetchUsers, patchLead,
-  postLeadComment, rescrapeOrg, fetchServiceHealth,
+  postLeadComment, toggleLeadCommentReaction, rescrapeOrg, fetchServiceHealth,
   type Profile, type LeadActivityEvent, type LeadComment,
 } from "@/lib/api-client";
+import { DiscussionComment } from "@/components/app/discussion-comment";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -523,6 +524,22 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       toast.error((error as Error).message || "Could not send the message");
     } finally {
       setSendingComment(false);
+    }
+  }
+
+  async function handleToggleCommentReaction(commentId: string, emoji: string) {
+    if (!display) return;
+    try {
+      const tok = await getToken();
+      const reactions = await toggleLeadCommentReaction(tok, display.id, commentId, emoji);
+      setComments((current) =>
+        current.map((comment) =>
+          comment.id === commentId ? { ...comment, reactions } : comment,
+        ),
+      );
+    } catch (error) {
+      toast.error((error as Error).message || "Could not update reaction");
+      throw error;
     }
   }
 
@@ -1131,7 +1148,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         </p>
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="space-y-2.5">
                         {comments.map((comment, index) => {
                           const own = comment.author_id === session?.user.id;
                           const showDate = startsNewChatDay(
@@ -1147,33 +1164,13 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                                   </span>
                                 </div>
                               )}
-                              <div className={cn("flex gap-2.5", own && "flex-row-reverse")}>
-                                <Avatar name={comment.author_name} size="sm" />
-                                <div className={cn("min-w-0 max-w-[82%]", own && "text-right")}>
-                                  <div className={cn(
-                                    "mb-1 flex items-baseline",
-                                    own && "justify-end",
-                                  )}>
-                                    <span className="text-[11px] font-semibold truncate">
-                                      {own ? "You" : comment.author_name}
-                                    </span>
-                                  </div>
-                                  <div className={cn(
-                                    "inline-flex max-w-full flex-col rounded-xl px-3 py-2 text-left text-xs leading-relaxed",
-                                    own
-                                      ? "bg-primary text-primary-foreground rounded-tr-sm"
-                                      : "bg-card border border-border text-foreground rounded-tl-sm",
-                                  )}>
-                                    <span className="whitespace-pre-wrap wrap-break-word">{comment.body}</span>
-                                    <span className={cn(
-                                      "mt-1 self-end whitespace-nowrap text-[9px] leading-none",
-                                      own ? "text-primary-foreground/75" : "text-muted-foreground",
-                                    )}>
-                                      {formatChatTime(comment.created_at)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
+                              <DiscussionComment
+                                comment={comment}
+                                isOwn={own}
+                                currentUserId={session?.user.id ?? ""}
+                                compact
+                                onToggleReaction={(emoji) => handleToggleCommentReaction(comment.id, emoji)}
+                              />
                             </div>
                           );
                         })}
@@ -1183,7 +1180,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   </div>
                   {/* Floating composer — no full-width bar, the input is its own card. */}
                   <div className="shrink-0 px-3 pb-3 pt-1">
-                    <div className="rounded-xl border border-border bg-card shadow-lg shadow-black/5 focus-within:border-primary/40 transition-colors">
+                    <div className="rounded-xl border border-border bg-card shadow-lg shadow-black/5">
                       <Textarea
                         value={commentBody}
                         onChange={(event) => setCommentBody(event.target.value)}
@@ -1196,7 +1193,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                         maxLength={2000}
                         rows={3}
                         placeholder="Write a message to the team…"
-                        className="min-h-[72px] resize-none border-0 bg-transparent text-xs shadow-none focus-visible:ring-0 px-3 pt-2.5"
+                        className="min-h-[72px] resize-none border-0 bg-transparent text-xs shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 px-3 pt-2.5"
                       />
                       <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
                         <span className="text-[10px] text-muted-foreground">

@@ -3,6 +3,9 @@ import { requireAuth } from "@/lib/auth/api-auth";
 import { assertLeadAccess } from "@/lib/auth/scope";
 import { ok, fail } from "@/lib/api-response";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  loadCommentReactionGroups,
+} from "@/lib/comment-reactions";
 
 type CommentRow = {
   id: string;
@@ -14,6 +17,7 @@ type CommentRow = {
 async function serializeComments(
   db: ReturnType<typeof createAdminClient>,
   rows: CommentRow[],
+  currentUserId: string,
 ) {
   const authorIds = [...new Set(rows.map((row) => row.author_id))];
   const authorNames = new Map<string, string>();
@@ -32,12 +36,20 @@ async function serializeComments(
     }
   }
 
+  const reactionsByComment = await loadCommentReactionGroups(
+    db,
+    "lead_comment_reactions",
+    rows.map((row) => row.id),
+    currentUserId,
+  );
+
   return rows.map((row) => ({
     id: row.id,
     body: row.body,
     author_id: row.author_id,
     author_name: authorNames.get(row.author_id) ?? "Team member",
     created_at: row.created_at,
+    reactions: reactionsByComment.get(row.id) ?? [],
   }));
 }
 
@@ -60,7 +72,7 @@ export async function GET(
     .limit(200);
 
   if (error) return fail(500, "INTERNAL", error.message);
-  return ok({ comments: await serializeComments(db, (data ?? []) as CommentRow[]) });
+  return ok({ comments: await serializeComments(db, (data ?? []) as CommentRow[], user.id) });
 }
 
 export async function POST(
@@ -91,6 +103,6 @@ export async function POST(
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);
-  const [comment] = await serializeComments(db, [data as CommentRow]);
+  const [comment] = await serializeComments(db, [data as CommentRow], user.id);
   return ok({ comment });
 }

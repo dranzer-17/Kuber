@@ -9,7 +9,7 @@ import {
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { formatChatDate, formatChatTime, startsNewChatDay } from "@/lib/chat-format";
+import { formatChatDate, startsNewChatDay } from "@/lib/chat-format";
 import { emailPreview, splitQuotedBody } from "@/lib/email-display";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
@@ -49,10 +49,12 @@ import {
   patchCampaignConfig,
   fetchCampaignComments,
   postCampaignComment,
+  toggleCampaignCommentReaction,
   type CampaignReplyThread,
   type CampaignComment,
   type ReplyDraft,
 } from "@/lib/api-client";
+import { DiscussionComment } from "@/components/app/discussion-comment";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
 import { ReplyDraftBox, replyDraftHasContent } from "@/components/app/reply-draft-box";
@@ -489,6 +491,26 @@ export function CampaignDetail({
       toast.error((sendError as Error).message || "Could not send the message");
     } finally {
       setSendingComment(false);
+    }
+  }
+
+  async function handleToggleCommentReaction(commentId: string, emoji: string) {
+    if (!appSession?.access_token) return;
+    try {
+      const reactions = await toggleCampaignCommentReaction(
+        appSession.access_token,
+        campaign.id,
+        commentId,
+        emoji,
+      );
+      setComments((current) =>
+        current.map((comment) =>
+          comment.id === commentId ? { ...comment, reactions } : comment,
+        ),
+      );
+    } catch (error) {
+      toast.error((error as Error).message || "Could not update reaction");
+      throw error;
     }
   }
 
@@ -2594,7 +2616,7 @@ export function CampaignDetail({
                   </p>
                 </div>
               ) : (
-                <div className="space-y-5">
+                <div className="space-y-3">
                   {comments.map((comment, index) => {
                     const own = comment.author_id === appSession?.user.id;
                     const showDate = startsNewChatDay(
@@ -2610,33 +2632,12 @@ export function CampaignDetail({
                             </span>
                           </div>
                         )}
-                        <div className={cn("flex gap-3", own && "flex-row-reverse")}>
-                          <Avatar name={comment.author_name} size="sm" />
-                          <div className={cn("min-w-0 max-w-[72%]", own && "text-right")}>
-                            <div className={cn(
-                              "mb-1 flex items-baseline",
-                              own && "justify-end",
-                            )}>
-                              <span className="text-[11px] font-semibold truncate">
-                                {own ? "You" : comment.author_name}
-                              </span>
-                            </div>
-                            <div className={cn(
-                              "inline-flex max-w-full flex-col rounded-xl px-3.5 py-2.5 text-left text-sm leading-relaxed",
-                              own
-                                ? "bg-primary text-primary-foreground rounded-tr-sm"
-                                : "bg-card border border-border text-foreground rounded-tl-sm",
-                            )}>
-                              <span className="whitespace-pre-wrap wrap-break-word">{comment.body}</span>
-                              <span className={cn(
-                                "mt-1 self-end whitespace-nowrap text-[10px] leading-none",
-                                own ? "text-primary-foreground/75" : "text-muted-foreground",
-                              )}>
-                                {formatChatTime(comment.created_at)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                        <DiscussionComment
+                          comment={comment}
+                          isOwn={own}
+                          currentUserId={appSession?.user.id ?? ""}
+                          onToggleReaction={(emoji) => handleToggleCommentReaction(comment.id, emoji)}
+                        />
                       </div>
                     );
                   })}
@@ -2648,7 +2649,7 @@ export function CampaignDetail({
 
           {/* Floating composer — no full-width bar, the input is its own card. */}
           <div className="shrink-0 w-full max-w-3xl mx-auto px-6 pb-6 pt-2">
-            <div className="rounded-2xl border border-border bg-card shadow-lg shadow-black/5 focus-within:border-primary/40 transition-colors">
+            <div className="rounded-2xl border border-border bg-card shadow-lg shadow-black/5">
               <Textarea
                 value={commentBody}
                 onChange={(event) => setCommentBody(event.target.value)}
@@ -2661,7 +2662,7 @@ export function CampaignDetail({
                 maxLength={2000}
                 rows={3}
                 placeholder="Write a message to the campaign team…"
-                className="min-h-[76px] resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0 px-4 pt-3"
+                className="min-h-[76px] resize-none border-0 bg-transparent text-sm shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0 px-4 pt-3"
               />
               <div className="flex items-center justify-between gap-2 px-4 pb-3">
                 <span className="text-[10px] text-muted-foreground">
