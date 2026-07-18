@@ -228,7 +228,7 @@ export type LeadActivityEvent = {
 };
 
 // Settings > Keys (super-admin only) — multi-provider API key management.
-export type ProviderCategory = "llm" | "scrape";
+export type ProviderCategory = "llm" | "service";
 export type ProviderKeyStatus = "healthy" | "cooling_off" | "dead";
 export type ProviderKey = {
   id: string; provider: string; label: string; secret_last4: string;
@@ -239,14 +239,23 @@ export type ProviderKey = {
 };
 export type ProviderConfig = {
   id: string; category: ProviderCategory; label: string;
+  description: string | null;
   modelInputMode: "dropdown" | "freeform" | "none";
   modelOptions: string[]; defaultModel: string | null; selectedModel: string | null;
+  /** True when this provider has no DB key but a .env.local value is present,
+   *  so it is still working — "not configured" would be wrong. */
+  envFallback: boolean;
   keys: ProviderKey[];
 };
 // Which LLM provider complete() tries first ("primary") and second
 // ("fallback") — null means "use the default order" (see registry.ts).
 export type LlmTierRoles = { primary: string | null; fallback: string | null };
-export type ProviderKeysData = { providers: ProviderConfig[]; tierRoles: LlmTierRoles; tierOrder: string[] };
+export type ProviderKeysData = {
+  providers: ProviderConfig[];
+  tierRoles: LlmTierRoles;
+  tierOrder: string[];
+  sendingAccounts: string[];
+};
 
 export async function fetchProviderKeys(token: string): Promise<ProviderKeysData> {
   return apiFetch("/api/v1/settings/keys", {}, token);
@@ -280,6 +289,10 @@ export async function setProviderModel(token: string, provider: string, model: s
 
 export async function setLlmTierRoles(token: string, body: { primary: string | null; fallback: string | null }): Promise<LlmTierRoles> {
   return apiFetch("/api/v1/settings/keys/tier", { method: "PUT", body: JSON.stringify(body) }, token);
+}
+
+export async function setSendingAccounts(token: string, emails: string[]): Promise<{ sendingAccounts: string[] }> {
+  return apiFetch("/api/v1/settings/keys/sending-accounts", { method: "PUT", body: JSON.stringify({ emails }) }, token);
 }
 
 export async function fetchLeadActivity(token: string, id: string): Promise<LeadActivityEvent[]> {

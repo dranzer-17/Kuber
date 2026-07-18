@@ -6,7 +6,7 @@ type Db = SupabaseClient;
 // Every provider's static .env.local fallback — the permanent last-resort
 // tier, not just a migration bridge. With zero rows in provider_keys, every
 // getActiveKey() call resolves here, so this system is a no-op on day one.
-const ENV_KEY_VARS: Record<ProviderId, string> = {
+export const ENV_KEY_VARS: Record<ProviderId, string> = {
   openrouter: "OPENROUTER_API_KEY",
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
@@ -14,6 +14,8 @@ const ENV_KEY_VARS: Record<ProviderId, string> = {
   mistral: "MISTRAL_API_KEY",
   groq: "GROQ_API_KEY",
   firecrawl: "FIRECRAWL_API_KEY",
+  apollo: "APOLLO_API_KEY",
+  instantly: "INSTANTLY_API_KEY",
 };
 
 const ENV_MODEL_PRIMARY = "LLM_PRIMARY_MODEL"; // openrouter only, legacy name

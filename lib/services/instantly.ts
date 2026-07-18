@@ -1,12 +1,22 @@
 import { toInstantlyTimezone } from "@/lib/instantly-timezones";
+import { requireServiceSecret } from "@/lib/services/service-keys";
 
 const BASE = "https://api.instantly.ai/api/v2";
 
-function h() {
+// Async because the key now resolves through Settings > Keys (DB first,
+// .env.local as the fallback tier) instead of being read straight off
+// process.env at module scope.
+async function h() {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
+    Authorization: `Bearer ${await requireServiceSecret("instantly", "Instantly")}`,
   };
+}
+
+/** Auth-only variant for the endpoints that must not send Content-Type
+ *  (GETs and multipart uploads). */
+async function authOnly() {
+  return { Authorization: `Bearer ${await requireServiceSecret("instantly", "Instantly")}` };
 }
 
 async function iJson<T>(res: Response): Promise<T> {
@@ -104,7 +114,7 @@ export async function createInstantlyCampaign(opts: {
   }
   const res = await fetch(`${BASE}/campaigns`, {
     method: "POST",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({
       name: opts.name,
       campaign_schedule: {
@@ -159,7 +169,7 @@ export async function patchInstantlyCampaignConfig(
   }
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}`, {
     method: "PATCH",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify(body),
   });
   await iJson<unknown>(res);
@@ -171,7 +181,7 @@ export async function patchInstantlySequences(
 ): Promise<void> {
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}`, {
     method: "PATCH",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({
       sequences: [{
         steps: steps.map((s) => ({
@@ -189,10 +199,9 @@ export async function patchInstantlySequences(
 export async function activateInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}/activate`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
-      // NO Content-Type — there is no body, and declaring JSON with an empty body 400s
-    },
+    // authOnly(): NO Content-Type — there is no body, and declaring JSON with
+    // an empty body 400s
+    headers: await authOnly(),
   });
   await iJson<unknown>(res);
 }
@@ -200,10 +209,8 @@ export async function activateInstantlyCampaign(instantlyCampaignId: string): Pr
 export async function pauseInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}/pause`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}`,
-      // NO Content-Type
-    },
+    // authOnly(): NO Content-Type
+    headers: await authOnly(),
   });
   await iJson<unknown>(res);
 }
@@ -212,7 +219,7 @@ export async function pauseInstantlyCampaign(instantlyCampaignId: string): Promi
 export async function deleteInstantlyCampaign(instantlyCampaignId: string): Promise<void> {
   const res = await fetch(`${BASE}/campaigns/${instantlyCampaignId}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}` },
+    headers: await authOnly(),
   });
   if (!res.ok && res.status !== 404) {
     const data = await res.json().catch(() => ({})) as { message?: string };
@@ -228,7 +235,7 @@ export async function addLeadsToInstantly(
 ): Promise<BulkAddResult> {
   const res = await fetch(`${BASE}/leads/add`, {   // CORRECT endpoint (NOT /campaign-lead)
     method: "POST",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({
       campaign_id: instantlyCampaignId,
       skip_if_in_workspace: false,
@@ -251,7 +258,7 @@ export async function addLeadsToInstantly(
 export async function deleteInstantlyLead(instantlyLeadId: string): Promise<void> {
   const res = await fetch(`${BASE}/leads/${instantlyLeadId}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}` },
+    headers: await authOnly(),
   });
   if (!res.ok && res.status !== 404) {
     const data = await res.json().catch(() => ({})) as { message?: string };
@@ -271,7 +278,7 @@ export async function updateInstantlyLeadVariables(
 ): Promise<void> {
   const res = await fetch(`${BASE}/leads/${instantlyLeadId}`, {
     method: "PATCH",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({ custom_variables: customVariables }),
   });
   await iJson<unknown>(res);
@@ -282,7 +289,7 @@ export async function updateInstantlyLeadVariables(
 export async function listInstantlyAccounts(): Promise<
   Array<{ email: string; status: number; daily_limit?: number }>
 > {
-  const res = await fetch(`${BASE}/accounts?limit=100`, { headers: h() });
+  const res = await fetch(`${BASE}/accounts?limit=100`, { headers: await h() });
   const data = await iJson<{
     items?: Array<{ email: string; status: number; daily_limit?: number }>
   }>(res);
@@ -299,7 +306,7 @@ export async function createInstantlyWebhook(opts: {
 }): Promise<string> {
   const res = await fetch(`${BASE}/webhooks`, {
     method: "POST",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({
       target_hook_url: opts.url,
       event_type: opts.eventType,
@@ -374,7 +381,7 @@ async function throttleListEmails(): Promise<void> {
 
 async function fetchEmailsList(url: string, retries = 2): Promise<ListEmailsResult> {
   await throttleListEmails();
-  const res = await fetch(url, { headers: h() });
+  const res = await fetch(url, { headers: await h() });
   if (res.status === 429 && retries > 0) {
     const retryAfter = Number(res.headers.get("Retry-After") ?? "5");
     await new Promise((r) => setTimeout(r, retryAfter * 1000));
@@ -401,7 +408,7 @@ export async function listEmails(params: ListEmailsParams = {}): Promise<ListEma
 export async function markInstantlyThreadAsRead(threadId: string): Promise<void> {
   const res = await fetch(`${BASE}/emails/threads/${encodeURIComponent(threadId)}/mark-as-read`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${process.env.INSTANTLY_API_KEY}` },
+    headers: await authOnly(),
   });
   if (!res.ok && res.status !== 404) {
     const data = await res.json().catch(() => ({})) as { message?: string };
@@ -411,7 +418,7 @@ export async function markInstantlyThreadAsRead(threadId: string): Promise<void>
 
 export async function countInstantlyUnread(): Promise<number> {
   try {
-    const res = await fetch(`${BASE}/emails/unread/count`, { headers: h() });
+    const res = await fetch(`${BASE}/emails/unread/count`, { headers: await h() });
     if (!res.ok) return 0;
     const data = await res.json() as { count?: number; unread_count?: number };
     return data.count ?? data.unread_count ?? 0;
@@ -421,14 +428,14 @@ export async function countInstantlyUnread(): Promise<number> {
 }
 
 export async function getInstantlyEmail(emailId: string): Promise<InstantlyEmail> {
-  const res = await fetch(`${BASE}/emails/${emailId}`, { headers: h() });
+  const res = await fetch(`${BASE}/emails/${emailId}`, { headers: await h() });
   return iJson<InstantlyEmail>(res);
 }
 
 // Pull a whole conversation in chronological order (oldest first) for AI context.
 export async function listThreadEmails(threadId: string): Promise<InstantlyEmail[]> {
   const url = `${BASE}/emails?search=${encodeURIComponent(`thread:${threadId}`)}&sort_order=asc&limit=20`;
-  const res = await fetch(url, { headers: h() });
+  const res = await fetch(url, { headers: await h() });
   const data = await iJson<{ items?: InstantlyEmail[] }>(res);
   return data.items ?? [];
 }
@@ -445,7 +452,7 @@ export async function listInstantlyCampaignReplies(
     limit: String(limit),
     sort_order: "desc",
   });
-  const res = await fetch(`${BASE}/emails?${params.toString()}`, { headers: h() });
+  const res = await fetch(`${BASE}/emails?${params.toString()}`, { headers: await h() });
   const data = await iJson<{ items?: InstantlyEmail[] }>(res);
   return (data.items ?? []).filter((e) => e.ue_type === 2 && !e.is_auto_reply);
 }
@@ -459,7 +466,7 @@ export async function getInstantlyLeadStatus(
   try {
     const res = await fetch(`${BASE}/leads/list`, {
       method: "POST",
-      headers: h(),
+      headers: await h(),
       body: JSON.stringify({
         campaign_id: instantlyCampaignId,
         search: leadEmail,
@@ -501,7 +508,7 @@ export async function replyToInstantlyEmail(opts: {
 }): Promise<InstantlyEmail> {
   const res = await fetch(`${BASE}/emails/reply`, {
     method: "POST",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({
       reply_to_uuid: opts.replyToUuid,
       eaccount: opts.eaccount,
@@ -525,7 +532,7 @@ export async function updateLeadInterestStatus(opts: {
 }): Promise<void> {
   const res = await fetch(`${BASE}/leads/update-interest-status`, {
     method: "POST",
-    headers: h(),
+    headers: await h(),
     body: JSON.stringify({
       lead_email: opts.leadEmail,
       interest_value: opts.interestValue,

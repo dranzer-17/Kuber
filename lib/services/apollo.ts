@@ -1,4 +1,5 @@
 import { fetchWithRetry, sleep } from "@/lib/http";
+import { requireServiceSecret } from "@/lib/services/service-keys";
 import {
   APOLLO_TITLES,
   APOLLO_SENIORITIES,
@@ -8,12 +9,15 @@ import {
 
 const BASE = "https://api.apollo.io/api/v1";
 
-function headers() {
+// Async because the key now resolves through Settings > Keys (DB first,
+// .env.local as the fallback tier) instead of being read straight off
+// process.env at module scope.
+async function headers() {
   return {
     "Content-Type": "application/json",
     "Cache-Control": "no-cache",
     accept: "application/json",
-    "x-api-key": process.env.APOLLO_API_KEY!,
+    "x-api-key": await requireServiceSecret("apollo", "Apollo"),
   };
 }
 
@@ -64,7 +68,7 @@ export async function searchPeople(opts: {
   const res = await fetchWithRetry(
     "apollo",
     `${BASE}/mixed_people/api_search`,
-    { method: "POST", headers: headers(), body: JSON.stringify(body) }
+    { method: "POST", headers: await headers(), body: JSON.stringify(body) }
   );
 
   if (!res.ok) {
@@ -123,7 +127,7 @@ export async function bulkMatch(
     `${BASE}/people/bulk_match?reveal_personal_emails=false&reveal_phone_number=false`,
     {
       method: "POST",
-      headers: headers(),
+      headers: await headers(),
       body: JSON.stringify({
         details: details.map((d) => ({
           id: d.id,

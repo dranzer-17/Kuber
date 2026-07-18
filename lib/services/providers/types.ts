@@ -1,7 +1,13 @@
 // Shared types for the multi-provider key/model system (Settings > Keys).
-// `firecrawl` is the one "scrape" category provider today; everything else
-// is "llm". New providers slot into ProviderId without touching the DB.
-export type ProviderCategory = "llm" | "scrape";
+// New providers slot into ProviderId without touching the DB — `provider` is
+// an unconstrained text column, validated against the code registry instead.
+//
+// Two categories, because the UI treats them differently:
+//   • "llm"     — interchangeable, tried in order, each carries a model choice.
+//   • "service" — a fixed integration (Apollo, Instantly, Firecrawl). Exactly
+//     one is not substitutable for another, so there is no try-order and no
+//     model; the app either has a working key for it or that feature is down.
+export type ProviderCategory = "llm" | "service";
 
 export type ProviderId =
   | "openrouter"
@@ -10,7 +16,9 @@ export type ProviderId =
   | "gemini"
   | "mistral"
   | "groq"
-  | "firecrawl";
+  | "firecrawl"
+  | "apollo"
+  | "instantly";
 
 export interface CompletionOpts {
   system: string;

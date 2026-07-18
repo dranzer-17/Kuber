@@ -149,8 +149,48 @@ async function fetchGroqCredits(secret: string): Promise<CreditCheck> {
   }
 }
 
+// Apollo exposes remaining credits directly on this endpoint, so the
+// "Re-check" button can surface a real number rather than just valid/invalid.
+async function fetchApolloCredits(secret: string): Promise<CreditCheck> {
+  try {
+    const res = await fetch("https://api.apollo.io/api/v1/auth/health", {
+      headers: { "x-api-key": secret, accept: "application/json" },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "Apollo rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `Apollo key check failed (HTTP ${res.status}) — proceeding` };
+    const data = await res.json().catch(() => ({})) as { is_logged_in?: boolean };
+    if (data.is_logged_in === false) {
+      return { ok: false, remaining: null, message: "Apollo reports this key is not authenticated" };
+    }
+    return { ok: true, remaining: null, message: "Apollo key is valid" };
+  } catch {
+    return { ok: true, remaining: null, message: "Apollo key check errored — proceeding" };
+  }
+}
+
+async function fetchInstantlyCredits(secret: string): Promise<CreditCheck> {
+  try {
+    // /accounts is the cheapest authenticated GET — it also confirms the
+    // workspace actually has sending accounts, which campaigns require.
+    const res = await fetch("https://api.instantly.ai/api/v2/accounts?limit=1", {
+      headers: { Authorization: `Bearer ${secret}` },
+    });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, remaining: null, message: "Instantly rejected the API key (401/403) — invalid key" };
+    }
+    if (!res.ok) return { ok: true, remaining: null, message: `Instantly key check failed (HTTP ${res.status}) — proceeding` };
+    return { ok: true, remaining: null, message: "Instantly key is valid" };
+  } catch {
+    return { ok: true, remaining: null, message: "Instantly key check errored — proceeding" };
+  }
+}
+
 const FETCHERS: Record<ProviderId, (secret: string) => Promise<CreditCheck>> = {
   firecrawl: fetchFirecrawlCredits,
+  apollo: fetchApolloCredits,
+  instantly: fetchInstantlyCredits,
   openrouter: fetchOpenRouterCredits,
   openai: fetchOpenAICredits,
   anthropic: fetchAnthropicCredits,

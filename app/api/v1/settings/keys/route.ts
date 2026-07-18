@@ -5,6 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateProviderKeySchema } from "@/lib/validators/provider-keys";
 import { getLlmTierRoles, PROVIDER_META, resolveLlmTierOrder } from "@/lib/services/providers/registry";
+import { ENV_KEY_VARS } from "@/lib/services/provider-keys";
+import { getSendingAccounts } from "@/lib/services/service-keys";
 
 type ProviderKeyRow = {
   id: string; provider: string; label: string; secret_last4: string;
@@ -20,11 +22,12 @@ export async function GET(req: NextRequest) {
   try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
 
   const db = createAdminClient();
-  const [{ data: keys }, { data: settings }, tierRoles, tierOrder] = await Promise.all([
+  const [{ data: keys }, { data: settings }, tierRoles, tierOrder, sendingAccounts] = await Promise.all([
     db.from("provider_keys").select(KEY_SELECT).order("priority", { ascending: true }),
     db.from("provider_settings").select("provider, selected_model"),
     getLlmTierRoles(db),
     resolveLlmTierOrder(db),
+    getSendingAccounts(db),
   ]);
 
   const modelByProvider = new Map((settings ?? []).map((s) => [s.provider, s.selected_model as string | null]));
@@ -35,18 +38,28 @@ export async function GET(req: NextRequest) {
     keysByProvider.set(k.provider, list);
   }
 
+  // envFallback tells the UI "no key here, but the integration still works off
+  // .env.local" — without it a configured-via-env provider reads as broken.
+  const envConfigured = new Set(
+    Object.values(PROVIDER_META)
+      .filter((meta) => !!process.env[ENV_KEY_VARS[meta.id]]?.trim())
+      .map((meta) => meta.id),
+  );
+
   const providers = Object.values(PROVIDER_META).map((meta) => ({
     id: meta.id,
     category: meta.category,
     label: meta.label,
+    description: meta.description ?? null,
     modelInputMode: meta.modelInputMode,
     modelOptions: meta.modelOptions ?? [],
     defaultModel: meta.defaultModel ?? null,
     selectedModel: modelByProvider.get(meta.id) ?? null,
+    envFallback: envConfigured.has(meta.id),
     keys: keysByProvider.get(meta.id) ?? [],
   }));
 
-  return ok({ providers, tierRoles, tierOrder });
+  return ok({ providers, tierRoles, tierOrder, sendingAccounts });
 }
 
 export async function POST(req: NextRequest) {

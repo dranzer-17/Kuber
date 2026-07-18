@@ -13,6 +13,10 @@ export interface ProviderMeta {
   modelInputMode: "dropdown" | "freeform" | "none";
   modelOptions?: string[];
   defaultModel?: string;
+  /** Shown under the provider name in Settings > Keys, so an admin can tell
+   *  what actually breaks if this key is missing. Service providers only —
+   *  LLM providers are interchangeable and need no per-provider explanation. */
+  description?: string;
 }
 
 // Model ID strings for Gemini/Mistral/Groq are pre-filled defaults, not
@@ -49,12 +53,26 @@ export const PROVIDER_META: Record<ProviderId, ProviderMeta> = {
     modelInputMode: "freeform", defaultModel: "llama-3.3-70b-versatile",
   },
   firecrawl: {
-    id: "firecrawl", category: "scrape", label: "Firecrawl",
+    id: "firecrawl", category: "service", label: "Firecrawl",
     modelInputMode: "none",
+    description: "Scrapes company websites during enrichment.",
+  },
+  apollo: {
+    id: "apollo", category: "service", label: "Apollo",
+    modelInputMode: "none",
+    description: "Lead search and contact enrichment.",
+  },
+  instantly: {
+    id: "instantly", category: "service", label: "Instantly",
+    modelInputMode: "none",
+    description: "Sends campaign email and reports replies back.",
   },
 };
 
-export type LlmProviderId = Exclude<ProviderId, "firecrawl">;
+export const SERVICE_PROVIDER_IDS = ["apollo", "instantly", "firecrawl"] as const;
+export type ServiceProviderId = (typeof SERVICE_PROVIDER_IDS)[number];
+
+export type LlmProviderId = Exclude<ProviderId, ServiceProviderId>;
 
 // Baseline order when no admin override is set. Each tier is tried
 // key-by-key (see provider-keys.ts) before falling through to the next

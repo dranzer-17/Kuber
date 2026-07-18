@@ -10,6 +10,7 @@ import {
   type InstantlyLeadInput,
 } from "@/lib/services/instantly";
 import { toInstantlyTimezone } from "@/lib/instantly-timezones";
+import { getSendingAccounts } from "@/lib/services/service-keys";
 
 const BATCH = 100;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -143,11 +144,11 @@ export async function sendCampaign(
   }));
   if (steps.length === 0) throw new Error("Campaign has no steps — cannot send");
 
-  // 3) Sending accounts from env
-  const emailList = (process.env.INSTANTLY_SENDING_ACCOUNTS ?? "")
-    .split(",").map((s) => s.trim()).filter(Boolean);
+  // 3) Sending accounts — Settings > Keys first, INSTANTLY_SENDING_ACCOUNTS
+  //    as the fallback tier (same precedence as every provider key).
+  const emailList = await getSendingAccounts(db);
   if (emailList.length === 0) {
-    throw new Error("INSTANTLY_SENDING_ACCOUNTS env var is empty — set comma-separated sender emails");
+    throw new Error("No Instantly sending accounts configured — add sender emails in Settings > Keys");
   }
 
   // 4) Eligible leads (certified, not yet pushed to Instantly)
