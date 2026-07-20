@@ -467,6 +467,7 @@ export async function fetchOrg(token: string, id: string): Promise<Record<string
 export async function patchOrg(token: string, id: string, body: {
   name?: string; domain?: string; website?: string; description?: string;
   industry?: string; city?: string; country?: string;
+  company_description?: string; sells_to?: string;
 }): Promise<Record<string, unknown>> {
   return apiFetch(`/api/v1/organizations/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }

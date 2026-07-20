@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import {
   Building2, Globe2, Mail, Megaphone, Users, X,
   Loader2, RefreshCw, CheckCircle2, AlertCircle, Clock,
-  RotateCcw, Zap, Bot, Settings, Pencil, Phone, Link,
-  MapPin, Save, ChevronRight, UserCog, Check, MessageSquare,
+  RotateCcw, Zap, Bot, Settings, Pencil, Phone,
+  MapPin, ChevronRight, UserCog, Check, MessageSquare,
   XCircle, Send, MailCheck, MailOpen, Reply, Sparkles, BellOff, ArrowUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,15 +16,13 @@ import { useApp } from "@/lib/app-context";
 import type { Lead, EnrichmentStage, LeadStatus } from "@/lib/leads";
 import { Avatar, ScoreBadge, StatusBadge } from "@/components/leads/lead-ui";
 import {
-  fetchLead, fetchLeadActivity, fetchLeadComments, fetchUsers, patchLead,
+  fetchLead, fetchLeadActivity, fetchLeadComments, fetchUsers, patchLead, patchOrg,
   postLeadComment, toggleLeadCommentReaction, rescrapeOrg, fetchServiceHealth,
   type Profile, type LeadActivityEvent, type LeadComment,
 } from "@/lib/api-client";
 import { DiscussionComment } from "@/components/app/discussion-comment";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import {
@@ -105,6 +103,171 @@ function FieldRow({
       </div>
       <div className="flex-1 min-w-0 text-sm">{children}</div>
     </div>
+  );
+}
+
+// Notion/ClickUp-style inline editing: the value itself IS the control.
+// Double-click swaps the static text for a bare input in place; Enter or
+// blur commits, Escape reverts — no separate "edit mode" or Save button.
+function InlineField({
+  value, placeholder, onCommit, type = "text", className, variant = "block",
+}: {
+  value: string;
+  placeholder?: string;
+  onCommit: (next: string) => Promise<void>;
+  type?: string;
+  className?: string;
+  variant?: "block" | "inline";
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft  ] = useState(value);
+  const [saving,  setSaving ] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const raf = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [editing]);
+
+  async function commit() {
+    const next = draft.trim();
+    setEditing(false);
+    if (next === (value ?? "").trim()) return;
+    setSaving(true);
+    try {
+      await onCommit(next);
+    } catch { /* toasted by caller; value stays unchanged so the text reverts */ }
+    finally { setSaving(false); }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type={type}
+        value={draft}
+        placeholder={placeholder}
+        size={variant === "inline" ? Math.max(draft.length, 3) + 1 : undefined}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        }}
+        className={cn(
+          "bg-transparent outline-none border-b border-primary/70 focus:border-primary px-0.5 -mx-0.5",
+          variant === "block" ? "block w-full" : "inline-block",
+          className,
+        )}
+      />
+    );
+  }
+
+  return (
+    <span
+      onDoubleClick={() => setEditing(true)}
+      title="Double-click to edit"
+      className={cn(
+        "rounded px-1 -mx-1 cursor-text hover:bg-secondary/60 transition-colors",
+        variant === "block" ? "block truncate" : "inline-block",
+        !value && "text-muted-foreground/50 italic",
+        saving && "opacity-60",
+        className,
+      )}
+    >
+      {saving ? "Saving…" : (value || placeholder || "\u00A0")}
+    </span>
+  );
+}
+
+// Same inline-edit pattern as InlineField, but for longer free-text (company
+// description, sells-to) — a growing textarea instead of a single-line input,
+// and Enter inserts a newline instead of committing (blur / Escape only).
+function InlineTextArea({
+  value, placeholder, onCommit, className,
+}: {
+  value: string;
+  placeholder?: string;
+  onCommit: (next: string) => Promise<void>;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft  ] = useState(value);
+  const [saving,  setSaving ] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const raf = requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.select();
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [editing]);
+
+  function autoGrow(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    setDraft(e.target.value);
+    e.target.style.height = "auto";
+    e.target.style.height = `${e.target.scrollHeight}px`;
+  }
+
+  async function commit() {
+    const next = draft.trim();
+    setEditing(false);
+    if (next === (value ?? "").trim()) return;
+    setSaving(true);
+    try {
+      await onCommit(next);
+    } catch { /* toasted by caller; value stays unchanged so the text reverts */ }
+    finally { setSaving(false); }
+  }
+
+  if (editing) {
+    return (
+      <textarea
+        ref={textareaRef}
+        value={draft}
+        placeholder={placeholder}
+        rows={3}
+        onChange={autoGrow}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") { setDraft(value); setEditing(false); }
+        }}
+        className={cn(
+          "w-full resize-none bg-transparent outline-none leading-relaxed",
+          "border border-primary/60 focus:border-primary rounded-lg px-2 py-1.5 -mx-2 -my-1.5",
+          className,
+        )}
+      />
+    );
+  }
+
+  return (
+    <p
+      onDoubleClick={() => setEditing(true)}
+      title="Double-click to edit"
+      className={cn(
+        "rounded-lg px-2 py-1.5 -mx-2 -my-1.5 cursor-text hover:bg-secondary/60 transition-colors leading-relaxed",
+        !value && "text-muted-foreground/50 italic",
+        saving && "opacity-60",
+        className,
+      )}
+    >
+      {saving ? "Saving…" : (value || placeholder || "\u00A0")}
+    </p>
   );
 }
 
@@ -403,12 +566,6 @@ function ActivityItem({ event, isLast, onCampaignClick }: {
 
 // ── Main drawer ───────────────────────────────────────────────────────────────
 
-type EditForm = {
-  first_name: string; last_name: string; email: string; phone: string;
-  title: string; headline: string; linkedin_url: string;
-  city: string; state: string; country: string;
-};
-
 export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   lead: Lead | null;
   onClose: () => void;
@@ -427,14 +584,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
   const [loadingComments, setLoadingComments] = useState(false);
   const [sendingComment,  setSendingComment ] = useState(false);
   const [retrying,    setRetrying   ] = useState(false);
-  const [editing,     setEditing    ] = useState(false);
-  const [saving,      setSaving     ] = useState(false);
-  const [saveError,   setSaveError  ] = useState("");
-  const [form,        setForm       ] = useState<EditForm>({
-    first_name: "", last_name: "", email: "", phone: "",
-    title: "", headline: "", linkedin_url: "",
-    city: "", state: "", country: "",
-  });
   const [employees,   setEmployees  ] = useState<Profile[]>([]);
   const [reassigning, setReassigning] = useState(false);
   const commentsEndRef = useRef<HTMLDivElement | null>(null);
@@ -543,46 +692,34 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
     }
   }
 
-  function populateForm(l: Lead) {
-    setForm({
-      first_name:   l.firstName   ?? "",
-      last_name:    l.lastName    ?? "",
-      email:        l.email       ?? "",
-      phone:        l.phone       ?? "",
-      title:        l.jobTitle    ?? "",
-      headline:     "",
-      linkedin_url: "",
-      city:         "",
-      state:        "",
-      country:      "",
-    });
-  }
-
-  async function handleSave() {
+  // Notion/ClickUp-style field save: each InlineField commits its own patch
+  // the moment it loses focus, no separate "edit mode" or Save button.
+  async function saveField(patch: Record<string, string>, label: string) {
     if (!display) return;
-    setSaving(true);
-    setSaveError("");
     try {
       const tok = await getToken();
-      const updated = await patchLead(tok, display.id, {
-        first_name:   form.first_name   || undefined,
-        last_name:    form.last_name    || undefined,
-        email:        form.email        || undefined,
-        phone:        form.phone        || undefined,
-        title:        form.title        || undefined,
-        headline:     form.headline     || undefined,
-        linkedin_url: form.linkedin_url || undefined,
-        city:         form.city         || undefined,
-        state:        form.state        || undefined,
-        country:      form.country      || undefined,
-      });
+      const updated = await patchLead(tok, display.id, patch);
       setFreshLead(updated);
       onLeadUpdated?.(updated);
-      setEditing(false);
     } catch (e) {
-      setSaveError((e as Error).message);
-    } finally {
-      setSaving(false);
+      toast.error((e as Error).message || `Couldn't update ${label}`);
+      throw e;
+    }
+  }
+
+  // Company description / sells-to belong to the organization, not the lead —
+  // they're shared across every lead under that org (review §3.4), so the
+  // edit is written to the org record and the enrichment panel re-synced from
+  // there rather than patched onto this one lead.
+  async function saveOrgField(patch: Record<string, string>, label: string) {
+    if (!display?.orgId) return;
+    try {
+      const tok = await getToken();
+      await patchOrg(tok, display.orgId, patch);
+      await fetchEnrichStatus(display.orgId);
+    } catch (e) {
+      toast.error((e as Error).message || `Couldn't update ${label}`);
+      throw e;
     }
   }
 
@@ -619,7 +756,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       setComments([]);
       setCommentBody("");
       setRailMode("activity");
-      setEditing(false);
       return;
     }
     setFreshLead(null);
@@ -628,9 +764,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
     setComments([]);
     setCommentBody("");
     setRailMode("activity");
-    setEditing(false);
-    setSaveError("");
-    populateForm(lead);
     void fetchFresh(lead);
     void fetchActivity(lead.id);
     // Quiet prefetch so the Discussion tab / chat icon can show a message
@@ -715,53 +848,42 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
             {/* Header — just the person */}
             <div className="swatch-bar-top flex items-center gap-3 px-6 pt-10 pb-4 shrink-0">
               <Avatar name={`${display.firstName} ${display.lastName}`} size="md" />
-              <h2 className="flex-1 min-w-0 font-display text-xl font-semibold truncate">
-                {display.firstName} {display.lastName}
+              <h2 className="flex-1 min-w-0 flex items-baseline gap-1.5 font-display text-xl font-semibold">
+                <InlineField
+                  value={display.firstName}
+                  placeholder="First name"
+                  variant="inline"
+                  className="font-display text-xl font-semibold"
+                  onCommit={(v) => saveField({ first_name: v }, "first name")}
+                />
+                <InlineField
+                  value={display.lastName}
+                  placeholder="Last name"
+                  variant="inline"
+                  className="font-display text-xl font-semibold"
+                  onCommit={(v) => saveField({ last_name: v }, "last name")}
+                />
               </h2>
               <div className="flex items-center gap-1 shrink-0">
-                {!editing ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setRailMode("discussion")}
-                      className={cn(
-                        "relative size-7 rounded-lg text-muted-foreground hover:text-foreground",
-                        railMode === "discussion" && "bg-secondary text-foreground",
-                      )}
-                      title="Open lead discussion"
-                      aria-label="Open lead discussion"
-                    >
-                      <MessageSquare className="size-3.5" />
-                      {comments.length > 0 && (
-                        <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] rounded-full bg-primary text-primary-foreground font-mono text-[9px] font-bold tabular-nums flex items-center justify-center px-0.5 leading-none">
-                          {comments.length > 99 ? "99+" : comments.length}
-                        </span>
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => { populateForm(display); setEditing(true); setSaveError(""); }}
-                      className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
-                      title="Edit lead"
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setEditing(false); setSaveError(""); }}>
-                      Cancel
-                    </Button>
-                    <Button size="sm" className="h-7 px-3 text-xs gap-1.5" onClick={handleSave} disabled={saving}>
-                      {saving ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
-                      {saving ? "Saving…" : "Save"}
-                    </Button>
-                  </>
-                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setRailMode("discussion")}
+                  className={cn(
+                    "relative size-7 rounded-lg text-muted-foreground hover:text-foreground",
+                    railMode === "discussion" && "bg-secondary text-foreground",
+                  )}
+                  title="Open lead discussion"
+                  aria-label="Open lead discussion"
+                >
+                  <MessageSquare className="size-3.5" />
+                  {comments.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] rounded-full bg-primary text-primary-foreground font-mono text-[9px] font-bold tabular-nums flex items-center justify-center px-0.5 leading-none">
+                      {comments.length > 99 ? "99+" : comments.length}
+                    </span>
+                  )}
+                </Button>
                 {/* Close lives in the activity rail; this one only shows when
                     the rail is hidden on very small screens */}
                 <Button
@@ -777,77 +899,9 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                 only the enrichment section scrolls internally if its text is long */}
             <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-y-auto px-6 pb-5 gap-4">
 
-              {/* ── Edit mode ── */}
-              {editing && (
-                <div className="space-y-3">
-                  {saveError && (
-                    <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5">
-                      <AlertCircle className="size-3.5 shrink-0" /> {saveError}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                      <legend className="eyebrow px-1">Personal</legend>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">First name</Label>
-                          <Input className="h-8 text-sm" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">Last name</Label>
-                          <Input className="h-8 text-sm" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs flex items-center gap-1.5"><Mail className="size-3" /> Email</Label>
-                        <Input className="h-8 text-sm" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs flex items-center gap-1.5"><Phone className="size-3" /> Phone</Label>
-                        <Input className="h-8 text-sm" type="tel" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-                      </div>
-                    </fieldset>
-                    <fieldset className="rounded-xl border border-border p-4 space-y-3">
-                      <legend className="eyebrow px-1">Professional</legend>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Job title</Label>
-                        <Input className="h-8 text-sm" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Headline</Label>
-                        <Input className="h-8 text-sm" placeholder="e.g. VP Procurement at Acme" value={form.headline} onChange={(e) => setForm((f) => ({ ...f, headline: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs flex items-center gap-1.5"><Link className="size-3" /> LinkedIn URL</Label>
-                        <Input className="h-8 text-sm" placeholder="linkedin.com/in/..." value={form.linkedin_url} onChange={(e) => setForm((f) => ({ ...f, linkedin_url: e.target.value }))} />
-                      </div>
-                    </fieldset>
-                  </div>
-                  <fieldset className="rounded-xl border border-border p-4">
-                    <legend className="eyebrow px-1 flex items-center gap-1"><MapPin className="size-3" /> Location</legend>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">City</Label>
-                        <Input className="h-8 text-sm" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">State</Label>
-                        <Input className="h-8 text-sm" value={form.state} onChange={(e) => setForm((f) => ({ ...f, state: e.target.value }))} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Country</Label>
-                        <Input className="h-8 text-sm" value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} />
-                      </div>
-                    </div>
-                  </fieldset>
-                </div>
-              )}
-
-              {/* ── View mode — ClickUp-style property rows, two columns ── */}
-              {!editing && <>
-
-              {/* Paired property rows — left/right cells share one grid row so
-                  dividers stay perfectly aligned across both columns */}
+              {/* ── ClickUp/Notion-style property rows — every value below is
+                  directly editable in place (double-click to edit, blur/Enter
+                  to save), two columns with dividers aligned across both ── */}
               {(() => {
                 const leftFields: React.ReactNode[] = [
                   <FieldRow key="status" icon={Zap} label="Status">
@@ -926,33 +980,37 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
 
                 const rightFields: React.ReactNode[] = [
                   <FieldRow key="email" icon={Mail} label="Email">
-                    {display.email
-                      ? <span className="font-mono text-xs truncate block">{display.email}</span>
-                      : <span className="text-muted-foreground/50 italic text-xs">Not yet enriched</span>}
+                    <InlineField
+                      value={display.email}
+                      placeholder="Not yet enriched"
+                      type="email"
+                      className="font-mono text-xs"
+                      onCommit={(v) => v ? saveField({ email: v }, "email") : Promise.resolve()}
+                    />
                   </FieldRow>,
-                ];
-                if (display.phone) {
-                  rightFields.push(
-                    <FieldRow key="phone" icon={Phone} label="Phone">
-                      <span className="font-mono text-xs">{display.phone}</span>
-                    </FieldRow>,
-                  );
-                }
-                if (display.jobTitle) {
-                  rightFields.push(
-                    <FieldRow key="title" icon={Pencil} label="Job title">
-                      <span className="truncate block">{display.jobTitle}</span>
-                    </FieldRow>,
-                  );
-                }
-                if (display.country) {
-                  rightFields.push(
-                    <FieldRow key="country" icon={MapPin} label="Country">
-                      {display.country}
-                    </FieldRow>,
-                  );
-                }
-                rightFields.push(
+                  <FieldRow key="phone" icon={Phone} label="Phone">
+                    <InlineField
+                      value={display.phone}
+                      placeholder="Add phone"
+                      type="tel"
+                      className="font-mono text-xs"
+                      onCommit={(v) => saveField({ phone: v }, "phone")}
+                    />
+                  </FieldRow>,
+                  <FieldRow key="title" icon={Pencil} label="Job title">
+                    <InlineField
+                      value={display.jobTitle}
+                      placeholder="Add job title"
+                      onCommit={(v) => saveField({ title: v }, "job title")}
+                    />
+                  </FieldRow>,
+                  <FieldRow key="country" icon={MapPin} label="Country">
+                    <InlineField
+                      value={display.country}
+                      placeholder="Add country"
+                      onCommit={(v) => saveField({ country: v }, "country")}
+                    />
+                  </FieldRow>,
                   <FieldRow key="source" icon={Globe2} label="Source">
                     <span className="inline-flex items-center font-mono text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border border-border">
                       {display.source}
@@ -961,7 +1019,7 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   <FieldRow key="created" icon={Clock} label="Created">
                     {formatDate(display.createdAt)}
                   </FieldRow>,
-                );
+                ];
 
                 const rowCount = Math.max(leftFields.length, rightFields.length);
                 return (
@@ -1023,24 +1081,26 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                 </div>
 
                 <div className="space-y-3 flex-1 min-h-0 overflow-y-auto pr-1">
-                  {currentStage === "done" && (
+                  {!!display.orgId && (
                     <div className="grid grid-cols-2 gap-4">
-                      {(enrichData?.company_description ?? display.companyDescription) && (
-                        <div className="min-w-0">
-                          <p className="eyebrow mb-1">What they do</p>
-                          <p className="text-sm text-muted-foreground leading-relaxed">
-                            {enrichData?.company_description ?? display.companyDescription}
-                          </p>
-                        </div>
-                      )}
-                      {(enrichData?.sells_to ?? display.sellsTo) && (
-                        <div className="min-w-0">
-                          <p className="eyebrow mb-1">Who they sell to</p>
-                          <p className="text-sm text-muted-foreground leading-relaxed">
-                            {enrichData?.sells_to ?? display.sellsTo}
-                          </p>
-                        </div>
-                      )}
+                      <div className="min-w-0">
+                        <p className="eyebrow mb-1">What they do</p>
+                        <InlineTextArea
+                          value={enrichData?.company_description ?? display.companyDescription ?? ""}
+                          placeholder="Add a description of what this company does"
+                          className="text-sm text-muted-foreground"
+                          onCommit={(v) => saveOrgField({ company_description: v }, "company description")}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="eyebrow mb-1">Who they sell to</p>
+                        <InlineTextArea
+                          value={enrichData?.sells_to ?? display.sellsTo ?? ""}
+                          placeholder="Add who this company sells to"
+                          className="text-sm text-muted-foreground"
+                          onCommit={(v) => saveOrgField({ sells_to: v }, "who they sell to")}
+                        />
+                      </div>
                     </div>
                   )}
                   {/* Friendly, non-technical status — the raw upstream error
@@ -1080,8 +1140,6 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
                   )}
                 </div>
               </div>
-
-              </> /* end view mode */}
 
             </div>
 

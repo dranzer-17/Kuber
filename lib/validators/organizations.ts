@@ -29,6 +29,8 @@ export const PatchOrgSchema = z.object({
   city: z.string().optional(),
   country: z.string().optional(),
   description: z.string().optional(),
+  company_description: z.string().optional(),
+  sells_to: z.string().optional(),
   primary_products: z.array(z.string()).optional(),
   unsubscribed: z.boolean().optional(),
 });
