@@ -30,11 +30,33 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onPointerDownOutside, onInteractOutside, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // A ConfirmDialog (destructive confirmation, e.g. "Delete this key?")
+      // portals to document.body as a sibling of this Dialog's own portal so
+      // it can render above drawers regardless of nesting depth (see
+      // components/ui/confirm-dialog.tsx). Without this check, Radix's
+      // outside-interaction detection reads a pointerdown on it as a click
+      // outside this Dialog and closes this Dialog first — unmounting the
+      // confirm dialog before its own button's click handler ever fires, so
+      // "Remove"/"Delete" silently does nothing.
+      onPointerDownOutside={(event) => {
+        if ((event.target as HTMLElement | null)?.closest("[data-confirm-dialog-root]")) {
+          event.preventDefault();
+          return;
+        }
+        onPointerDownOutside?.(event);
+      }}
+      onInteractOutside={(event) => {
+        if ((event.target as HTMLElement | null)?.closest("[data-confirm-dialog-root]")) {
+          event.preventDefault();
+          return;
+        }
+        onInteractOutside?.(event);
+      }}
       className={cn(
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-2xl border-border bg-card shadow-2xl",
         className

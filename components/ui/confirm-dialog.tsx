@@ -1,5 +1,6 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { AlertTriangle, Pause, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -23,6 +24,23 @@ interface ConfirmDialogProps {
  *
  * Deliberately not built on the Radix `Dialog` primitive: it renders above
  * drawers (z-50/z-60), so it needs its own z-[200] overlay.
+ *
+ * Portaled to `document.body` rather than rendered in place — callers often
+ * nest this inside an element carrying the app's `.enter` fade-up animation
+ * class, and that class's `transform: translateY(0)` final keyframe (kept by
+ * `animation-fill-mode: both`) makes that ancestor a containing block for
+ * `position: fixed` descendants. Without the portal, this dialog's "fixed,
+ * full-viewport" overlay gets sized and positioned relative to that ancestor
+ * box instead of the viewport, instead of covering the whole screen.
+ *
+ * `pointer-events: auto` is forced on the root below because a Radix `Dialog`
+ * left open behind this one sets `document.body.style.pointerEvents = "none"`
+ * for the whole time it's open (its modal-blocking mechanism) and only
+ * re-enables `auto` on its own content node. This dialog is a body child too,
+ * but isn't a registered Radix layer, so without the override it silently
+ * inherits `pointer-events: none` from body — clicks land on it visually but
+ * pass straight through to whatever Radix left clickable underneath, so
+ * "Cancel"/"Remove" appear completely unresponsive.
  */
 export function ConfirmDialog({
   open,
@@ -35,12 +53,12 @@ export function ConfirmDialog({
   onClose,
   onConfirm,
 }: ConfirmDialogProps) {
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
   const isWarning = tone === "warning";
 
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+  return createPortal(
+    <div data-confirm-dialog-root className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-auto">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={() => { if (!loading) onClose(); }}
@@ -65,6 +83,7 @@ export function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

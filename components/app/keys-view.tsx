@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   KeyRound, Plus, Eye, EyeOff, RefreshCw, Trash2, ShieldCheck,
-  Pencil, Mail, X,
+  Pencil, Mail, X, ArrowUp, ArrowDown, GripVertical,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -18,7 +20,8 @@ import {
 } from "@/components/ui/select";
 import {
   fetchProviderKeys, createProviderKey, patchProviderKey, deleteProviderKey,
-  checkProviderKey, setProviderModel, setSendingAccounts,
+  checkProviderKey, setProviderModel, setSendingAccounts, setLlmTierRoles,
+  reorderProviderKeys,
   type ProviderConfig, type ProviderKey,
 } from "@/lib/api-client";
 
@@ -71,13 +74,76 @@ function ConfigSummary({ provider }: { provider: ProviderConfig }) {
   );
 }
 
+/** FLIP (First-Last-Invert-Play) position animation for a reorderable list.
+ *  React reconciles a reordered array by moving DOM nodes instantly — no
+ *  animation happens for free. This measures each row's position before and
+ *  after a reorder and plays the delta back as a CSS transform, so dragging
+ *  one key past another visibly slides the rest out of the way instead of
+ *  snapping. `order` is the dependency that triggers a re-measure; pass the
+ *  array of ids currently on screen. */
+function useFlip(order: string[]) {
+  const rectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const nodesRef = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const registerNode = useCallback((id: string, node: HTMLDivElement | null) => {
+    if (node) nodesRef.current.set(id, node);
+    else nodesRef.current.delete(id);
+  }, []);
+
+  useLayoutEffect(() => {
+    const prevRects = rectsRef.current;
+    const nextRects = new Map<string, DOMRect>();
+    nodesRef.current.forEach((node, id) => nextRects.set(id, node.getBoundingClientRect()));
+
+    nodesRef.current.forEach((node, id) => {
+      const prev = prevRects.get(id);
+      const next = nextRects.get(id);
+      if (!prev || !next) return;
+      const dy = prev.top - next.top;
+      if (Math.abs(dy) < 0.5) return;
+
+      node.style.transition = "none";
+      node.style.transform = `translateY(${dy}px)`;
+      node.getBoundingClientRect(); // force reflow so the jump above applies before...
+      requestAnimationFrame(() => {
+        // ...this transition animates it back to translateY(0).
+        node.style.transition = "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)";
+        node.style.transform = "";
+      });
+    });
+
+    rectsRef.current = nextRects;
+  }, [order]);
+
+  return registerNode;
+}
+
 export function KeysView() {
   const { session } = useApp();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [tierOrder, setTierOrder] = useState<string[]>([]);
   const [sendingAccounts, setAccounts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<ProviderConfig | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  // Order while a drag is in flight — updated live as the pointer crosses
+  // other rows so they visibly shift out of the way. Null once nothing is
+  // being dragged.
+  const [liveOrderIds, setLiveOrderIds] = useState<string[] | null>(null);
+  // Floating card that follows the pointer (HTML5 drag ghosts are too faint
+  // and don't feel attached). Null when idle.
+  const [dragOverlay, setDragOverlay] = useState<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const dragGrabOffsetRef = useRef({ x: 0, y: 0 });
+  const serverOrderIdsRef = useRef<string[]>([]);
+  const liveOrderIdsRef = useRef<string[] | null>(null);
+  const draggedIdRef = useRef<string | null>(null);
 
   const load = useCallback(async (initial = false) => {
     if (!session) return;
@@ -85,6 +151,7 @@ export function KeysView() {
     try {
       const data = await fetchProviderKeys(session.access_token);
       setProviders(data.providers);
+      setTierOrder(data.tierOrder);
       setAccounts(data.sendingAccounts);
     } catch (e) {
       toast.error((e as Error).message);
@@ -108,8 +175,146 @@ export function KeysView() {
   const configuredLlm = llmProviders.filter((p) => p.keys.length > 0 || p.envFallback);
   const availableLlm = llmProviders.filter((p) => p.keys.length === 0 && !p.envFallback);
 
-  // First configured provider with an active key is primary; the rest are fallbacks.
-  const primaryId = configuredLlm.find((p) => p.keys.some((k) => k.is_active))?.id ?? null;
+  // The real order complete() tries providers in — Primary first, Fallback
+  // second, then everything else DEFAULT_LLM_TIER_ORDER's relative order —
+  // computed server-side (registry.ts) and returned as `tierOrder`, filtered
+  // down to only the providers actually configured here.
+  const serverOrderIds = useMemo(
+    () => tierOrder.filter((id) => configuredLlm.some((p) => p.id === id)),
+    [tierOrder, configuredLlm],
+  );
+  // While dragging, the list on screen is the live, locally-shifted order;
+  // otherwise it's whatever the server last confirmed.
+  const displayOrderIds = liveOrderIds ?? serverOrderIds;
+  const orderedConfiguredLlm = useMemo(
+    () => displayOrderIds
+      .map((id) => configuredLlm.find((p) => p.id === id))
+      .filter((p): p is ProviderConfig => !!p),
+    [displayOrderIds, configuredLlm],
+  );
+  const registerLlmRow = useFlip(displayOrderIds);
+
+  serverOrderIdsRef.current = serverOrderIds;
+  liveOrderIdsRef.current = liveOrderIds;
+  draggedIdRef.current = draggedId;
+
+  // Move `draggedId` to sit where `targetId` currently is — called as the
+  // floating card crosses other rows so the list reflows under the cursor.
+  function shiftDraggedToward(targetId: string) {
+    const dragged = draggedIdRef.current;
+    if (!dragged || dragged === targetId) return;
+    setLiveOrderIds((current) => {
+      const ids = current ?? serverOrderIdsRef.current;
+      const from = ids.indexOf(dragged);
+      const to = ids.indexOf(targetId);
+      if (from === -1 || to === -1 || from === to) return ids;
+      const next = [...ids];
+      next.splice(from, 1);
+      next.splice(to, 0, dragged);
+      return next;
+    });
+  }
+
+  // Persist Primary/Fallback from the live order. Runs after pointer-up; the
+  // drag itself never waits on the network.
+  function commitDragOrder() {
+    const ids = liveOrderIdsRef.current;
+    setDraggedId(null);
+    setDragOverlay(null);
+    if (!ids || !session) { setLiveOrderIds(null); return; }
+    void (async () => {
+      try {
+        await setLlmTierRoles(session.access_token, {
+          primary: ids[0] ?? null,
+          fallback: ids[1] ?? null,
+        });
+        await load();
+      } catch (e) {
+        toast.error((e as Error).message);
+        await load();
+      } finally {
+        setLiveOrderIds(null);
+      }
+    })();
+  }
+
+  /** Pointer-based whole-row drag: the card sticks to the cursor; other rows
+   *  slide via FLIP as the pointer crosses them. Buttons/links are ignored so
+   *  Manage / Delete still click normally. */
+  function handleRowPointerDown(providerId: string, e: React.PointerEvent<HTMLDivElement>) {
+    if (orderedConfiguredLlm.length < 2) return;
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, [role='button'], [data-no-dnd]")) return;
+
+    const row = e.currentTarget;
+    const rect = row.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    dragGrabOffsetRef.current = { x: startX - rect.left, y: startY - rect.top };
+    let activated = false;
+    const pointerId = e.pointerId;
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!activated) {
+        if (Math.hypot(dx, dy) < 6) return;
+        activated = true;
+        setDraggedId(providerId);
+        setLiveOrderIds(serverOrderIdsRef.current);
+        setDragOverlay({
+          id: providerId,
+          x: ev.clientX - dragGrabOffsetRef.current.x,
+          y: ev.clientY - dragGrabOffsetRef.current.y,
+          width: rect.width,
+          height: rect.height,
+        });
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "grabbing";
+      }
+
+      setDragOverlay((prev) => prev && {
+        ...prev,
+        x: ev.clientX - dragGrabOffsetRef.current.x,
+        y: ev.clientY - dragGrabOffsetRef.current.y,
+      });
+
+      // Hit-test under the pointer (overlay is pointer-events-none). Walk
+      // ancestors so a hit on text/icon still resolves to the row.
+      const stack = document.elementsFromPoint(ev.clientX, ev.clientY);
+      for (const el of stack) {
+        const row = (el as Element).closest?.("[data-provider-id]") as HTMLElement | null;
+        const id = row?.dataset.providerId;
+        if (id && id !== providerId) {
+          shiftDraggedToward(id);
+          break;
+        }
+      }
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      if (activated) commitDragOrder();
+      try { row.releasePointerCapture(pointerId); } catch { /* already released */ }
+    };
+
+    row.setPointerCapture(pointerId);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
+  const overlayProvider = dragOverlay
+    ? orderedConfiguredLlm.find((p) => p.id === dragOverlay.id) ?? null
+    : null;
+  const overlayRank = dragOverlay && liveOrderIds
+    ? liveOrderIds.indexOf(dragOverlay.id) + 1
+    : null;
 
   if (loading) {
     return <p className="text-sm text-muted-foreground px-5 py-10 text-center">Loading provider keys…</p>;
@@ -140,6 +345,7 @@ export function KeysView() {
               key={p.id}
               provider={p}
               onManage={() => setEditing(p)}
+              onChanged={load}
             />
           ))}
         </div>
@@ -159,7 +365,9 @@ export function KeysView() {
             <p className="text-xs text-muted-foreground mt-1">
               {configuredLlm.length === 0
                 ? "None configured yet — drafts can't be generated until you add one."
-                : "OpenRouter, OpenAI, and Anthropic only. The first with a key is primary; the rest are automatic fallbacks."}
+                : configuredLlm.length > 1
+                  ? "OpenRouter, OpenAI, and Anthropic only. Drag any row to reorder — top is Primary."
+                  : "OpenRouter, OpenAI, and Anthropic only."}
             </p>
           </div>
           <Button
@@ -187,19 +395,40 @@ export function KeysView() {
             </p>
           </button>
         ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border">
-            {configuredLlm.map((p) => (
+          <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border relative">
+            {orderedConfiguredLlm.map((p, i) => (
               <ProviderRow
                 key={p.id}
                 provider={p}
-                roleBadge={
-                  p.keys.some((k) => k.is_active)
-                    ? (p.id === primaryId ? "primary" : "fallback")
-                    : null
-                }
+                rank={p.keys.some((k) => k.is_active) || p.envFallback ? i + 1 : null}
                 onManage={() => setEditing(p)}
+                onChanged={load}
+                draggable={orderedConfiguredLlm.length > 1}
+                dragging={draggedId === p.id}
+                rowRef={(el) => registerLlmRow(p.id, el)}
+                onPointerDownDrag={(e) => handleRowPointerDown(p.id, e)}
               />
             ))}
+            {dragOverlay && overlayProvider && (
+              <div
+                aria-hidden
+                className="pointer-events-none fixed z-50 rounded-xl border border-border bg-card shadow-xl ring-1 ring-black/5 dark:ring-white/10"
+                style={{
+                  left: dragOverlay.x,
+                  top: dragOverlay.y,
+                  width: dragOverlay.width,
+                  height: dragOverlay.height,
+                }}
+              >
+                <ProviderRow
+                  provider={overlayProvider}
+                  rank={overlayRank && overlayRank > 0 ? overlayRank : null}
+                  onManage={() => {}}
+                  onChanged={async () => {}}
+                  overlay
+                />
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -223,18 +452,70 @@ export function KeysView() {
   );
 }
 
+const RANK_LABEL: Record<number, string> = { 1: "Primary", 2: "Fallback" };
+
 /** A single provider line. Same shape for services and LLMs so the page reads
- *  as one list; LLM rows may also show an automatic primary/fallback badge. */
-function ProviderRow({ provider, roleBadge, onManage }: {
+ *  as one list; LLM rows may also show their position in the try-order and
+ *  pick up whole-row drag-to-reorder from the parent. Deleting the
+ *  top-priority key lives right here — the "Manage" modal is for models,
+ *  multiple keys, and health, not the one-key common case. */
+function ProviderRow({
+  provider, rank, onManage, onChanged,
+  draggable, dragging, rowRef,
+  onPointerDownDrag, overlay,
+}: {
   provider: ProviderConfig;
-  roleBadge?: "primary" | "fallback" | null;
+  rank?: number | null;
   onManage: () => void;
+  onChanged: () => Promise<void>;
+  draggable?: boolean;
+  dragging?: boolean;
+  /** Attaches this row's DOM node to the parent's FLIP position tracker. */
+  rowRef?: (el: HTMLDivElement | null) => void;
+  onPointerDownDrag?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  /** Floating clone that follows the cursor — no actions, no hit target. */
+  overlay?: boolean;
 }) {
+  const { session } = useApp();
   const model = provider.selectedModel || provider.defaultModel;
   const hasKeys = provider.keys.length > 0;
+  const topKey = [...provider.keys].sort((a, b) => a.priority - b.priority)[0];
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!session || !topKey) return;
+    setDeleting(true);
+    try {
+      await deleteProviderKey(session.access_token, topKey.id);
+      toast.success("Key removed");
+      setConfirmOpen(false);
+      await onChanged();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5 min-w-0">
+    <div
+      ref={rowRef}
+      data-provider-id={overlay ? undefined : provider.id}
+      className={cn(
+        "flex items-center gap-3 px-5 py-3.5 min-w-0",
+        draggable && !overlay && "cursor-grab active:cursor-grabbing touch-none select-none",
+        dragging && !overlay && "opacity-0",
+        overlay && "h-full",
+      )}
+      onPointerDown={overlay ? undefined : onPointerDownDrag}
+    >
+      {draggable || overlay ? (
+        <GripVertical className="size-4 text-muted-foreground/40 shrink-0" aria-hidden />
+      ) : (
+        <span className="size-4 shrink-0" aria-hidden />
+      )}
+
       <div className={cn(
         "shrink-0 size-8 rounded-md flex items-center justify-center",
         hasKeys ? "bg-emerald-500/10 text-emerald-500" : "bg-secondary/60 text-muted-foreground",
@@ -245,18 +526,13 @@ function ProviderRow({ provider, roleBadge, onManage }: {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 min-w-0">
           <p className="text-sm font-semibold truncate">{provider.label}</p>
-          {roleBadge && (
-            <span className={cn(
-              "shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-              roleBadge === "primary"
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
-                : "border-border bg-secondary/60 text-muted-foreground",
-            )}>
-              {roleBadge === "primary" ? "Primary" : "Fallback"}
-            </span>
+          {!!rank && (
+            <Badge variant={rank === 1 ? "selected" : "unselected"} className="shrink-0 normal-case">
+              {RANK_LABEL[rank] ?? `Backup #${rank - 1}`}
+            </Badge>
           )}
           {provider.modelInputMode !== "none" && model && (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground bg-secondary/60 rounded px-1.5 py-0.5 truncate max-w-[14rem]">
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground bg-secondary/60 rounded px-1.5 py-0.5 truncate max-w-56">
               {model}
             </span>
           )}
@@ -271,9 +547,45 @@ function ProviderRow({ provider, roleBadge, onManage }: {
         </div>
       </div>
 
-      <Button size="sm" variant={hasKeys ? "outline" : "ghost"} className="shrink-0 h-8" onClick={onManage}>
-        {hasKeys ? <><Pencil className="size-3.5 mr-1.5" /> Update</> : "Manage"}
-      </Button>
+      <div className="flex items-center gap-1 shrink-0" data-no-dnd>
+        <Button
+          size="icon-sm" variant="outline" className="size-8"
+          onClick={overlay ? undefined : onManage}
+          tabIndex={overlay ? -1 : undefined}
+          aria-label={`Manage ${provider.label}`}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+        {topKey && (
+          <Button
+            size="icon-sm" variant="ghost"
+            className="size-8 text-muted-foreground hover:text-destructive"
+            onClick={overlay ? undefined : () => setConfirmOpen(true)}
+            tabIndex={overlay ? -1 : undefined}
+            aria-label={`Remove ${provider.label} key`}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        )}
+      </div>
+
+      {!overlay && confirmOpen && topKey && (
+        <ConfirmDialog
+          open
+          title={`Remove this ${provider.label} key?`}
+          description={`"${topKey.label}" will be permanently deleted. ${
+            provider.keys.length > 1
+              ? "Traffic fails over to the next key for " + provider.label + "."
+              : provider.envFallback
+                ? "Traffic falls back to the .env.local value."
+                : `${provider.label} will have no key configured until you add one.`
+          }`}
+          confirmLabel="Remove"
+          loading={deleting}
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   );
 }
@@ -550,6 +862,23 @@ function ManageProviderModal({ provider, onClose, onChanged }: {
     }
   }
 
+  async function handleMove(index: number, direction: -1 | 1) {
+    if (!session) return;
+    const target = index + direction;
+    if (target < 0 || target >= keys.length) return;
+    const reordered = [...keys];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setBusyKeyId(keys[index].id);
+    try {
+      await reorderProviderKeys(session.access_token, provider.id, reordered.map((k) => k.id));
+      await onChanged();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusyKeyId(null);
+    }
+  }
+
   return (
     <>
       <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -599,12 +928,35 @@ function ManageProviderModal({ provider, onClose, onChanged }: {
 
               {keys.length > 0 && (
                 <ul className="rounded-md border border-border divide-y divide-border overflow-hidden">
-                  {keys.map((key) => {
+                  {keys.map((key, i) => {
                     const meta = statusMeta(key.status);
                     const busy = busyKeyId === key.id;
                     return (
                       <li key={key.id} className={cn("px-3 py-2.5 space-y-2", !key.is_active && "opacity-60")}>
                         <div className="flex items-center gap-2 min-w-0">
+                          {keys.length > 1 && (
+                            <span className="shrink-0 flex flex-col -my-1">
+                              <button
+                                type="button"
+                                disabled={busy || i === 0}
+                                onClick={() => void handleMove(i, -1)}
+                                className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground"
+                                aria-label="Move up"
+                              >
+                                <ArrowUp className="size-3" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy || i === keys.length - 1}
+                                onClick={() => void handleMove(i, 1)}
+                                className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground"
+                                aria-label="Move down"
+                              >
+                                <ArrowDown className="size-3" />
+                              </button>
+                            </span>
+                          )}
+                          <span className="shrink-0 text-[10px] font-mono text-muted-foreground/70 w-3.5 text-center">{i + 1}</span>
                           <span className="text-sm font-medium truncate">{key.label}</span>
                           <span className="font-mono text-xs text-muted-foreground">•••{key.secret_last4}</span>
                           <span
@@ -630,13 +982,6 @@ function ManageProviderModal({ provider, onClose, onChanged }: {
                             </Button>
                           )}
                           <Button
-                            size="sm" variant="ghost" className="h-7 text-xs"
-                            disabled={busy}
-                            onClick={() => void handlePatch(key, { is_active: !key.is_active })}
-                          >
-                            {key.is_active ? "Disable" : "Enable"}
-                          </Button>
-                          <Button
                             size="icon-sm" variant="ghost"
                             className="ml-auto text-destructive hover:text-destructive"
                             onClick={() => setDeleteTarget(key)}
@@ -644,6 +989,16 @@ function ManageProviderModal({ provider, onClose, onChanged }: {
                           >
                             <Trash2 className="size-3.5" />
                           </Button>
+                          <span className="flex items-center gap-1.5 pl-1">
+                            <span className="text-xs text-muted-foreground">Active</span>
+                            <Switch
+                              tone="success"
+                              checked={key.is_active}
+                              disabled={busy}
+                              onCheckedChange={(checked) => void handlePatch(key, { is_active: checked })}
+                              aria-label={key.is_active ? "Disable key" : "Enable key"}
+                            />
+                          </span>
                         </div>
                       </li>
                     );
