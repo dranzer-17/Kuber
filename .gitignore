@@ -11,3 +11,4 @@ ui-screenshots
 *.tsbuildinfo
 # Local QA handoff notes — contains team PII, must never hit this public repo
 TESTING_HANDOFF.md
+.vercel

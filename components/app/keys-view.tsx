@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   KeyRound, Plus, Eye, EyeOff, RefreshCw, Trash2, ShieldCheck,
@@ -409,7 +410,12 @@ export function KeysView() {
                 onPointerDownDrag={(e) => handleRowPointerDown(p.id, e)}
               />
             ))}
-            {dragOverlay && overlayProvider && (
+            {dragOverlay && overlayProvider && typeof document !== "undefined" && createPortal(
+              // Portaled straight to <body> — any transformed ancestor (e.g.
+              // this page's `.enter` fade-in, which ends at `transform:
+              // translateY(0)` and so still counts) would otherwise become
+              // the containing block for `position: fixed`, throwing the
+              // card's coordinates off relative to the viewport.
               <div
                 aria-hidden
                 className="pointer-events-none fixed z-50 rounded-xl border border-border bg-card shadow-xl ring-1 ring-black/5 dark:ring-white/10"
@@ -427,7 +433,8 @@ export function KeysView() {
                   onChanged={async () => {}}
                   overlay
                 />
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         )}
