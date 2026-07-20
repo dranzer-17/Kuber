@@ -1,5 +1,4 @@
 {
-  "_comment": "Hobby plan only allows once-per-day crons. unibox/sync (*/5 * * * *), enrichment-watchdog (*/15 * * * *), and auto-retry-failed-orgs (0 */3 * * *) were removed for that reason on 2026-07-20 — restore them (see git history on this file) after upgrading to Pro.",
   "crons": [
     {
       "path": "/api/internal/reconcile-counters",
