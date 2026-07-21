@@ -286,13 +286,17 @@ export async function updateInstantlyLeadVariables(
 
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
-export async function listInstantlyAccounts(): Promise<
-  Array<{ email: string; status: number; daily_limit?: number }>
-> {
+export type InstantlyAccount = {
+  email: string;
+  status: number;
+  daily_limit?: number | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+export async function listInstantlyAccounts(): Promise<InstantlyAccount[]> {
   const res = await fetch(`${BASE}/accounts?limit=100`, { headers: await h() });
-  const data = await iJson<{
-    items?: Array<{ email: string; status: number; daily_limit?: number }>
-  }>(res);
+  const data = await iJson<{ items?: InstantlyAccount[] }>(res);
   return data.items ?? [];
 }
 

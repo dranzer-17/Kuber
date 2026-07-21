@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import {
   KeyRound, Plus, Eye, EyeOff, RefreshCw, Trash2, ShieldCheck,
-  Pencil, Mail, X, ArrowUp, ArrowDown, GripVertical,
+  Pencil, X, ArrowUp, ArrowDown,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { cn } from "@/lib/utils";
@@ -21,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import {
   fetchProviderKeys, createProviderKey, patchProviderKey, deleteProviderKey,
-  checkProviderKey, setProviderModel, setSendingAccounts, setLlmTierRoles,
+  checkProviderKey, setProviderModel, setLlmTierRoles,
   reorderProviderKeys,
   type ProviderConfig, type ProviderKey,
 } from "@/lib/api-client";
@@ -123,28 +122,12 @@ export function KeysView() {
   const { session } = useApp();
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [tierOrder, setTierOrder] = useState<string[]>([]);
-  const [sendingAccounts, setAccounts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<ProviderConfig | null>(null);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  // Order while a drag is in flight — updated live as the pointer crosses
-  // other rows so they visibly shift out of the way. Null once nothing is
-  // being dragged.
-  const [liveOrderIds, setLiveOrderIds] = useState<string[] | null>(null);
-  // Floating card that follows the pointer (HTML5 drag ghosts are too faint
-  // and don't feel attached). Null when idle.
-  const [dragOverlay, setDragOverlay] = useState<{
-    id: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
-  const dragGrabOffsetRef = useRef({ x: 0, y: 0 });
-  const serverOrderIdsRef = useRef<string[]>([]);
-  const liveOrderIdsRef = useRef<string[] | null>(null);
-  const draggedIdRef = useRef<string | null>(null);
+  // Optimistic order shown while a move is being persisted — null when the
+  // list matches whatever the server last confirmed.
+  const [pendingOrderIds, setPendingOrderIds] = useState<string[] | null>(null);
 
   const load = useCallback(async (initial = false) => {
     if (!session) return;
@@ -153,7 +136,6 @@ export function KeysView() {
       const data = await fetchProviderKeys(session.access_token);
       setProviders(data.providers);
       setTierOrder(data.tierOrder);
-      setAccounts(data.sendingAccounts);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -184,9 +166,9 @@ export function KeysView() {
     () => tierOrder.filter((id) => configuredLlm.some((p) => p.id === id)),
     [tierOrder, configuredLlm],
   );
-  // While dragging, the list on screen is the live, locally-shifted order;
-  // otherwise it's whatever the server last confirmed.
-  const displayOrderIds = liveOrderIds ?? serverOrderIds;
+  // While a move is persisting, show the optimistic order; otherwise whatever
+  // the server last confirmed.
+  const displayOrderIds = pendingOrderIds ?? serverOrderIds;
   const orderedConfiguredLlm = useMemo(
     () => displayOrderIds
       .map((id) => configuredLlm.find((p) => p.id === id))
@@ -195,127 +177,31 @@ export function KeysView() {
   );
   const registerLlmRow = useFlip(displayOrderIds);
 
-  serverOrderIdsRef.current = serverOrderIds;
-  liveOrderIdsRef.current = liveOrderIds;
-  draggedIdRef.current = draggedId;
-
-  // Move `draggedId` to sit where `targetId` currently is — called as the
-  // floating card crosses other rows so the list reflows under the cursor.
-  function shiftDraggedToward(targetId: string) {
-    const dragged = draggedIdRef.current;
-    if (!dragged || dragged === targetId) return;
-    setLiveOrderIds((current) => {
-      const ids = current ?? serverOrderIdsRef.current;
-      const from = ids.indexOf(dragged);
-      const to = ids.indexOf(targetId);
-      if (from === -1 || to === -1 || from === to) return ids;
-      const next = [...ids];
-      next.splice(from, 1);
-      next.splice(to, 0, dragged);
-      return next;
-    });
-  }
-
-  // Persist Primary/Fallback from the live order. Runs after pointer-up; the
-  // drag itself never waits on the network.
-  function commitDragOrder() {
-    const ids = liveOrderIdsRef.current;
-    setDraggedId(null);
-    setDragOverlay(null);
-    if (!ids || !session) { setLiveOrderIds(null); return; }
+  // Swap the provider at `index` with its neighbor in `direction`, show the
+  // new order immediately (FLIP animates the swap), then persist
+  // Primary/Fallback from it.
+  function moveProvider(index: number, direction: -1 | 1) {
+    if (!session) return;
+    const target = index + direction;
+    if (target < 0 || target >= displayOrderIds.length) return;
+    const next = [...displayOrderIds];
+    [next[index], next[target]] = [next[target], next[index]];
+    setPendingOrderIds(next);
     void (async () => {
       try {
         await setLlmTierRoles(session.access_token, {
-          primary: ids[0] ?? null,
-          fallback: ids[1] ?? null,
+          primary: next[0] ?? null,
+          fallback: next[1] ?? null,
         });
         await load();
       } catch (e) {
         toast.error((e as Error).message);
         await load();
       } finally {
-        setLiveOrderIds(null);
+        setPendingOrderIds(null);
       }
     })();
   }
-
-  /** Pointer-based whole-row drag: the card sticks to the cursor; other rows
-   *  slide via FLIP as the pointer crosses them. Buttons/links are ignored so
-   *  Manage / Delete still click normally. */
-  function handleRowPointerDown(providerId: string, e: React.PointerEvent<HTMLDivElement>) {
-    if (orderedConfiguredLlm.length < 2) return;
-    if (e.button !== 0) return;
-    const target = e.target as HTMLElement;
-    if (target.closest("button, a, input, textarea, select, [role='button'], [data-no-dnd]")) return;
-
-    const row = e.currentTarget;
-    const rect = row.getBoundingClientRect();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    dragGrabOffsetRef.current = { x: startX - rect.left, y: startY - rect.top };
-    let activated = false;
-    const pointerId = e.pointerId;
-
-    const onMove = (ev: PointerEvent) => {
-      const dx = ev.clientX - startX;
-      const dy = ev.clientY - startY;
-      if (!activated) {
-        if (Math.hypot(dx, dy) < 6) return;
-        activated = true;
-        setDraggedId(providerId);
-        setLiveOrderIds(serverOrderIdsRef.current);
-        setDragOverlay({
-          id: providerId,
-          x: ev.clientX - dragGrabOffsetRef.current.x,
-          y: ev.clientY - dragGrabOffsetRef.current.y,
-          width: rect.width,
-          height: rect.height,
-        });
-        document.body.style.userSelect = "none";
-        document.body.style.cursor = "grabbing";
-      }
-
-      setDragOverlay((prev) => prev && {
-        ...prev,
-        x: ev.clientX - dragGrabOffsetRef.current.x,
-        y: ev.clientY - dragGrabOffsetRef.current.y,
-      });
-
-      // Hit-test under the pointer (overlay is pointer-events-none). Walk
-      // ancestors so a hit on text/icon still resolves to the row.
-      const stack = document.elementsFromPoint(ev.clientX, ev.clientY);
-      for (const el of stack) {
-        const row = (el as Element).closest?.("[data-provider-id]") as HTMLElement | null;
-        const id = row?.dataset.providerId;
-        if (id && id !== providerId) {
-          shiftDraggedToward(id);
-          break;
-        }
-      }
-    };
-
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-      if (activated) commitDragOrder();
-      try { row.releasePointerCapture(pointerId); } catch { /* already released */ }
-    };
-
-    row.setPointerCapture(pointerId);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-  }
-
-  const overlayProvider = dragOverlay
-    ? orderedConfiguredLlm.find((p) => p.id === dragOverlay.id) ?? null
-    : null;
-  const overlayRank = dragOverlay && liveOrderIds
-    ? liveOrderIds.indexOf(dragOverlay.id) + 1
-    : null;
 
   if (loading) {
     return <p className="text-sm text-muted-foreground px-5 py-10 text-center">Loading provider keys…</p>;
@@ -352,12 +238,6 @@ export function KeysView() {
         </div>
       </section>
 
-      {/* ── Sending accounts ─────────────────────────────────────────────── */}
-      <SendingAccountsCard
-        emails={sendingAccounts}
-        onSaved={(next) => setAccounts(next)}
-      />
-
       {/* ── LLM providers ────────────────────────────────────────────────── */}
       <section className="space-y-3">
         <div className="flex items-end justify-between gap-4 px-1">
@@ -367,7 +247,7 @@ export function KeysView() {
               {configuredLlm.length === 0
                 ? "None configured yet — drafts can't be generated until you add one."
                 : configuredLlm.length > 1
-                  ? "OpenRouter, OpenAI, and Anthropic only. Drag any row to reorder — top is Primary."
+                  ? "OpenRouter, OpenAI, and Anthropic only. Use the arrows to reorder — top is Primary."
                   : "OpenRouter, OpenAI, and Anthropic only."}
             </p>
           </div>
@@ -404,38 +284,12 @@ export function KeysView() {
                 rank={p.keys.some((k) => k.is_active) || p.envFallback ? i + 1 : null}
                 onManage={() => setEditing(p)}
                 onChanged={load}
-                draggable={orderedConfiguredLlm.length > 1}
-                dragging={draggedId === p.id}
                 rowRef={(el) => registerLlmRow(p.id, el)}
-                onPointerDownDrag={(e) => handleRowPointerDown(p.id, e)}
+                onMoveUp={orderedConfiguredLlm.length > 1 && i > 0 ? () => moveProvider(i, -1) : undefined}
+                onMoveDown={orderedConfiguredLlm.length > 1 && i < orderedConfiguredLlm.length - 1 ? () => moveProvider(i, 1) : undefined}
+                showMoveColumn={orderedConfiguredLlm.length > 1}
               />
             ))}
-            {dragOverlay && overlayProvider && typeof document !== "undefined" && createPortal(
-              // Portaled straight to <body> — any transformed ancestor (e.g.
-              // this page's `.enter` fade-in, which ends at `transform:
-              // translateY(0)` and so still counts) would otherwise become
-              // the containing block for `position: fixed`, throwing the
-              // card's coordinates off relative to the viewport.
-              <div
-                aria-hidden
-                className="pointer-events-none fixed z-50 rounded-xl border border-border bg-card shadow-xl ring-1 ring-black/5 dark:ring-white/10"
-                style={{
-                  left: dragOverlay.x,
-                  top: dragOverlay.y,
-                  width: dragOverlay.width,
-                  height: dragOverlay.height,
-                }}
-              >
-                <ProviderRow
-                  provider={overlayProvider}
-                  rank={overlayRank && overlayRank > 0 ? overlayRank : null}
-                  onManage={() => {}}
-                  onChanged={async () => {}}
-                  overlay
-                />
-              </div>,
-              document.body,
-            )}
           </div>
         )}
       </section>
@@ -463,25 +317,24 @@ const RANK_LABEL: Record<number, string> = { 1: "Primary", 2: "Fallback" };
 
 /** A single provider line. Same shape for services and LLMs so the page reads
  *  as one list; LLM rows may also show their position in the try-order and
- *  pick up whole-row drag-to-reorder from the parent. Deleting the
+ *  reorder via the up/down arrows at the left. Deleting the
  *  top-priority key lives right here — the "Manage" modal is for models,
  *  multiple keys, and health, not the one-key common case. */
 function ProviderRow({
   provider, rank, onManage, onChanged,
-  draggable, dragging, rowRef,
-  onPointerDownDrag, overlay,
+  rowRef, onMoveUp, onMoveDown, showMoveColumn,
 }: {
   provider: ProviderConfig;
   rank?: number | null;
   onManage: () => void;
   onChanged: () => Promise<void>;
-  draggable?: boolean;
-  dragging?: boolean;
   /** Attaches this row's DOM node to the parent's FLIP position tracker. */
   rowRef?: (el: HTMLDivElement | null) => void;
-  onPointerDownDrag?: (e: React.PointerEvent<HTMLDivElement>) => void;
-  /** Floating clone that follows the cursor — no actions, no hit target. */
-  overlay?: boolean;
+  /** Undefined when the row is already at that end of the list. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  /** Keeps non-reorderable rows (services, single LLM) aligned with movable ones. */
+  showMoveColumn?: boolean;
 }) {
   const { session } = useApp();
   const model = provider.selectedModel || provider.defaultModel;
@@ -508,17 +361,29 @@ function ProviderRow({
   return (
     <div
       ref={rowRef}
-      data-provider-id={overlay ? undefined : provider.id}
-      className={cn(
-        "flex items-center gap-3 px-5 py-3.5 min-w-0",
-        draggable && !overlay && "cursor-grab active:cursor-grabbing touch-none select-none",
-        dragging && !overlay && "opacity-0",
-        overlay && "h-full",
-      )}
-      onPointerDown={overlay ? undefined : onPointerDownDrag}
+      className="flex items-center gap-3 px-5 py-3.5 min-w-0"
     >
-      {draggable || overlay ? (
-        <GripVertical className="size-4 text-muted-foreground/40 shrink-0" aria-hidden />
+      {showMoveColumn ? (
+        <span className="shrink-0 flex flex-col -my-1">
+          <button
+            type="button"
+            disabled={!onMoveUp}
+            onClick={onMoveUp}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground"
+            aria-label={`Move ${provider.label} up`}
+          >
+            <ArrowUp className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={!onMoveDown}
+            onClick={onMoveDown}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground"
+            aria-label={`Move ${provider.label} down`}
+          >
+            <ArrowDown className="size-3.5" />
+          </button>
+        </span>
       ) : (
         <span className="size-4 shrink-0" aria-hidden />
       )}
@@ -554,11 +419,10 @@ function ProviderRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0" data-no-dnd>
+      <div className="flex items-center gap-1 shrink-0">
         <Button
           size="icon-sm" variant="outline" className="size-8"
-          onClick={overlay ? undefined : onManage}
-          tabIndex={overlay ? -1 : undefined}
+          onClick={onManage}
           aria-label={`Manage ${provider.label}`}
         >
           <Pencil className="size-3.5" />
@@ -567,8 +431,7 @@ function ProviderRow({
           <Button
             size="icon-sm" variant="ghost"
             className="size-8 text-muted-foreground hover:text-destructive"
-            onClick={overlay ? undefined : () => setConfirmOpen(true)}
-            tabIndex={overlay ? -1 : undefined}
+            onClick={() => setConfirmOpen(true)}
             aria-label={`Remove ${provider.label} key`}
           >
             <Trash2 className="size-3.5" />
@@ -576,7 +439,7 @@ function ProviderRow({
         )}
       </div>
 
-      {!overlay && confirmOpen && topKey && (
+      {confirmOpen && topKey && (
         <ConfirmDialog
           open
           title={`Remove this ${provider.label} key?`}
@@ -1079,153 +942,3 @@ function ManageProviderModal({ provider, onClose, onChanged }: {
   );
 }
 
-/** The sender addresses campaigns send from. Lives on this page because a
- *  valid Instantly key with zero sending accounts produces a campaign that is
- *  accepted and then silently never sends — the two are one setup step. */
-function SendingAccountsCard({ emails, onSaved }: {
-  emails: string[];
-  onSaved: (next: string[]) => void;
-}) {
-  const { session } = useApp();
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<string[]>(emails);
-  const [entry, setEntry] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  function openEditor() {
-    setDraft(emails);
-    setEntry("");
-    setOpen(true);
-  }
-
-  function addEntry() {
-    const value = entry.trim().toLowerCase();
-    if (!value) return;
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-      toast.error(`"${value}" is not a valid email address`);
-      return;
-    }
-    if (draft.some((e) => e.toLowerCase() === value)) {
-      toast.error("That address is already in the list");
-      return;
-    }
-    setDraft((d) => [...d, value]);
-    setEntry("");
-  }
-
-  async function handleSave() {
-    if (!session) return;
-    setSaving(true);
-    try {
-      const { sendingAccounts } = await setSendingAccounts(session.access_token, draft);
-      onSaved(sendingAccounts);
-      toast.success("Sending accounts updated");
-      setOpen(false);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="space-y-3">
-      <div className="px-1">
-        <p className="eyebrow">Sending accounts</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          The mailboxes campaigns send from. These must already be connected inside Instantly.
-        </p>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card px-5 py-3.5 flex items-center gap-4">
-        <div className="shrink-0 size-8 rounded-md bg-secondary/60 flex items-center justify-center">
-          <Mail className="size-4 text-muted-foreground" />
-        </div>
-        <div className="min-w-0 flex-1">
-          {emails.length === 0 ? (
-            <>
-              <p className="text-sm font-semibold">No sending accounts</p>
-              <span className="inline-flex items-center gap-1.5 text-xs text-destructive mt-0.5">
-                <span className="size-1.5 rounded-full bg-destructive" aria-hidden />
-                Campaigns cannot send until at least one is set
-              </span>
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-semibold truncate">
-                {emails.length} address{emails.length !== 1 ? "es" : ""}
-              </p>
-              <p className="text-xs text-muted-foreground truncate mt-0.5">{emails.join(", ")}</p>
-            </>
-          )}
-        </div>
-        <Button size="sm" variant="ghost" className="shrink-0 h-8" onClick={openEditor}>
-          <Pencil className="size-3.5 mr-1.5" /> Edit
-        </Button>
-      </div>
-
-      {open && (
-        <Dialog open onOpenChange={(v) => { if (!v) setOpen(false); }}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Sending accounts</DialogTitle>
-            </DialogHeader>
-
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Add an address</Label>
-                <div className="flex gap-2">
-                  <Input
-                    type="email"
-                    value={entry}
-                    onChange={(e) => setEntry(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") { e.preventDefault(); addEntry(); }
-                    }}
-                    placeholder="sales@kuberpolyplast.com"
-                    autoComplete="off"
-                  />
-                  <Button type="button" variant="outline" onClick={addEntry}>Add</Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Must match a mailbox already connected in Instantly, or its campaigns will be rejected.
-                </p>
-              </div>
-
-              {draft.length > 0 && (
-                <ul className="rounded-md border border-border divide-y divide-border overflow-hidden">
-                  {draft.map((email) => (
-                    <li key={email} className="flex items-center gap-2 px-3 py-2">
-                      <span className="text-sm truncate flex-1 font-mono text-xs">{email}</span>
-                      <Button
-                        size="icon-sm" variant="ghost"
-                        className="text-muted-foreground hover:text-destructive shrink-0"
-                        onClick={() => setDraft((d) => d.filter((e) => e !== email))}
-                        aria-label={`Remove ${email}`}
-                      >
-                        <X className="size-3.5" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {draft.length === 0 && (
-                <p className="text-xs text-muted-foreground rounded-md border border-dashed border-border px-3 py-4 text-center">
-                  Saving with none set falls back to <code className="font-mono">INSTANTLY_SENDING_ACCOUNTS</code>.
-                </p>
-              )}
-
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={() => void handleSave()} disabled={saving}>
-                  {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />} Save
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-    </section>
-  );
-}

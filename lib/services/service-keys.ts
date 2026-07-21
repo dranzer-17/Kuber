@@ -15,10 +15,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getActiveKey } from "@/lib/services/provider-keys";
 import type { ServiceProviderId } from "@/lib/services/providers/registry";
 
-/** Key in the shared `settings` table holding the comma-separated sender
- *  emails campaigns send from. Not an API key, but it belongs next to the
- *  Instantly credential: a valid key with zero sending accounts produces a
- *  campaign that is accepted by Instantly and then never sends. */
+/** Key in the shared `settings` table holding the selected Instantly sender.
+ *  Older deployments may still contain a comma-separated pool; the Email &
+ *  Sending settings page requires choosing one before replacing that value. */
 export const SENDING_ACCOUNTS_SETTING_KEY = "instantly_sending_accounts";
 
 function parseEmailList(raw: string | null | undefined): string[] {

@@ -254,7 +254,6 @@ export type ProviderKeysData = {
   providers: ProviderConfig[];
   tierRoles: LlmTierRoles;
   tierOrder: string[];
-  sendingAccounts: string[];
 };
 
 export async function fetchProviderKeys(token: string): Promise<ProviderKeysData> {
@@ -291,8 +290,30 @@ export async function setLlmTierRoles(token: string, body: { primary: string | n
   return apiFetch("/api/v1/settings/keys/tier", { method: "PUT", body: JSON.stringify(body) }, token);
 }
 
-export async function setSendingAccounts(token: string, emails: string[]): Promise<{ sendingAccounts: string[] }> {
-  return apiFetch("/api/v1/settings/keys/sending-accounts", { method: "PUT", body: JSON.stringify({ emails }) }, token);
+export type InstantlySendingAccount = {
+  email: string;
+  status: number;
+  status_label: string;
+  can_send: boolean;
+  daily_limit?: number | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+export async function fetchSendingAccounts(token: string): Promise<{
+  accounts: InstantlySendingAccount[];
+  selected_email: string | null;
+  selection_required: boolean;
+}> {
+  return apiFetch("/api/v1/settings/keys/sending-accounts", {}, token);
+}
+
+export async function setSendingAccount(token: string, email: string): Promise<{ selected_email: string }> {
+  return apiFetch(
+    "/api/v1/settings/keys/sending-accounts",
+    { method: "PUT", body: JSON.stringify({ email }) },
+    token,
+  );
 }
 
 export async function fetchLeadActivity(token: string, id: string): Promise<LeadActivityEvent[]> {

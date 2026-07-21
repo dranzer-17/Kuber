@@ -144,11 +144,11 @@ export async function sendCampaign(
   }));
   if (steps.length === 0) throw new Error("Campaign has no steps — cannot send");
 
-  // 3) Sending accounts — Settings > Keys first, INSTANTLY_SENDING_ACCOUNTS
+  // 3) Sending account — Settings > Email & Sending first, INSTANTLY_SENDING_ACCOUNTS
   //    as the fallback tier (same precedence as every provider key).
   const emailList = await getSendingAccounts(db);
   if (emailList.length === 0) {
-    throw new Error("No Instantly sending accounts configured — add sender emails in Settings > Keys");
+    throw new Error("No Instantly sending account selected — choose one in Settings > Email & Sending");
   }
 
   // 4) Eligible leads (certified, not yet pushed to Instantly)

@@ -6,7 +6,6 @@ import { ok, fail } from "@/lib/api-response";
 import { CreateProviderKeySchema } from "@/lib/validators/provider-keys";
 import { getLlmTierRoles, PROVIDER_META, resolveLlmTierOrder } from "@/lib/services/providers/registry";
 import { ENV_KEY_VARS } from "@/lib/services/provider-keys";
-import { getSendingAccounts } from "@/lib/services/service-keys";
 
 type ProviderKeyRow = {
   id: string; provider: string; label: string; secret_last4: string;
@@ -22,12 +21,11 @@ export async function GET(req: NextRequest) {
   try { await requireManager(req); } catch (r) { return r as Response; }
 
   const db = createAdminClient();
-  const [{ data: keys }, { data: settings }, tierRoles, tierOrder, sendingAccounts] = await Promise.all([
+  const [{ data: keys }, { data: settings }, tierRoles, tierOrder] = await Promise.all([
     db.from("provider_keys").select(KEY_SELECT).order("priority", { ascending: true }),
     db.from("provider_settings").select("provider, selected_model"),
     getLlmTierRoles(db),
     resolveLlmTierOrder(db),
-    getSendingAccounts(db),
   ]);
 
   const modelByProvider = new Map((settings ?? []).map((s) => [s.provider, s.selected_model as string | null]));
@@ -59,7 +57,7 @@ export async function GET(req: NextRequest) {
     keys: keysByProvider.get(meta.id) ?? [],
   }));
 
-  return ok({ providers, tierRoles, tierOrder, sendingAccounts });
+  return ok({ providers, tierRoles, tierOrder });
 }
 
 export async function POST(req: NextRequest) {
