@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { toast } from "sonner";
 import {
   KeyRound, Plus, Eye, EyeOff, RefreshCw, Trash2, ShieldCheck,
-  Pencil, X, ArrowUp, ArrowDown,
+  Pencil, X, ArrowUp, ArrowDown, Check, ChevronsUpDown,
 } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { cn } from "@/lib/utils";
@@ -18,11 +18,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { SearchInput } from "@/components/ui/search-input";
 import {
   fetchProviderKeys, createProviderKey, patchProviderKey, deleteProviderKey,
   checkProviderKey, setProviderModel, setLlmTierRoles,
-  reorderProviderKeys,
-  type ProviderConfig, type ProviderKey,
+  reorderProviderKeys, fetchProviderModels,
+  type ProviderConfig, type ProviderKey, type ProviderModelOption,
 } from "@/lib/api-client";
 
 const OTHER_MODEL = "__other__";
@@ -584,46 +586,176 @@ function AddProviderModal({ available, onClose, onAdded }: {
   );
 }
 
-/** Dropdown for providers with a known catalog, free text for the rest, and an
- *  "Other…" escape hatch so a new model name never requires a code change. */
+/** Searchable dropdown fed by the provider's live model catalog (fetched
+ *  server-side with the configured key), so changing the model is a pick, not
+ *  a guess. Falls back to the static option list / free text when the catalog
+ *  can't be loaded (e.g. no key stored yet), and always keeps a manual-entry
+ *  escape hatch so a brand-new model name never requires a code change. */
 function ModelField({ provider, value, onChange }: {
   provider: ProviderConfig;
   value: string;
   onChange: (v: string) => void;
 }) {
-  const isPreset = provider.modelOptions.includes(value);
-  const [freeform, setFreeform] = useState(provider.modelInputMode === "freeform" || (!!value && !isPreset));
+  const { session } = useApp();
+  const [models, setModels] = useState<ProviderModelOption[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [manual, setManual] = useState(false);
+  const [staticFreeform, setStaticFreeform] = useState(
+    provider.modelInputMode === "freeform" || (!!value && !provider.modelOptions.includes(value)),
+  );
 
-  if (provider.modelInputMode === "dropdown" && !freeform) {
+  useEffect(() => {
+    let cancelled = false;
+    if (!session) { setLoading(false); return; }
+    setLoading(true);
+    fetchProviderModels(session.access_token, provider.id)
+      .then((list) => {
+        if (cancelled) return;
+        setModels(list);
+        setLoadError(list.length === 0 ? "The provider returned no models." : null);
+      })
+      .catch((e) => { if (!cancelled) setLoadError((e as Error).message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [session, provider.id]);
+
+  const manualInput = (
+    <Input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={provider.defaultModel ?? "exact model id"}
+      className="font-mono text-xs"
+    />
+  );
+
+  if (loading) {
     return (
-      <Select
-        value={value}
-        onValueChange={(v) => {
-          if (v === OTHER_MODEL) { setFreeform(true); onChange(""); return; }
-          onChange(v);
-        }}
-      >
-        <SelectTrigger><SelectValue placeholder="Choose a model" /></SelectTrigger>
-        <SelectContent>
-          {provider.modelOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-          <SelectItem value={OTHER_MODEL}>Other…</SelectItem>
-        </SelectContent>
-      </Select>
+      <div className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-card px-3 text-xs text-muted-foreground">
+        <RefreshCw className="size-3.5 animate-spin" /> Loading models…
+      </div>
+    );
+  }
+
+  if (manual) {
+    return (
+      <div className="space-y-1.5">
+        {manualInput}
+        <button
+          type="button"
+          onClick={() => setManual(false)}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          ← Back to the model list
+        </button>
+      </div>
+    );
+  }
+
+  const catalog = models ?? [];
+  if (catalog.length > 0) {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? catalog.filter((m) => m.id.toLowerCase().includes(q) || (m.name ?? "").toLowerCase().includes(q))
+      : catalog;
+
+    return (
+      <div className="space-y-1.5">
+        <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) setQuery(""); }}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className={cn("truncate font-mono text-xs", !value && "text-muted-foreground font-sans")}>
+                {value || "Choose a model"}
+              </span>
+              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
+            <div className="border-b border-border p-2">
+              <SearchInput
+                size="sm"
+                value={query}
+                onChange={setQuery}
+                placeholder={`Search ${catalog.length} models…`}
+              />
+            </div>
+            <div className="max-h-60 overflow-y-auto p-1">
+              {filtered.length === 0 && (
+                <p className="px-3 py-4 text-center text-xs text-muted-foreground">No models match “{query}”</p>
+              )}
+              {filtered.slice(0, 150).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => { onChange(m.id); setOpen(false); }}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent",
+                    value === m.id && "bg-accent/60",
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-xs">{m.id}</span>
+                    {m.name && m.name !== m.id && (
+                      <span className="block truncate text-[11px] text-muted-foreground">{m.name}</span>
+                    )}
+                  </span>
+                  {value === m.id && <Check className="size-3.5 shrink-0 text-primary" />}
+                </button>
+              ))}
+              {filtered.length > 150 && (
+                <p className="px-3 py-2 text-center text-[11px] text-muted-foreground">
+                  Showing 150 of {filtered.length} — keep typing to narrow down.
+                </p>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+        <button
+          type="button"
+          onClick={() => setManual(true)}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Enter a model id manually
+        </button>
+      </div>
+    );
+  }
+
+  // Catalog unavailable — static preset dropdown (if any) or free text.
+  if (provider.modelInputMode === "dropdown" && !staticFreeform) {
+    return (
+      <div className="space-y-1.5">
+        <Select
+          value={value}
+          onValueChange={(v) => {
+            if (v === OTHER_MODEL) { setStaticFreeform(true); onChange(""); return; }
+            onChange(v);
+          }}
+        >
+          <SelectTrigger><SelectValue placeholder="Choose a model" /></SelectTrigger>
+          <SelectContent>
+            {provider.modelOptions.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+            <SelectItem value={OTHER_MODEL}>Other…</SelectItem>
+          </SelectContent>
+        </Select>
+        {loadError && <p className="text-xs text-muted-foreground">Live model list unavailable — {loadError}</p>}
+      </div>
     );
   }
 
   return (
     <div className="space-y-1.5">
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={provider.defaultModel ?? "exact model id"}
-        className="font-mono text-xs"
-      />
+      {manualInput}
+      {loadError && <p className="text-xs text-muted-foreground">Live model list unavailable — {loadError}</p>}
       {provider.modelInputMode === "dropdown" && (
         <button
           type="button"
-          onClick={() => { setFreeform(false); onChange(provider.defaultModel ?? provider.modelOptions[0] ?? ""); }}
+          onClick={() => { setStaticFreeform(false); onChange(provider.defaultModel ?? provider.modelOptions[0] ?? ""); }}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
           ← Back to the model list

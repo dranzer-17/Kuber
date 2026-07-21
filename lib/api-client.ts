@@ -290,6 +290,17 @@ export async function setLlmTierRoles(token: string, body: { primary: string | n
   return apiFetch("/api/v1/settings/keys/tier", { method: "PUT", body: JSON.stringify(body) }, token);
 }
 
+export type ProviderModelOption = { id: string; name: string | null };
+
+/** Live model catalog for an LLM provider, fetched server-side with the
+ *  provider's configured key (Settings > Keys model picker). */
+export async function fetchProviderModels(token: string, provider: string): Promise<ProviderModelOption[]> {
+  const data = await apiFetch<{ models: ProviderModelOption[] }>(
+    `/api/v1/settings/keys/models?provider=${encodeURIComponent(provider)}`, {}, token,
+  );
+  return data.models;
+}
+
 export type InstantlySendingAccount = {
   email: string;
   status: number;
