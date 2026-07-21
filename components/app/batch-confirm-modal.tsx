@@ -36,7 +36,14 @@ function BatchConfirmModalInner({
   const extra       = totalCount && totalCount > leads.length ? totalCount - leads.length : 0;
 
   return (
-    <div className="fixed inset-0 z-200 flex items-center justify-center">
+    // `data-confirm-dialog-root` + forced `pointer-events-auto` are required
+    // because this modal portals to document.body while a Radix Dialog (the
+    // Add Leads drawer) is open behind it: Radix sets `pointer-events: none`
+    // on <body> while open, which would otherwise make every button here
+    // unclickable, and its outside-interaction detection would close the
+    // drawer (unmounting this modal) on any click inside it. See the same
+    // treatment in components/ui/confirm-dialog.tsx and components/ui/dialog.tsx.
+    <div data-confirm-dialog-root className="fixed inset-0 z-200 flex items-center justify-center pointer-events-auto">
       {/* backdrop */}
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
 
