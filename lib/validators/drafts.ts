@@ -29,6 +29,15 @@ export const RegenerateDraftSchema = z.object({
   custom_instruction: z.string().optional(),
 });
 
+// Bulk regeneration. Omitting campaign_lead_ids means "every eligible lead in
+// this campaign" — the server resolves the target list either way, so the ids
+// here only ever narrow it (see lib/services/regeneration-jobs.ts).
+export const BulkRegenerateSchema = z.object({
+  campaign_lead_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+  custom_instruction: z.string().max(1000).optional(),
+  step_number: z.number().int().min(1).default(1),
+});
+
 export const ManualDraftSchema = z.object({
   campaign_lead_id: z.string().uuid(),
   step_number: z.number().int().min(2),

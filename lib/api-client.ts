@@ -602,6 +602,57 @@ export async function bulkApproveDrafts(token: string, draftIds: string[]): Prom
   }, token);
 }
 
+export type RegenerationSkipped = { certified: number; sent: number; no_draft: number; other: number };
+
+export type RegenerationJobStatus = {
+  id: string;
+  campaign_id: string;
+  status: "queued" | "running" | "completed" | "cancelled" | "failed";
+  step_number: number;
+  custom_instruction: string | null;
+  total: number;
+  succeeded: number;
+  failed: number;
+  processed: number;
+  active: boolean;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+/** What a bulk regeneration would touch, and what it would leave alone. */
+export async function previewRegeneration(
+  token: string,
+  campaignId: string,
+  campaignLeadIds?: string[],
+): Promise<{ eligible: number; by_status: { draft: number; failed: number }; skipped: RegenerationSkipped }> {
+  const qs = campaignLeadIds?.length ? `?campaign_lead_ids=${campaignLeadIds.join(",")}` : "";
+  return apiFetch(`/api/v1/campaigns/${campaignId}/regenerate-drafts${qs}`, {}, token);
+}
+
+/** Queue a background bulk regeneration. Omit ids to cover every eligible lead. */
+export async function regenerateCampaignDrafts(
+  token: string,
+  campaignId: string,
+  opts?: { campaignLeadIds?: string[]; customInstruction?: string },
+): Promise<{ job_id: string; total: number; skipped: RegenerationSkipped }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/regenerate-drafts`, {
+    method: "POST",
+    body: JSON.stringify({
+      ...(opts?.campaignLeadIds?.length ? { campaign_lead_ids: opts.campaignLeadIds } : {}),
+      ...(opts?.customInstruction ? { custom_instruction: opts.customInstruction } : {}),
+    }),
+  }, token);
+}
+
+export async function fetchRegenerationJob(token: string, campaignId: string): Promise<{ job: RegenerationJobStatus | null }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/regeneration-job`, {}, token);
+}
+
+export async function cancelRegenerationJob(token: string, campaignId: string): Promise<{ job_id: string; cancelled: boolean; remaining: number }> {
+  return apiFetch(`/api/v1/campaigns/${campaignId}/regeneration-job/cancel`, { method: "POST" }, token);
+}
+
 export async function editDraft(token: string, draftId: string, subject: string, body: string): Promise<{ id: string; status: string }> {
   return apiFetch(`/api/v1/drafts/${draftId}`, {
     method: "PATCH",
@@ -669,20 +720,27 @@ export async function setCampaignLeadStatus(
   }, token);
 }
 
+/**
+ * Retry every failed draft in a campaign.
+ *
+ * This used to loop on the client, awaiting one regenerate call per lead — which
+ * meant a long campaign's retry died the moment the tab closed. It now queues the
+ * same background job the outbox's bulk Regenerate uses, so it returns at once
+ * and survives a closed browser.
+ */
 export async function retryFailedDrafts(token: string, campaignId: string): Promise<{ retried: number; errors: string[] }> {
   const { campaign_leads } = await fetchCampaignLeads(token, campaignId);
-  const failed = campaign_leads.filter((cl) => cl.email_drafts?.status === "failed" && cl.email_drafts?.id);
-  const errors: string[] = [];
-  let retried = 0;
-  for (const cl of failed) {
-    try {
-      await regenerateDraft(token, cl.email_drafts!.id);
-      retried++;
-    } catch (e) {
-      errors.push((e as Error).message);
-    }
+  const failedIds = campaign_leads
+    .filter((cl) => cl.email_drafts?.status === "failed" && cl.email_drafts?.id)
+    .map((cl) => cl.id);
+  if (failedIds.length === 0) return { retried: 0, errors: [] };
+
+  try {
+    const { total } = await regenerateCampaignDrafts(token, campaignId, { campaignLeadIds: failedIds });
+    return { retried: total, errors: [] };
+  } catch (e) {
+    return { retried: 0, errors: [(e as Error).message] };
   }
-  return { retried, errors };
 }
 
 export async function fetchCampaignReport(token: string, campaignId: string): Promise<{

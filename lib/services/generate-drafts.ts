@@ -212,6 +212,8 @@ export async function generateOneDraft(
   aiPromptContext?: string,
   existingDraftId?: string,
   stepNumber = 1,
+  /** Set when this draft is part of a bulk regeneration run; surfaced in the lead's activity log. */
+  bulkJobId?: string,
 ): Promise<{ ok: true; draftId: string; status: string } | { ok: false; reason: string }> {
   const lead = unwrapLead(target.leads);
   if (!lead) {
@@ -345,7 +347,7 @@ export async function generateOneDraft(
 
       await logLeadEvent(db, lead.id, "draft_created", draftCreatedDetail(stepNumber, finalStatus), {
         actorId: userId ?? null,
-        metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, status: finalStatus, generic_template: true },
+        metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, status: finalStatus, generic_template: true, ...(bulkJobId ? { bulk_job_id: bulkJobId } : {}) },
       });
 
       return { ok: true, draftId: activeDraftId, status: finalStatus };
@@ -462,7 +464,7 @@ export async function generateOneDraft(
 
     await logLeadEvent(db, lead.id, "draft_created", draftCreatedDetail(stepNumber, finalStatus), {
       actorId: userId ?? null,
-      metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, status: finalStatus },
+      metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, status: finalStatus, ...(bulkJobId ? { bulk_job_id: bulkJobId } : {}) },
     });
 
     return { ok: true, draftId: activeDraftId, status: finalStatus };

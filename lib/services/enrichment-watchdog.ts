@@ -41,8 +41,49 @@ export async function triggerEnrichWatchdog(baseUrl: string, db: Db) {
   }
 }
 
-/** Runs both nudges together — this is the whole job of the frequent watchdog. */
+/** A running regeneration job is considered stalled once its heartbeat is this old. */
+const REGEN_STALE_MINUTES = 5;
+
+/** Revive bulk draft-regeneration jobs whose batch self-chain died mid-run —
+ *  the same failure mode the two watchdogs above exist for. Each batch bumps
+ *  heartbeat_at, so a 'running' job that has gone quiet lost its chain: reset
+ *  the items it had claimed and kick it again. Without this, a job stalls
+ *  forever AND holds uq_draft_regen_active_job, blocking every future run on
+ *  that campaign. */
+export async function triggerRegenerationWatchdog(baseUrl: string, db: Db) {
+  const secret = process.env.INTERNAL_SECRET;
+  if (!secret) return;
+
+  const staleBefore = new Date(Date.now() - REGEN_STALE_MINUTES * 60 * 1000).toISOString();
+
+  const { data: stalled } = await db
+    .from("draft_regeneration_jobs")
+    .select("id")
+    .in("status", ["queued", "running"])
+    .or(`heartbeat_at.is.null,heartbeat_at.lt.${staleBefore}`)
+    .lt("created_at", staleBefore)
+    .limit(5);
+
+  for (const job of stalled ?? []) {
+    // Items left 'running' belong to the batch that died; put them back in the
+    // queue. Anything already done/failed keeps its outcome.
+    await db
+      .from("draft_regeneration_job_items")
+      .update({ status: "pending", updated_at: new Date().toISOString() })
+      .eq("job_id", job.id)
+      .eq("status", "running");
+
+    void fetch(`${baseUrl}/api/enrich/regenerate-drafts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+      body: JSON.stringify({ job_id: job.id }),
+    }).catch(() => {});
+  }
+}
+
+/** Runs the nudges together — this is the whole job of the frequent watchdog. */
 export async function runEnrichmentWatchdog(baseUrl: string, db: Db) {
   triggerScrapeWatchdog(baseUrl);
   await triggerEnrichWatchdog(baseUrl, db);
+  await triggerRegenerationWatchdog(baseUrl, db);
 }

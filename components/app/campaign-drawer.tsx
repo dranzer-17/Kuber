@@ -50,10 +50,17 @@ import {
   fetchCampaignComments,
   postCampaignComment,
   toggleCampaignCommentReaction,
+  previewRegeneration,
+  regenerateCampaignDrafts,
+  fetchRegenerationJob,
+  cancelRegenerationJob,
   type CampaignReplyThread,
   type CampaignComment,
   type ReplyDraft,
+  type RegenerationJobStatus,
+  type RegenerationSkipped,
 } from "@/lib/api-client";
+import { RegenerateDraftsModal } from "@/components/app/regenerate-drafts-modal";
 import { DiscussionComment } from "@/components/app/discussion-comment";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
@@ -388,6 +395,17 @@ export function CampaignDetail({
   const [editBody, setEditBody] = useState("");
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenQuery, setRegenQuery] = useState("");
+  // Bulk regeneration: the confirm modal's server-resolved preview, the live job, and submit state.
+  const [bulkRegenPreview, setBulkRegenPreview] = useState<{
+    counts: { draft: number; failed: number };
+    skipped: RegenerationSkipped;
+    isSubset: boolean;
+    campaignLeadIds?: string[];
+  } | null>(null);
+  const [bulkRegenSubmitting, setBulkRegenSubmitting] = useState(false);
+  const [bulkRegenOpening, setBulkRegenOpening] = useState(false);
+  const [regenJob, setRegenJob] = useState<RegenerationJobStatus | null>(null);
+  const [cancellingJob, setCancellingJob] = useState(false);
   const [saving, setSaving] = useState(false);
   const [certifying, setCertifying] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -598,6 +616,18 @@ export function CampaignDetail({
     return leads;
   }, [campaign.id]);
 
+  const loadRegenJob = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+      const { job } = await fetchRegenerationJob(session.access_token, campaign.id);
+      setRegenJob(job);
+      return job;
+    } catch {
+      return null;
+    }
+  }, [campaign.id]);
+
   const loadReplies = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
@@ -666,6 +696,7 @@ export function CampaignDetail({
   useEffect(() => {
     setLoading(true);
     void loadReplies();
+    void loadRegenJob();
     loadData()
       .then((leads) => {
         if (leads && leads.length === 1) {
@@ -674,7 +705,7 @@ export function CampaignDetail({
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [loadData]);
+  }, [loadData, loadRegenJob]);
 
   // Refresh reply threads when opening Outbox so Unibox Generate/Save shows up
   // without remounting the campaign drawer.
@@ -757,6 +788,29 @@ export function CampaignDetail({
     const interval = setInterval(() => { void loadData(); }, 3000);
     return () => clearInterval(interval);
   }, [progress, loadData]);
+
+  // A bulk regeneration runs entirely server-side, so the only way to see it
+  // advance is to ask. Poll the job and the leads together while one is live;
+  // on the tick where it stops being active, refresh once more so the final
+  // drafts are on screen.
+  useEffect(() => {
+    if (!regenJob?.active) return;
+    const interval = setInterval(() => {
+      void (async () => {
+        const job = await loadRegenJob();
+        await loadData();
+        if (job && !job.active) {
+          const done = job.status === "completed";
+          if (done && job.failed > 0) {
+            toast.warning(`Regenerated ${job.succeeded} draft${job.succeeded !== 1 ? "s" : ""}; ${job.failed} failed`);
+          } else if (done) {
+            toast.success(`${job.succeeded} draft${job.succeeded !== 1 ? "s" : ""} regenerated`);
+          }
+        }
+      })();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [regenJob?.active, loadRegenJob, loadData]);
 
   const selected = campaignLeads.find((cl) => cl.id === selectedId) ?? null;
 
@@ -980,6 +1034,72 @@ export function CampaignDetail({
     await handleBulkCertify();
   }
 
+  /**
+   * Open the bulk-regenerate confirm modal. The counts come from the server, not
+   * from what this component happens to have loaded — an employee's "all" is
+   * only their own assigned leads, and that boundary is resolved server-side.
+   */
+  async function openBulkRegenerate(campaignLeadIds?: string[]) {
+    setBulkRegenOpening(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const preview = await previewRegeneration(session.access_token, campaign.id, campaignLeadIds);
+      if (preview.eligible === 0) {
+        toast.info("No drafts are eligible — certified and sent emails are not regenerated in bulk.");
+        return;
+      }
+      setBulkRegenPreview({
+        counts: preview.by_status,
+        skipped: preview.skipped,
+        isSubset: !!campaignLeadIds?.length,
+        campaignLeadIds,
+      });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBulkRegenOpening(false);
+    }
+  }
+
+  async function submitBulkRegenerate(instruction: string) {
+    if (!bulkRegenPreview) return;
+    setBulkRegenSubmitting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { total } = await regenerateCampaignDrafts(session.access_token, campaign.id, {
+        campaignLeadIds: bulkRegenPreview.campaignLeadIds,
+        customInstruction: instruction || undefined,
+      });
+      toast.success(`Regenerating ${total} draft${total !== 1 ? "s" : ""} in the background`);
+      setBulkRegenPreview(null);
+      setCheckedIds(new Set());
+      await loadRegenJob();
+      await loadData();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBulkRegenSubmitting(false);
+    }
+  }
+
+  async function handleCancelRegenJob() {
+    setCancellingJob(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const { remaining } = await cancelRegenerationJob(session.access_token, campaign.id);
+      toast.success(`Regeneration cancelled — ${remaining} lead${remaining !== 1 ? "s" : ""} left untouched`);
+      await loadRegenJob();
+      await loadData();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setCancellingJob(false);
+    }
+  }
+
   async function handleRegenerate() {
     if (!selected?.email_drafts?.id) return;
     setRegenerating(true);
@@ -1051,15 +1171,12 @@ export function CampaignDetail({
     }
   }
 
+  // Send-only. Certifying used to live here too, which meant a ticked draft put
+  // an identical "Certify (N)" in both the header and the list toolbar. Certify
+  // now has exactly two homes — "Certify all" in the header for the whole
+  // campaign, "Certify (N)" in the toolbar for what you ticked — matching the
+  // Regenerate pair beside them.
   async function handlePrimaryAction() {
-    if (checkedDraftCount > 0) {
-      await handleBulkCertify(
-        campaignLeads
-          .filter((cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft")
-          .map((cl) => cl.email_drafts!.id),
-      );
-      return;
-    }
     if (checkedSendCount > 0) {
       const ids = campaignLeads
         .filter((cl) => checkedIds.has(cl.id) && sendReadyLeads.some((s) => s.id === cl.id))
@@ -1171,33 +1288,25 @@ export function CampaignDetail({
     setViewTab("outbox");
   }
 
-  const checkedDraftCount = campaignLeads.filter(
-    (cl) => checkedIds.has(cl.id) && cl.email_drafts?.status === "draft"
-  ).length;
-
   const checkedSendCount = campaignLeads.filter(
     (cl) => checkedIds.has(cl.id) && sendReadyLeads.some((s) => s.id === cl.id)
   ).length;
 
   const primaryAction =
-    checkedDraftCount > 0
-      ? { mode: "certify" as const, count: checkedDraftCount }
-      : checkedSendCount > 0
-        ? { mode: "send" as const, count: checkedSendCount }
-        : certifiedCount > 0
-          ? { mode: "sendAll" as const, count: certifiedCount }
-          : { mode: "none" as const, count: 0 };
+    checkedSendCount > 0
+      ? { mode: "send" as const, count: checkedSendCount }
+      : certifiedCount > 0
+        ? { mode: "sendAll" as const, count: certifiedCount }
+        : { mode: "none" as const, count: 0 };
 
-  const primaryBusy = primaryAction.mode === "certify" ? certifying : sending;
+  const primaryBusy = sending;
   const primaryLabel = primaryBusy
-    ? primaryAction.mode === "certify" ? "Certifying…" : "Sending…"
-    : primaryAction.mode === "certify"
-      ? `Certify (${primaryAction.count})`
-      : primaryAction.mode === "send"
-        ? `Send (${primaryAction.count})`
-        : primaryAction.mode === "sendAll"
-          ? `Send all (${primaryAction.count})`
-          : "Send all (0)";
+    ? "Sending…"
+    : primaryAction.mode === "send"
+      ? `Send (${primaryAction.count})`
+      : primaryAction.mode === "sendAll"
+        ? `Send all (${primaryAction.count})`
+        : "Send all (0)";
 
   const sortedCampaignLeads = sortCampaignLeads(campaignLeads, leadsSort);
 
@@ -1371,6 +1480,24 @@ export function CampaignDetail({
     .map((cl) => cl.email_drafts!.id);
   const outboxCertifyDraftIds = outboxCheckedDraftIds.length > 0 ? outboxCheckedDraftIds : outboxFilteredDraftIds;
 
+  // Bulk-regenerable = a live draft still in 'draft' or 'failed' (certified and
+  // sent are protected). A lead with a reply thread is excluded: its outbox row
+  // shows the REPLY draft's status, and replies have their own regenerate — the
+  // initial email is already sent, so the server would skip it anyway.
+  //
+  // Two counts, mirroring the Certify pair: the header regenerates the whole
+  // campaign, the toolbar only what you ticked. Both are just hints for the
+  // modal — the server re-resolves targets under the caller's scope, so an
+  // employee can never widen either one to a co-worker's lead.
+  const isBulkRegenerable = (cl: CampaignLead) =>
+    !outboxThreadByLeadId.get(cl.id) &&
+    (cl.email_drafts?.status === "draft" || cl.email_drafts?.status === "failed");
+  const campaignRegenerableCount = campaignLeads.filter(isBulkRegenerable).length;
+  const outboxCheckedRegenIds = outboxSelectableFilteredLeads
+    .filter((cl) => checkedIds.has(cl.id) && isBulkRegenerable(cl))
+    .map((cl) => cl.id);
+  const regenJobActive = !!regenJob?.active;
+
   const campaignTabs = [
     { value: "analytics" as const, label: "Analytics", icon: BarChart2 },
     { value: "leads" as const,     label: "Leads",     icon: List,   count: campaign.leads },
@@ -1465,6 +1592,23 @@ export function CampaignDetail({
 
         {viewTab === "outbox" && (
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            {campaignRegenerableCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={bulkRegenOpening || regenJobActive}
+                title={regenJobActive
+                  ? "A regeneration is already running for this campaign"
+                  : "Regenerate every un-certified draft in this campaign"}
+                onClick={() => void openBulkRegenerate()}
+              >
+                {bulkRegenOpening
+                  ? <Loader2 className="size-3.5 animate-spin" />
+                  : <RotateCcw className="size-3.5" />}
+                Regenerate all ({campaignRegenerableCount})
+              </Button>
+            )}
             {draftReadyLeads.length > 0 && (
               <Button
                 variant="outline"
@@ -1929,8 +2073,13 @@ export function CampaignDetail({
                   </a>
                 </Button>
               </div>
-              <div className="px-3 py-2 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
+              {/* Wraps rather than collides: this panel is ~265px wide, and the
+                  label plus the action buttons do not fit on one line. Both
+                  groups are shrink-0 so the actions wrap to their own row
+                  instead of squeezing "Deselect all" and the selected count
+                  down to clipped stubs. */}
+              <div className="px-3 py-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+                <div className="flex items-center gap-2 shrink-0">
                   {outboxSelectableFilteredLeads.length > 0 && (
                     <Button
                       type="button"
@@ -1967,20 +2116,77 @@ export function CampaignDetail({
                     </span>
                   )}
                 </div>
-                {outboxCertifyDraftIds.length > 0 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 px-2 text-[11px]"
-                    disabled={certifying}
-                    onClick={() => void handleBulkCertify(outboxCertifyDraftIds)}
-                  >
-                    {certifying ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
-                    Certify ({outboxCertifyDraftIds.length})
-                  </Button>
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Selection-scoped only. "Regenerate all" lives in the header,
+                      so with nothing ticked this button stays out of the way
+                      instead of showing the same count twice. */}
+                  {outboxCheckedRegenIds.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+                      disabled={bulkRegenOpening || regenJobActive}
+                      title={regenJobActive
+                        ? "A regeneration is already running for this campaign"
+                        : "Regenerate the selected drafts"}
+                      onClick={() => void openBulkRegenerate(outboxCheckedRegenIds)}
+                    >
+                      {bulkRegenOpening
+                        ? <Loader2 className="size-3 animate-spin" />
+                        : <RotateCcw className="size-3" />}
+                      Regenerate ({outboxCheckedRegenIds.length})
+                    </Button>
+                  )}
+                  {outboxCertifyDraftIds.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 px-2 text-[11px]"
+                      disabled={certifying}
+                      onClick={() => void handleBulkCertify(outboxCertifyDraftIds)}
+                    >
+                      {certifying ? <Loader2 className="size-3 animate-spin mr-1" /> : null}
+                      Certify ({outboxCertifyDraftIds.length})
+                    </Button>
+                  )}
+                </div>
               </div>
+              {regenJobActive && regenJob && (
+                <div className="px-3 pb-2.5 pt-0.5 space-y-1.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="eyebrow truncate">Regenerating drafts</p>
+                    <p className="font-mono tabular-nums text-[11px] text-muted-foreground shrink-0">
+                      {regenJob.processed} / {regenJob.total}
+                    </p>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-500"
+                      style={{ width: `${regenJob.total > 0 ? Math.round((regenJob.processed / regenJob.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {regenJob.failed > 0 && (
+                        <span className="text-destructive">{regenJob.failed} failed · </span>
+                      )}
+                      Safe to close this window.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={cancellingJob}
+                      onClick={() => void handleCancelRegenJob()}
+                      className="h-6 shrink-0 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                    >
+                      {cancellingJob ? <Loader2 className="size-3 animate-spin" /> : "Cancel"}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto divide-y divide-border/40">
               {outboxFilteredLeads.length === 0 ? (
@@ -2690,6 +2896,17 @@ export function CampaignDetail({
       </div>
 
       {/* ── Shared modals ─────────────────────────────────────────────────── */}
+
+      {bulkRegenPreview && (
+        <RegenerateDraftsModal
+          counts={bulkRegenPreview.counts}
+          skipped={bulkRegenPreview.skipped}
+          isSubset={bulkRegenPreview.isSubset}
+          submitting={bulkRegenSubmitting}
+          onConfirm={(instruction) => void submitBulkRegenerate(instruction)}
+          onCancel={() => setBulkRegenPreview(null)}
+        />
+      )}
 
       {/* Lead detail drawer — opened when name card is clicked */}
       <LeadDrawer
