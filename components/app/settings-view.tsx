@@ -42,9 +42,13 @@ type AiSection = "my-writing" | "my-signature" | "template" | "default" | "repli
 type KnowledgeSection = "company" | "products" | "documents";
 type ProductOffering = { name: string; description: string };
 
+// Knowledge Sources is open to everyone — employees work with the company
+// context and product library more than managers do. Prompt-shaped company
+// defaults (Email Template, Reply AI, Footer) remain manager-only.
 const NAV_ITEMS: { id: Section; label: string }[] = [
   { id: "profile",    label: "My Profile" },
   { id: "ai",         label: "AI & Outreach" },
+  { id: "knowledge",  label: "Knowledge Sources" },
   { id: "appearance", label: "Appearance" },
   { id: "account",    label: "Account" },
 ];
@@ -339,13 +343,12 @@ export function SettingsView() {
         setUserEmail(session?.user?.email ?? "");
         setUserName(session?.user?.user_metadata?.full_name ?? session?.user?.user_metadata?.name ?? "");
 
-        // Personal settings load for everyone; company settings + logo only for
-        // managers (employees neither see nor edit those tabs).
+        // Personal settings, company settings and the logo all load for everyone
+        // — employees need the company settings behind Knowledge Sources, and
+        // GET /settings is readable by any authenticated user.
         const myPromise = fetchMySettings(token);
-        const settingsPromise = isManager ? fetchSettings(token) : Promise.resolve(null);
-        const logoPromise = isManager
-          ? fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }))
-          : Promise.resolve({ logo_path: null, logo_url: null });
+        const settingsPromise = fetchSettings(token);
+        const logoPromise = fetchLogo(token).catch(() => ({ logo_path: null, logo_url: null }));
 
         const my = await myPromise;
         // Keys nav depends on this — set it from /me/settings immediately so we
@@ -380,7 +383,7 @@ export function SettingsView() {
       }
     }
     void load();
-  }, [isManager]);
+  }, []);
 
   async function handleLogoPick(file: File | null) {
     if (!file) return;
@@ -444,16 +447,23 @@ export function SettingsView() {
         });
         setMyDefaults(my.defaults);
         toast.success("Your settings were saved");
+      } else if (section === "knowledge") {
+        // Knowledge Sources is editable by everyone, so send only the keys those
+        // tabs own — the prompt-shaped keys are manager-only server-side and
+        // including them would 403 an employee's save.
+        await patchSettings(token, {
+          default_sender_name: senderName,
+          client_industry:     clientIndustry,
+          company_context:     companyContext,
+          product_offerings:   JSON.stringify(productOfferings),
+        });
+        toast.success("Knowledge sources saved");
       } else {
         await patchSettings(token, {
-          default_sender_name:     senderName,
-          client_industry:         clientIndustry,
-          company_context:         companyContext,
           system_prompt:           systemPrompt,
           generic_email_subject:   genericSubject,
           generic_email_body:      genericBody,
           signature_contact:       sigContact,
-          product_offerings:       JSON.stringify(productOfferings),
           reply_drafter_prompt:    replyDrafterPrompt,
         });
         toast.success("Company settings saved");
@@ -585,8 +595,8 @@ export function SettingsView() {
           </aside>
         )}
 
-        {/* Knowledge secondary sidebar (managers only) */}
-        {section === "knowledge" && isManager && (
+        {/* Knowledge secondary sidebar */}
+        {section === "knowledge" && (
           <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
             <p className="eyebrow px-2 mb-1">Knowledge Sources</p>
             {KNOWLEDGE_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
@@ -878,8 +888,8 @@ export function SettingsView() {
                 </div>
               )}
 
-              {/* ── Knowledge Sources (managers only) ── */}
-              {section === "knowledge" && isManager && (
+              {/* ── Knowledge Sources (everyone) ── */}
+              {section === "knowledge" && (
                 <div className="space-y-8 enter">
 
                   {/* Company Details */}

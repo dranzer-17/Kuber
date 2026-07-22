@@ -8,6 +8,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 ui-screenshots
+# Ad-hoc Playwright verification artifacts — never product code
+verify-shots
+verify-ui.mjs
 *.tsbuildinfo
 # Local QA handoff notes — contains team PII, must never hit this public repo
 TESTING_HANDOFF.md
