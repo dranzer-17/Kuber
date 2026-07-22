@@ -1,23 +1,28 @@
 import { z } from "zod";
 
-const TerritorySchema = z.enum(["india", "foreign"]);
+// Territory is a list of countries the employee receives leads for — the
+// output of the same region/country picker the Apollo import uses. Names are
+// canonicalised server-side (lib/territory.ts), so the picker's "UAE" and a
+// stored "United Arab Emirates" are the same thing.
+const TerritoryCountriesSchema = z.array(z.string().min(1)).max(300);
 
-// Territory is REQUIRED for employees at creation (planning.md Phase 4 / Q8) —
-// otherwise territory-based routing silently skips them. Managers have none.
+// Still REQUIRED for employees at creation (planning.md Phase 4 / Q8) —
+// an employee covering nowhere is silently skipped by territory routing.
+// Managers have none.
 export const CreateUserSchema = z
   .object({
     email: z.string().email(),
     password: z.string().min(8),
     full_name: z.string().min(1).max(200),
     role: z.enum(["manager", "employee"]),
-    territory: TerritorySchema.nullable().optional(),
+    territory_countries: TerritoryCountriesSchema.optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.role === "employee" && !data.territory) {
+    if (data.role === "employee" && !data.territory_countries?.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["territory"],
-        message: "Territory is required for employees (india / foreign)",
+        path: ["territory_countries"],
+        message: "Pick at least one country — employees need a territory for lead routing",
       });
     }
   });
@@ -25,7 +30,7 @@ export const CreateUserSchema = z
 export const PatchUserSchema = z.object({
   full_name: z.string().min(1).max(200).optional(),
   role: z.enum(["manager", "employee"]).optional(),
-  territory: TerritorySchema.nullable().optional(),
+  territory_countries: TerritoryCountriesSchema.optional(),
   is_active: z.boolean().optional(),
   // Online/offline availability (spec §2B) — separate from is_active.
   availability_status: z.enum(["online", "offline"]).optional(),

@@ -159,7 +159,7 @@ export const LOCATION_CATEGORIES: LocationCategory[] = [
   {
     id: "central-asia",
     label: "Central Asia",
-    countries: ["Kazakhstan", "Uzbekistan", "Turkmenistan", "Kyrgyzstan", "Tajikistan"],
+    countries: ["Kazakhstan", "Uzbekistan", "Turkmenistan", "Kyrgyzstan", "Tajikistan", "Armenia", "Azerbaijan", "Georgia"],
   },
   {
     id: "middle-east",
@@ -169,7 +169,7 @@ export const LOCATION_CATEGORIES: LocationCategory[] = [
   {
     id: "western-europe",
     label: "Western Europe",
-    countries: ["Germany", "France", "United Kingdom", "Italy", "Spain", "Netherlands", "Belgium", "Switzerland", "Austria", "Portugal", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Greece", "Luxembourg"],
+    countries: ["Germany", "France", "United Kingdom", "Italy", "Spain", "Netherlands", "Belgium", "Switzerland", "Austria", "Portugal", "Sweden", "Norway", "Denmark", "Finland", "Ireland", "Greece", "Luxembourg", "Cyprus", "Malta", "Iceland", "Monaco", "Guernsey", "Jersey"],
   },
   {
     id: "eastern-europe",
@@ -184,7 +184,7 @@ export const LOCATION_CATEGORIES: LocationCategory[] = [
   {
     id: "central-america-caribbean",
     label: "Central America & Caribbean",
-    countries: ["Guatemala", "Honduras", "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Cuba", "Dominican Republic", "Jamaica", "Haiti", "Trinidad and Tobago", "Belize"],
+    countries: ["Guatemala", "Honduras", "El Salvador", "Nicaragua", "Costa Rica", "Panama", "Cuba", "Dominican Republic", "Jamaica", "Haiti", "Trinidad and Tobago", "Belize", "Puerto Rico", "Aruba", "Bahamas", "Barbados"],
   },
   {
     id: "south-america",
@@ -199,7 +199,7 @@ export const LOCATION_CATEGORIES: LocationCategory[] = [
   {
     id: "west-africa",
     label: "West Africa",
-    countries: ["Nigeria", "Ghana", "Senegal", "Ivory Coast", "Cameroon", "Mali", "Burkina Faso", "Niger", "Guinea", "Benin", "Togo", "Sierra Leone", "Liberia", "Gambia"],
+    countries: ["Nigeria", "Ghana", "Senegal", "Ivory Coast", "Cameroon", "Mali", "Burkina Faso", "Niger", "Guinea", "Benin", "Togo", "Sierra Leone", "Liberia", "Gambia", "Cape Verde"],
   },
   {
     id: "east-africa",
@@ -236,7 +236,8 @@ export const LOCATION_MAP: Record<string, string> = {
   "Hong Kong": "Hong Kong", Mongolia: "Mongolia",
   // Central Asia
   Kazakhstan: "Kazakhstan", Uzbekistan: "Uzbekistan", Turkmenistan: "Turkmenistan",
-  Kyrgyzstan: "Kyrgyzstan", Tajikistan: "Tajikistan",
+  Kyrgyzstan: "Kyrgyzstan", Tajikistan: "Tajikistan", Armenia: "Armenia",
+  Azerbaijan: "Azerbaijan", Georgia: "Georgia",
   // Middle East
   UAE: "United Arab Emirates", "Saudi Arabia": "Saudi Arabia", Turkey: "Turkey",
   Iran: "Iran", Iraq: "Iraq", Israel: "Israel", Jordan: "Jordan", Kuwait: "Kuwait",
@@ -247,7 +248,8 @@ export const LOCATION_MAP: Record<string, string> = {
   Spain: "Spain", Netherlands: "Netherlands", Belgium: "Belgium", Switzerland: "Switzerland",
   Austria: "Austria", Portugal: "Portugal", Sweden: "Sweden", Norway: "Norway",
   Denmark: "Denmark", Finland: "Finland", Ireland: "Ireland", Greece: "Greece",
-  Luxembourg: "Luxembourg",
+  Luxembourg: "Luxembourg", Cyprus: "Cyprus", Malta: "Malta", Iceland: "Iceland",
+  Monaco: "Monaco", Guernsey: "Guernsey", Jersey: "Jersey",
   // Eastern Europe
   Poland: "Poland", "Czech Republic": "Czech Republic", Romania: "Romania", Hungary: "Hungary",
   Ukraine: "Ukraine", Russia: "Russia", Bulgaria: "Bulgaria", Slovakia: "Slovakia",
@@ -262,6 +264,7 @@ export const LOCATION_MAP: Record<string, string> = {
   Nicaragua: "Nicaragua", "Costa Rica": "Costa Rica", Panama: "Panama", Cuba: "Cuba",
   "Dominican Republic": "Dominican Republic", Jamaica: "Jamaica", Haiti: "Haiti",
   "Trinidad and Tobago": "Trinidad and Tobago", Belize: "Belize",
+  "Puerto Rico": "Puerto Rico", Aruba: "Aruba", Bahamas: "Bahamas", Barbados: "Barbados",
   // South America
   Brazil: "Brazil", Argentina: "Argentina", Colombia: "Colombia", Chile: "Chile",
   Peru: "Peru", Venezuela: "Venezuela", Ecuador: "Ecuador", Bolivia: "Bolivia",
@@ -273,7 +276,7 @@ export const LOCATION_MAP: Record<string, string> = {
   Nigeria: "Nigeria", Ghana: "Ghana", Senegal: "Senegal", "Ivory Coast": "Ivory Coast",
   Cameroon: "Cameroon", Mali: "Mali", "Burkina Faso": "Burkina Faso", Niger: "Niger",
   Guinea: "Guinea", Benin: "Benin", Togo: "Togo", "Sierra Leone": "Sierra Leone",
-  Liberia: "Liberia", Gambia: "Gambia",
+  Liberia: "Liberia", Gambia: "Gambia", "Cape Verde": "Cape Verde",
   // East Africa
   Kenya: "Kenya", Ethiopia: "Ethiopia", Tanzania: "Tanzania", Uganda: "Uganda",
   Rwanda: "Rwanda", Somalia: "Somalia", Mozambique: "Mozambique", Madagascar: "Madagascar",

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UserPlus, RefreshCw, Eye, EyeOff, Users, ShieldCheck, MapPinOff, Radio } from "lucide-react";
+import { UserPlus, RefreshCw, Eye, EyeOff, Users, ShieldCheck, MapPinOff, Radio, Pencil, X } from "lucide-react";
 import { useApp } from "@/lib/app-context";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/leads/lead-ui";
@@ -18,28 +19,17 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { LocationsPicker, LocationsGrid } from "@/components/ui/locations-picker";
+import { summarizeTerritory } from "@/lib/territory";
+import { LOCATION_CATEGORIES } from "@/lib/constants";
 import {
   fetchUsers, createUser, patchUser,
   fetchOversight,
-  type Profile, type Territory,
+  type Profile,
 } from "@/lib/api-client";
 
-const TERRITORY_OPTIONS: { value: Territory; label: string; short: string }[] = [
-  { value: "india",   label: "India",                   short: "India" },
-  { value: "foreign", label: "Foreign (rest of world)", short: "Foreign" },
-];
-
-function territoryShort(value: string | null | undefined): string {
-  if (!value) return "None";
-  if (value === "europe") return "Foreign";
-  return TERRITORY_OPTIONS.find((t) => t.value === value)?.short ?? value;
-}
-
-function territorySelectValue(value: string | null | undefined): string {
-  if (!value) return "none";
-  if (value === "europe") return "foreign";
-  return value;
-}
+const TERRITORY_HELP =
+  "Which countries' leads route to this person under territory-based assignment. Tick a region header to take the whole region.";
 
 function roleLabel(u: Profile): string {
   if (u.is_super_admin) return "Super Admin";
@@ -60,7 +50,7 @@ export function TeamView() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [newRole, setNewRole] = useState<"manager" | "employee">("employee");
-  const [territory, setTerritory] = useState<Territory | "">("");
+  const [territoryCountries, setTerritoryCountries] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
 
   const [reassignTarget, setReassignTarget] = useState<Profile | null>(null);
@@ -89,19 +79,19 @@ export function TeamView() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!session) return;
-    if (newRole === "employee" && !territory) {
-      toast.error("Pick a territory — employees need one for lead routing.");
+    if (newRole === "employee" && territoryCountries.length === 0) {
+      toast.error("Pick at least one country — employees need a territory for lead routing.");
       return;
     }
     setSaving(true);
     try {
       const created = await createUser(session.access_token, {
         email, password, full_name: fullName, role: newRole,
-        territory: newRole === "employee" ? (territory as Territory) : null,
+        territory_countries: newRole === "employee" ? territoryCountries : [],
       });
       setUsers((prev) => [...prev, created]);
       setShowAdd(false);
-      setEmail(""); setPassword(""); setFullName(""); setNewRole("employee"); setTerritory(""); setShowPassword(false);
+      setEmail(""); setPassword(""); setFullName(""); setNewRole("employee"); setTerritoryCountries([]); setShowPassword(false);
       toast.success("User created");
     } catch (e) {
       toast.error((e as Error).message);
@@ -110,7 +100,7 @@ export function TeamView() {
     }
   }
 
-  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory: Territory | null; is_active: boolean; availability_status: "online" | "offline"; reassign_to: string }>) {
+  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: "online" | "offline"; reassign_to: string }>) {
     if (!session) return;
     try {
       const updated = await patchUser(session.access_token, id, patch);
@@ -166,8 +156,17 @@ export function TeamView() {
   // Territory-based routing (auto-assignment and manual territory bulk-assign
   // alike) silently skips leads with no covering active employee — surface
   // the gap here instead of letting leads pile up in the pool unnoticed.
+  // A region counts as uncovered only when NOT ONE of its countries is held by
+  // an active employee; partial coverage is a deliberate choice, not a gap.
   const uncoveredTerritories = !loading
-    ? TERRITORY_OPTIONS.filter((t) => !users.some((u) => u.role === "employee" && u.is_active && territorySelectValue(u.territory) === t.value))
+    ? LOCATION_CATEGORIES.filter((region) => {
+        const covered = new Set(
+          users
+            .filter((u) => u.role === "employee" && u.is_active)
+            .flatMap((u) => u.territory_countries ?? []),
+        );
+        return !region.countries.some((c) => covered.has(c));
+      })
     : [];
 
   if (loadingSession || role !== "manager") return null;
@@ -203,7 +202,9 @@ export function TeamView() {
             value={loading ? "—" : uncoveredTerritories.length}
             icon={MapPinOff}
             tone={uncoveredTerritories.length > 0 ? "red" : "neutral"}
-            sub={uncoveredTerritories.length > 0 ? uncoveredTerritories.map((t) => t.short).join(", ") : "fully covered"}
+            sub={uncoveredTerritories.length > 0
+              ? uncoveredTerritories.slice(0, 3).map((t) => t.label).join(", ") + (uncoveredTerritories.length > 3 ? ` +${uncoveredTerritories.length - 3}` : "")
+              : "fully covered"}
           />
         </div>
       </div>
@@ -269,16 +270,19 @@ export function TeamView() {
             </div>
             {newRole === "employee" && (
               <div className="space-y-1.5 sm:col-span-2">
-                <Label>Territory <span className="text-destructive">*</span></Label>
-                <Select value={territory} onValueChange={(v) => setTerritory(v as Territory)}>
-                  <SelectTrigger><SelectValue placeholder="Pick a territory (required)" /></SelectTrigger>
-                  <SelectContent>
-                    {TERRITORY_OPTIONS.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Decides which leads route to them under territory-based assignment.</p>
+                <LocationsPicker
+                  selected={territoryCountries}
+                  onChangeSelected={setTerritoryCountries}
+                  label="Territory *"
+                  helpText={TERRITORY_HELP}
+                  placeholder="Pick countries or whole regions (required)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Decides which leads route to them under territory-based assignment.
+                  {territoryCountries.length > 0 && (
+                    <> Currently: <span className="text-foreground">{summarizeTerritory(territoryCountries)}</span>.</>
+                  )}
+                </p>
               </div>
             )}
             <div className="sm:col-span-2 flex justify-end gap-2 pt-1">
@@ -333,7 +337,7 @@ export function TeamView() {
                                 Super Admin
                               </span>
                             )}
-                            {u.role === "employee" && u.is_active && !u.territory && (
+                            {u.role === "employee" && u.is_active && (u.territory_countries ?? []).length === 0 && (
                               <span
                                 className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25"
                                 title="Excluded from territory routing until a territory is set"
@@ -376,20 +380,10 @@ export function TeamView() {
 
                     <TableCell className="py-3">
                       {u.role === "employee" ? (
-                        <Select
-                          value={territorySelectValue(u.territory)}
-                          onValueChange={(v) => handlePatch(u.id, { territory: v === "none" ? null : (v as Territory) })}
-                        >
-                          <SelectTrigger className="h-9 w-30 bg-card font-mono text-xs" title={u.territory ? TERRITORY_OPTIONS.find((t) => t.value === territorySelectValue(u.territory))?.label ?? "Foreign (rest of world)" : "No territory"}>
-                            <SelectValue>{territoryShort(u.territory)}</SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No territory</SelectItem>
-                            {TERRITORY_OPTIONS.map((t) => (
-                              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <TerritoryCell
+                          countries={u.territory_countries ?? []}
+                          onSave={(next) => handlePatch(u.id, { territory_countries: next })}
+                        />
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
@@ -537,5 +531,133 @@ function ReassignBeforeDeactivateModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Territory in a table cell.
+ *
+ * The picker is a 5-column grid of every region, which cannot live inside a
+ * table row: the users table is `overflow-hidden`, so an absolutely-positioned
+ * panel gets clipped (it did — the first attempt rendered half off the row).
+ * The cell therefore shows a summary — "India", "Western Europe", "3 regions ·
+ * 41 countries" — and opens the grid in a modal portalled to <body>.
+ *
+ * Edits are held in a draft and written once on Save, so ticking a 17-country
+ * region is one request rather than seventeen.
+ */
+function TerritoryCell({
+  countries,
+  onSave,
+}: {
+  countries: string[];
+  onSave: (next: string[]) => void | Promise<unknown>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string[]>(countries);
+  const [saving, setSaving] = useState(false);
+
+  const summary = summarizeTerritory(countries);
+  const empty = countries.length === 0;
+
+  const dirty = draft.length !== countries.length || draft.some((c) => !countries.includes(c));
+
+  function openEditor() {
+    setDraft(countries);
+    setOpen(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={openEditor}
+        title={empty
+          ? "No territory — excluded from routing"
+          : `${countries.length} countries: ${countries.slice(0, 12).join(", ")}${countries.length > 12 ? "…" : ""}`}
+        className={cn(
+          "h-9 w-44 justify-between gap-1.5 bg-card px-2.5 font-mono text-xs",
+          empty && "border-amber-500/40 text-amber-400",
+        )}
+      >
+        <span className="truncate">{empty ? "Set territory" : summary}</span>
+        <Pencil className="size-3 shrink-0 opacity-60" />
+      </Button>
+
+      {open && <TerritoryModal
+        draft={draft}
+        setDraft={setDraft}
+        dirty={dirty}
+        saving={saving}
+        onSave={save}
+        onCancel={() => setOpen(false)}
+      />}
+    </>
+  );
+}
+
+function TerritoryModal({
+  draft, setDraft, dirty, saving, onSave, onCancel,
+}: {
+  draft: string[];
+  setDraft: (v: string[]) => void;
+  dirty: boolean;
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-200 flex items-center justify-center pointer-events-auto">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={saving ? undefined : onCancel} />
+      <div className="swatch-bar-top enter relative z-10 mx-4 flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+          <div>
+            <p className="eyebrow">Territory</p>
+            <h2 className="font-display text-base font-semibold mt-0.5">
+              Which countries&apos; leads route here
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{TERRITORY_HELP}</p>
+          </div>
+          <Button type="button" variant="ghost" size="icon" onClick={onCancel} disabled={saving} className="size-8 shrink-0 text-muted-foreground hover:text-foreground">
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <LocationsGrid selected={draft} onChangeSelected={setDraft} maxHeightClassName="max-h-[55vh]" />
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
+          <p className="text-xs text-muted-foreground">
+            {draft.length === 0
+              ? "No countries — this employee is skipped by territory routing."
+              : summarizeTerritory(draft)}
+          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={saving}>Cancel</Button>
+            <Button type="button" size="sm" onClick={onSave} disabled={saving || !dirty}>
+              {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />}
+              Save territory
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
       .select("id, name, status, created_by, total_leads, sent_count, opened_count, replied_count, hot_count, created_at")
       .eq("is_deleted", false)
       .order("created_at", { ascending: false }),
-    db.from("profiles").select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin"),
+    db.from("profiles").select("id, email, full_name, role, territory_countries, is_active, availability_status, is_super_admin"),
     db.from("leads").select("assigned_to").eq("is_deleted", false).not("assigned_to", "is", null),
     // campaign_leads joined to their lead's owner — the basis for BOTH the
     // lead→campaign fan-out and the "campaigns containing this employee's

@@ -67,7 +67,7 @@ type LeadsEntityMode = "individual" | "orgs";
 const ASSIGN_STRATEGIES: { value: BulkAssignStrategy; label: string; description: string }[] = [
   { value: "manual", label: "Manual", description: "Assign every selected lead to one employee you pick." },
   { value: "round_robin", label: "Round robin", description: "Split the selected leads evenly across all active employees." },
-  { value: "territory", label: "Territory-based", description: "Route each selected lead by territory (India vs. foreign) based on its country." },
+  { value: "territory", label: "Territory-based", description: "Route each selected lead to whoever covers its country." },
 ];
 
 type FilterState = {

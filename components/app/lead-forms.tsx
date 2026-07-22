@@ -17,7 +17,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { LOCATION_MAP, LOCATION_CATEGORIES, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
+import { LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
+import { LocationsPicker } from "@/components/ui/locations-picker";
 import { InfoTip } from "@/components/ui/info-tip";
 import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
@@ -528,175 +529,11 @@ function IndustryKeywordsDropdown({
 }
 
 // ─── LocationsDropdown ────────────────────────────────────────────────────────
+// The picker itself now lives in components/ui/locations-picker.tsx so employee
+// territories can use the identical control. This alias keeps the call sites in
+// this file unchanged.
 
-const ALL_LOCATION_KEYS = Object.keys(LOCATION_MAP);
-
-function LocationsDropdown({
-  selected,
-  onChangeSelected,
-}: {
-  selected: string[];
-  onChangeSelected: (v: string[]) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  function toggleCountry(country: string) {
-    onChangeSelected(selected.includes(country) ? selected.filter((c) => c !== country) : [...selected, country]);
-  }
-
-  function toggleRegion(countries: string[]) {
-    const allSel = countries.every((c) => selected.includes(c));
-    if (allSel) onChangeSelected(selected.filter((c) => !countries.includes(c)));
-    else onChangeSelected([...selected, ...countries.filter((c) => !selected.includes(c))]);
-  }
-
-  const selectedCount = selected.length;
-  const totalCount = ALL_LOCATION_KEYS.length;
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <Label>Locations</Label>
-          <InfoTip side="right" text="No selection = worldwide search. Select specific countries to narrow results, or leave empty to search globally." />
-        </div>
-        {selectedCount > 0 && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => onChangeSelected([])} className="h-auto p-0 text-[10px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground">
-            Clear ({selectedCount})
-          </Button>
-        )}
-      </div>
-
-      <div ref={ref} className="relative">
-        {/* Trigger */}
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setOpen((o) => !o)}
-          className={cn(
-            "w-full justify-between px-3 py-2 text-sm font-normal text-left bg-card",
-            open ? "border-ring ring-1 ring-ring" : "border-input hover:border-muted-foreground",
-          )}
-        >
-          <span className={selectedCount === 0 ? "text-muted-foreground/60" : "text-foreground"}>
-            {selectedCount === 0
-              ? "Select countries… (empty = worldwide)"
-              : `${selectedCount} countr${selectedCount !== 1 ? "ies" : "y"} selected`}
-          </span>
-          <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} fill="none" stroke="currentColor" strokeWidth={2}>
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </Button>
-
-        {/* Panel */}
-        {open && (
-          <div className="absolute left-0 right-0 top-full mt-1 z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-secondary/40">
-              <p className="eyebrow">
-                {selectedCount > 0 ? `${selectedCount} of ${totalCount} selected` : "Select countries by region"}
-              </p>
-              <Button type="button" variant="link" size="sm" onClick={() => onChangeSelected([...ALL_LOCATION_KEYS])} className="h-auto p-0 text-[11px]">
-                Select all
-              </Button>
-            </div>
-
-            {/* 5-column grid of regions */}
-            <div className="grid grid-cols-5 max-h-80 overflow-y-auto">
-              {(() => {
-                const cols: (typeof LOCATION_CATEGORIES)[] = [[], [], [], [], []];
-                LOCATION_CATEGORIES.forEach((cat, i) => cols[i % 5].push(cat));
-                return cols.map((col, ci) => (
-                  <div key={ci} className={cn("flex flex-col", ci < 4 && "border-r border-border")}>
-                    {col.map((region, ri) => {
-                      const allSel = region.countries.every((c) => selected.includes(c));
-                      const someSel = region.countries.some((c) => selected.includes(c));
-                      return (
-                        <div key={region.id} className={cn("px-3 pt-3 pb-2", ri > 0 && "border-t border-border/60")}>
-                          {/* Region header */}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => toggleRegion(region.countries)}
-                            className="w-full h-auto flex-col items-center gap-1.5 mb-2 rounded-none p-0 font-normal group hover:bg-transparent"
-                          >
-                            <div className="flex items-center gap-2">
-                              <AppCheckbox
-                                size="sm"
-                                checked={allSel ? true : someSel ? "indeterminate" : false}
-                              />
-                              <span className="text-[11px] font-bold uppercase tracking-wide text-foreground group-hover:text-primary transition-colors text-center leading-tight">
-                                {region.label}
-                              </span>
-                            </div>
-                            <div className="w-full h-px bg-border/60" />
-                          </Button>
-                          {/* Countries */}
-                          <div className="space-y-0.5">
-                            {region.countries.map((country) => {
-                              const checked = selected.includes(country);
-                              return (
-                                <Button
-                                  key={country}
-                                  type="button"
-                                  variant="ghost"
-                                  onClick={() => toggleCountry(country)}
-                                  className={cn(
-                                    "w-full h-auto justify-start gap-2 rounded px-2 py-1 text-left font-normal",
-                                    checked ? "bg-primary/10 hover:bg-primary/10" : "hover:bg-secondary/60",
-                                  )}
-                                >
-                                  <AppCheckbox size="sm" checked={checked} />
-                                  <span className={cn("text-xs leading-tight", checked ? "text-foreground font-medium" : "text-muted-foreground")}>
-                                    {country}
-                                  </span>
-                                </Button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ));
-              })()}
-            </div>
-
-            {/* Footer */}
-            <div className="border-t border-border px-4 py-2.5 flex items-center justify-end bg-secondary/20">
-              <Button type="button" variant="link" size="sm" onClick={() => setOpen(false)} className="h-auto p-0 text-xs">
-                Done
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Selected pills */}
-      {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1 pt-1">
-          {selected.map((c) => (
-            <span key={c} className={cn(badgeVariants({ variant: "selected" }), "gap-1 px-2")}>
-              {c}
-              <button type="button" onClick={() => toggleCountry(c)} className="hover:text-destructive transition-colors">
-                <X className="size-2.5" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+const LocationsDropdown = LocationsPicker;
 
 // ─── Apollo ───────────────────────────────────────────────────────────────────
 

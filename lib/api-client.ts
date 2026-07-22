@@ -807,7 +807,6 @@ export async function patchMySettings(
 
 // ─── Roles / users / assignment ───────────────────────────────────────────────
 
-export type Territory = "india" | "foreign";
 export type AvailabilityStatus = "online" | "offline";
 
 export type Profile = {
@@ -815,7 +814,8 @@ export type Profile = {
   email: string;
   full_name: string | null;
   role: "manager" | "employee";
-  territory: Territory | null;
+  /** Canonical country names this employee receives leads for. Empty = no territory. */
+  territory_countries: string[];
   is_active: boolean;
   availability_status: AvailabilityStatus;
   is_super_admin: boolean;
@@ -827,13 +827,13 @@ export async function fetchUsers(token: string): Promise<Profile[]> {
 }
 
 export async function createUser(token: string, body: {
-  email: string; password: string; full_name: string; role: "manager" | "employee"; territory?: Territory | null;
+  email: string; password: string; full_name: string; role: "manager" | "employee"; territory_countries?: string[];
 }): Promise<Profile> {
   return apiFetch("/api/v1/settings/users", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory: Territory | null; is_active: boolean; availability_status: AvailabilityStatus; password: string; reassign_to: string;
+  full_name: string; role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: AvailabilityStatus; password: string; reassign_to: string;
 }>): Promise<Profile> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }

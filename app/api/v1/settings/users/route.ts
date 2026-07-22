@@ -3,6 +3,7 @@ import { requireManager } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateUserSchema } from "@/lib/validators/users";
+import { canonicalCountryList } from "@/lib/territory";
 
 export async function GET(req: NextRequest) {
   try { await requireManager(req); } catch (r) { return r as Response; }
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
   const db = createAdminClient();
   const { data, error } = await db
     .from("profiles")
-    .select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin, created_at")
+    .select("id, email, full_name, role, territory_countries, is_active, availability_status, is_super_admin, created_at")
     .order("created_at", { ascending: true });
 
   if (error) return fail(500, "INTERNAL", error.message);
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const parsed = CreateUserSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
-  const { email, password, full_name, role, territory } = parsed.data;
+  const { email, password, full_name, role, territory_countries } = parsed.data;
 
   // Only the Super Admin creates other manager accounts — regular managers
   // may only bring on employees (mirrors the PATCH-side restriction below).
@@ -51,10 +52,10 @@ export async function POST(req: NextRequest) {
       email,
       full_name,
       role,
-      territory: role === "employee" ? (territory ?? null) : null,
+      territory_countries: role === "employee" ? canonicalCountryList(territory_countries) : [],
       is_active: true,
     })
-    .select("id, email, full_name, role, territory, is_active, availability_status, is_super_admin, created_at")
+    .select("id, email, full_name, role, territory_countries, is_active, availability_status, is_super_admin, created_at")
     .single();
 
   if (profileError) {

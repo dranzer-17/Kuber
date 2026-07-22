@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logLeadEvent } from "@/lib/services/lead-events";
+import { canonicalCountryList } from "@/lib/territory";
+import { allocateByTerritory, type Coverage } from "@/lib/services/territory-allocator";
 
 // Territory is consulted only AT ASSIGNMENT TIME (review §5.4) — deliberately.
 // If an employee's territory changes after leads were already routed to them,
@@ -8,20 +10,7 @@ import { logLeadEvent } from "@/lib/services/lead-events";
 // every territory edit would silently move leads out from under whoever is
 // actively working them, which is worse than the status quo.
 type Db = ReturnType<typeof createAdminClient>;
-export type Territory = "india" | "foreign";
 export type AssignmentStrategy = "manual" | "round_robin" | "territory";
-
-/**
- * Map a lead's country to a routing region:
- * india / foreign (rest of world). Null only when country is empty —
- * such leads are skipped by territory routing and stay in the manager pool.
- */
-export function normalizeTerritory(country: string | null | undefined): Territory | null {
-  const c = country?.trim().toLowerCase();
-  if (!c) return null;
-  if (c === "india") return "india";
-  return "foreign";
-}
 
 /**
  * Employees ELIGIBLE for automatic assignment (spec §2B/§3): role=employee,
@@ -29,15 +18,42 @@ export function normalizeTerritory(country: string | null | undefined): Territor
  * assigned at all; offline users are temporarily excluded from round-robin and
  * territory routing (but can still receive a manual assignment, with a warning).
  */
-async function getEligibleEmployees(db: Db, territory?: Territory): Promise<string[]> {
-  let query = db.from("profiles")
+async function getEligibleEmployees(db: Db): Promise<string[]> {
+  const { data } = await db.from("profiles")
     .select("id")
     .eq("role", "employee")
     .eq("is_active", true)
-    .eq("availability_status", "online");
-  if (territory) query = query.eq("territory", territory);
-  const { data } = await query.order("id");
+    .eq("availability_status", "online")
+    .order("id");
   return (data ?? []).map((row) => row.id as string);
+}
+
+/**
+ * The same eligible employees, each with the countries they cover.
+ *
+ * Coverage used to be a single `territory` column ('india' | 'foreign') matched
+ * with `.eq()` in SQL. It is now a list of countries, and matching happens in
+ * JS via canonicalCountry — because lead countries arrive from Apollo spelled
+ * inconsistently ('US', 'Czechia', 'Tuerkiye'), and an `= any(array)` in SQL
+ * would compare those raw strings and silently match nothing.
+ *
+ * Employees with an empty territory are dropped here rather than filtered
+ * later: they cover nowhere, so they can never be a candidate.
+ */
+async function getCoverage(db: Db): Promise<Coverage[]> {
+  const { data } = await db.from("profiles")
+    .select("id, territory_countries")
+    .eq("role", "employee")
+    .eq("is_active", true)
+    .eq("availability_status", "online")
+    .order("id");
+
+  return (data ?? [])
+    .map((row) => ({
+      employeeId: row.id as string,
+      countries: new Set(canonicalCountryList(row.territory_countries as string[] | null)),
+    }))
+    .filter((c) => c.countries.size > 0);
 }
 
 /** Workspace-level exclusion counts for assignment summaries (spec §3 response). */
@@ -52,21 +68,11 @@ async function getExclusionCounts(db: Db): Promise<{ excluded_offline: number; e
 }
 
 /**
- * Candidates for a region (active + online reps in that territory):
- *   india   → india reps only (no sensible fallback — pool if none)
- *   foreign → foreign (rest-of-world) reps only
+ * Round-robin's rotation lane. Territory routing no longer uses a lane — with
+ * arbitrary per-employee country lists there is no fixed set of regions to keep
+ * cursors for, and the allocator balances within the batch instead.
  */
-async function candidatesForRegion(db: Db, region: Territory): Promise<string[]> {
-  return getEligibleEmployees(db, region);
-}
-
-/**
- * The independently-rotating cursors. Round-robin ignores territory entirely and
- * rotates every eligible employee through "global"; territory routing rotates
- * each region's reps through that region's own lane, so India and foreign never
- * share a position.
- */
-type Lane = "global" | Territory;
+type Lane = "global";
 
 /**
  * The next `count` assignees for `lane`, in order — rotation, not load-balancing.
@@ -213,8 +219,8 @@ export async function bulkAssignByStrategy(
   // Both rotating strategies settle which leads are actually in play BEFORE
   // drawing assignees, so a skipped lead never burns a cursor position and
   // leaves a gap in the rotation.
-  type Target = { id: string; prior: string | null };
-  const eligibleForRotation: (Target & { region: Territory | null })[] = [];
+  type Target = { id: string; prior: string | null; country: string | null };
+  const eligibleForRotation: Target[] = [];
   for (const lead of rows) {
     const prior = (lead.assigned_to as string | null) ?? null;
     if (skipAlreadyAssigned && prior) { summary.skipped_already_assigned++; continue; }
@@ -222,34 +228,29 @@ export async function bulkAssignByStrategy(
     eligibleForRotation.push({
       id: lead.id as string,
       prior,
-      region: normalizeTerritory(lead.country as string | null),
+      country: (lead.country as string | null) ?? null,
     });
   }
 
   if (strategy === "territory") {
-    const byRegion = new Map<Territory, Target[]>();
+    // The whole selection is one batch, so the allocator can see every lead at
+    // once — forced regions settle before contested ones and the split comes
+    // out even. priorInBatch is empty: this run starts from zero and nobody's
+    // lifetime book is consulted (see territory-allocator.ts).
+    const coverage = await getCoverage(db);
+    const { assignments, unmatched } = allocateByTerritory(
+      eligibleForRotation.map((t) => ({ id: t.id, country: t.country })),
+      coverage,
+    );
+
+    summary.unmatched += unmatched.length;
+    summary.eligible_employee_count = new Set(assignments.values()).size;
+
     for (const target of eligibleForRotation) {
-      // No country → no region to route by; stays in the manager's pool.
-      if (!target.region) { summary.unmatched++; continue; }
-      const bucket = byRegion.get(target.region) ?? [];
-      bucket.push(target);
-      byRegion.set(target.region, bucket);
+      const assigneeId = assignments.get(target.id);
+      if (!assigneeId) continue; // already tallied in unmatched
+      await applyAssignment(target.id, target.prior, assigneeId);
     }
-
-    const eligibleEmployees = new Set<string>();
-    for (const [region, targets] of byRegion) {
-      const candidates = await candidatesForRegion(db, region);
-      for (const id of candidates) eligibleEmployees.add(id);
-      if (candidates.length === 0) { summary.unmatched += targets.length; continue; }
-
-      const picks = await pickRoundRobin(db, region, candidates, targets.length);
-      for (const [i, target] of targets.entries()) {
-        const assigneeId = picks[i];
-        if (!assigneeId) { summary.unmatched++; continue; }
-        await applyAssignment(target.id, target.prior, assigneeId);
-      }
-    }
-    summary.eligible_employee_count = eligibleEmployees.size;
     return summary;
   }
 
@@ -278,6 +279,8 @@ export async function resolveAssignee(
   leadCountry: string | null | undefined,
   strategyOverride?: AssignmentStrategy,
   manualTarget?: string | null,
+  /** Territory routing balances across the whole import, so it needs to know which lead this is. */
+  lead?: { id: string; importId: string | null },
 ): Promise<string | null> {
   let strategy = strategyOverride;
   if (!strategy) {
@@ -299,13 +302,49 @@ export async function resolveAssignee(
   }
 
   if (strategy === "territory") {
-    const region = normalizeTerritory(leadCountry);
-    if (!region) return null;
-    const candidates = await candidatesForRegion(db, region);
-    // The region's own cursor, so leads trickling in one at a time still
-    // alternate between same-region reps instead of piling onto one.
-    const [assigneeId] = await pickRoundRobin(db, region, candidates, 1);
-    return assigneeId ?? null;
+    const coverage = await getCoverage(db);
+    if (coverage.length === 0) return null;
+
+    // Leads assign one at a time as enrichment finishes, so there is no batch
+    // in hand — but the import IS the batch, and all of its lead rows exist
+    // from the moment of import even while they are still enriching. Recover
+    // it, run the same allocator over the whole import, and take this lead's
+    // answer. That is what lets a lead in a contested region wait for someone
+    // who is not already buried under a region only they can serve.
+    //
+    // Recomputed per lead rather than cached: it is one extra query on a path
+    // that fires seconds apart, and it self-corrects when leads are archived
+    // or countries edited. A stored plan would go stale invisibly.
+    if (lead?.importId) {
+      const { data: importLeads } = await db
+        .from("leads")
+        .select("id, country, assigned_to")
+        .eq("import_id", lead.importId)
+        .eq("is_deleted", false);
+
+      if (importLeads && importLeads.length > 0) {
+        // Leads already handed out from THIS IMPORT — never anyone's lifetime
+        // book, which is the distinction that keeps 69062e2's pile-up away.
+        const priorInBatch = new Map<string, number>();
+        const pending: { id: string; country: string | null }[] = [];
+        for (const row of importLeads) {
+          const owner = row.assigned_to as string | null;
+          if (owner) priorInBatch.set(owner, (priorInBatch.get(owner) ?? 0) + 1);
+          else pending.push({ id: row.id as string, country: (row.country as string | null) ?? null });
+        }
+
+        const { assignments } = allocateByTerritory(pending, coverage, priorInBatch);
+        return assignments.get(lead.id) ?? null;
+      }
+    }
+
+    // No import to balance against (a hand-added lead): allocate this one lead
+    // on its own — still correctly scoped to whoever covers its country.
+    const { assignments } = allocateByTerritory(
+      [{ id: lead?.id ?? "one", country: leadCountry ?? null }],
+      coverage,
+    );
+    return assignments.get(lead?.id ?? "one") ?? null;
   }
 
   const candidates = await getEligibleEmployees(db);
@@ -359,6 +398,7 @@ export async function autoAssignEnrichedLeads(db: Db, orgId: string): Promise<vo
       lead.country as string | null,
       choice?.strategy,
       choice?.target,
+      { id: lead.id as string, importId: (lead.import_id as string | null) ?? null },
     );
     if (!assigneeId) continue;
     await db
