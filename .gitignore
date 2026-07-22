@@ -1,6 +1,8 @@
 .next
 node_modules
 .env*.local
+# Real secrets prepared for Vercel import — never commit
+.env.vercel
 out
 dist
 npm-debug.log*
