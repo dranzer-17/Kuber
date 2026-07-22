@@ -1,0 +1,34 @@
+name: Retry failed orgs
+
+# Opportunistic: gives orgs that failed enrichment a while ago (a site that was
+# down/slow) another shot. Deliberately infrequent — there's no urgency, and the
+# route itself only re-queues failures older than 3h, so a late tick is harmless.
+on:
+  schedule:
+    - cron: "0 */3 * * *"   # every 3 hours, on the hour (UTC)
+  workflow_dispatch:          # adds a manual "Run workflow" button in the Actions tab
+
+concurrency:
+  group: retry-failed-orgs
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping auto-retry-failed-orgs
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$INTERNAL_SECRET" ]; then
+            echo "::error::APP_URL and INTERNAL_SECRET repository secrets are not set."
+            exit 1
+          fi
+          curl -sS --fail-with-body \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            -X POST "$APP_URL/api/internal/auto-retry-failed-orgs" \
+            -H "x-internal-secret: $INTERNAL_SECRET" \
+            -w $'\nHTTP %{http_code}\n'

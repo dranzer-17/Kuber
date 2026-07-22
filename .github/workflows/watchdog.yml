@@ -1,0 +1,37 @@
+name: Enrichment watchdog
+
+# Safety net: re-kicks the enrichment pipeline if its self-chain silently dies
+# (the server can stay up while the relay just stops — confirmed happening live).
+# GitHub's schedule is best-effort and can run a few minutes late or skip a tick;
+# that is fine here, this is a net, not a deadline.
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes (UTC)
+  workflow_dispatch:          # adds a manual "Run workflow" button in the Actions tab
+
+# Don't let a slow run pile up on top of the next scheduled one.
+concurrency:
+  group: enrichment-watchdog
+  cancel-in-progress: false
+
+# This job only calls a URL — it needs no access to the repo itself.
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping enrichment-watchdog
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$INTERNAL_SECRET" ]; then
+            echo "::error::APP_URL and INTERNAL_SECRET repository secrets are not set."
+            exit 1
+          fi
+          curl -sS --fail-with-body \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            -X POST "$APP_URL/api/internal/enrichment-watchdog" \
+            -H "x-internal-secret: $INTERNAL_SECRET" \
+            -w $'\nHTTP %{http_code}\n'
