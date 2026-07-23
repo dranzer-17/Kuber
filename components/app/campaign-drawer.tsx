@@ -84,6 +84,7 @@ import {
 } from "@/lib/leads";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
 import { EmptyState } from "@/components/ui/empty-state";
+import { computeCampaignStats } from "@/lib/campaign-status";
 
 /**
  * Strips quoted-reply lines from a stored email plain-text body for display.
@@ -1395,12 +1396,17 @@ export function CampaignDetail({
   const outboxThreadByLeadId = new Map(threads.filter((t) => t.campaign_lead_id).map((t) => [t.campaign_lead_id as string, t]));
 
   // ── Analytics tab derived data ──────────────────────────────────────────
-  const analyticsTotalLeads = campaign.leads ?? 0;
-  const analyticsSent = campaign.sent ?? 0;
-  const analyticsReplied = campaign.replied ?? 0;
-  const analyticsHot = campaign.hot ?? 0;
-  const analyticsCold = campaign.cold ?? 0;
-  const analyticsReplyRate = analyticsSent > 0 ? Math.round((analyticsReplied / analyticsSent) * 100) : 0;
+  // Prefer the scoped report + loaded campaignLeads (already filtered to the
+  // caller's assigned leads for employees). campaign.leads/sent/hot are only a
+  // fallback before the first load — never show campaign-wide totals once we
+  // have the employee's own rows.
+  const scopedStats = computeCampaignStats(campaignLeads);
+  const analyticsTotalLeads = report?.totals.leads ?? (!loading ? scopedStats.total_leads : (campaign.leads ?? 0));
+  const analyticsSent = report?.totals.sent ?? (!loading ? scopedStats.sent_count : (campaign.sent ?? 0));
+  const analyticsReplied = report?.totals.replied ?? (!loading ? scopedStats.replied_count : (campaign.replied ?? 0));
+  const analyticsHot = !loading ? scopedStats.hot_count : (campaign.hot ?? 0);
+  const analyticsCold = !loading ? scopedStats.cold_count : (campaign.cold ?? 0);
+  const analyticsReplyRate = report?.rates.replyRate ?? (analyticsSent > 0 ? Math.round((analyticsReplied / analyticsSent) * 100) : 0);
 
   // NOTE: --primary/--muted-foreground already hold a complete `hsl(...)` string
   // (set dynamically in lib/branding.ts), so wrapping them again in `hsl(var(...))`
@@ -1500,7 +1506,7 @@ export function CampaignDetail({
 
   const campaignTabs = [
     { value: "analytics" as const, label: "Analytics", icon: BarChart2 },
-    { value: "leads" as const,     label: "Leads",     icon: List,   count: campaign.leads },
+    { value: "leads" as const,     label: "Leads",     icon: List,   count: analyticsTotalLeads },
     { value: "outbox" as const,    label: "Outbox",    icon: Send,   count: outboxActionableCount || undefined },
     { value: "sequences" as const, label: "Sequences", icon: Layers },
     { value: "options" as const,   label: "Options",   icon: Gauge },

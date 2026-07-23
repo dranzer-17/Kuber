@@ -18,16 +18,16 @@ export default async function CampaignDetailPage({
   let initialCampaign = null;
   try {
     const db = createAdminClient();
-    const campaign = await getCampaign(db, id);
     // Employees may open a campaign they created, that's assigned to them, OR
     // that contains a lead assigned to them (same rule as the list + API — not
     // created_by only, which used to hide campaigns holding their own leads).
-    // The detail's leads query further filters to only their own leads within.
+    // getCampaign overlays employee-scoped lead/sent/hot counts so the drawer
+    // badge + analytics tiles match only their assigned leads.
     if (role === "employee" && user?.id) {
       const ids = await employeeCampaignIds(db, user.id);
-      initialCampaign = ids.includes(id) ? campaign : null;
+      initialCampaign = ids.includes(id) ? await getCampaign(db, id, user.id) : null;
     } else {
-      initialCampaign = campaign;
+      initialCampaign = await getCampaign(db, id);
     }
   } catch {
     // campaign not found — client component will handle
