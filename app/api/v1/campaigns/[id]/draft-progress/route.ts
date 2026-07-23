@@ -32,8 +32,20 @@ export async function GET(
 
   const { data: rows } = await db
     .from("campaign_leads")
-    .select("id, email_drafts(status)")
+    .select("id, lead_id, email_drafts(status)")
     .eq("campaign_id", id);
+
+  // The embed resolves through campaign_leads.draft_id, which is only repointed
+  // once generation succeeds — so an in-flight draft shows up here as either no
+  // row (first generation) or the previous row demoted to 'rejected'
+  // (regeneration). Neither counts as work-in-progress, which stopped the
+  // client's 3s poll mid-regeneration. Read the live rows directly instead.
+  const { data: inFlight } = await db
+    .from("email_drafts")
+    .select("lead_id")
+    .eq("campaign_id", id)
+    .eq("status", "generating");
+  const generatingLeadIds = new Set((inFlight ?? []).map((d) => d.lead_id as string));
 
   const statusCounts: Record<string, number> = {
     generating: 0,
@@ -46,6 +58,12 @@ export async function GET(
   let pending = 0;
 
   for (const row of rows ?? []) {
+    // An in-flight row wins over whatever draft_id still points at, so a lead is
+    // never counted as both generating and pending.
+    if (generatingLeadIds.has(row.lead_id as string)) {
+      statusCounts.generating++;
+      continue;
+    }
     const draft = unwrapDraft(row.email_drafts as DraftRow);
     if (!draft) {
       pending++;

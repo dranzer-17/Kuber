@@ -47,6 +47,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { data, error, count } = await q;
   if (error) return fail(500, "INTERNAL", error.message);
 
+  // A draft that is mid-generation is invisible through the embed above.
+  // campaign_leads.draft_id is only repointed once generation SUCCEEDS, so:
+  //   - a first-time draft has draft_id = null            → embed returns nothing
+  //   - a regeneration leaves draft_id on the old row,
+  //     which regenerateOneDraft has just demoted to
+  //     'rejected' so the new row can take its place      → embed returns 'rejected'
+  // Both render as "No draft" in the outbox until the LLM returns, which reads
+  // as "the draft was deleted" rather than "we're working on it". Surface the
+  // in-flight row separately so the UI can say Generating / Regenerating.
+  const { data: inFlight } = await db
+    .from("email_drafts")
+    .select("lead_id, version, parent_draft_id, step_number")
+    .eq("campaign_id", id)
+    .eq("status", "generating");
+
+  // version > 1 / a parent row is what distinguishes "make me a new draft" from
+  // "replace the one you already showed me".
+  const activityByLead = new Map<string, "generating" | "regenerating">();
+  for (const d of inFlight ?? []) {
+    if ((d.step_number ?? 1) !== 1) continue;
+    const isRegen = !!d.parent_draft_id || (d.version ?? 1) > 1;
+    activityByLead.set(d.lead_id as string, isRegen ? "regenerating" : "generating");
+  }
+
   function mapLeadRow(
     raw: Record<string, unknown> | null,
   ): { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null; company_name: string | null } | null {
@@ -61,6 +85,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const items = (data ?? []).map((cl: Record<string, unknown>) => ({
     ...cl,
     leads: mapLeadRow(cl.leads as Record<string, unknown> | null),
+    draft_activity: activityByLead.get(cl.lead_id as string) ?? null,
     attachment: {
       perLead: cl.attachment_name
         ? { name: cl.attachment_name, size: cl.attachment_size, mime: cl.attachment_mime }
