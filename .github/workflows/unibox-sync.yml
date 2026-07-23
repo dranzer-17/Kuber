@@ -12,7 +12,13 @@ name: Unibox sync
 # the sync is cursor-based and simply picks up where it left off.
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes (UTC)
+    # Every 15 min, not every 5: the Instantly webhook already mirrors both
+    # reply_received and email_sent into unibox_emails within ~1 minute, so this
+    # is a reconciliation sweep for the ones it drops, not the delivery path.
+    # At ~0.6 inbound emails/day (10 in the 17 days to 2026-07-23) a 5-minute
+    # poll spent 288 calls/day to find nothing; GitHub throttled it to 0 runs
+    # anyway. What matters here is a bounded worst case, not low latency.
+    - cron: "*/15 * * * *"   # every 15 minutes (UTC)
   workflow_dispatch:          # adds a manual "Run workflow" button in the Actions tab
 
 # A slow sync must not stack on top of the next tick — the cursor is shared.
