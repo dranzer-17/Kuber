@@ -1,7 +1,6 @@
-import { NextRequest, NextResponse, after } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
-import { internalAppBaseUrl } from "@/lib/internal-url";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { getInstantlyEmail } from "@/lib/services/instantly";
 import { ingestInstantlyEmail } from "@/lib/services/unibox";
@@ -94,7 +93,7 @@ export async function POST(req: NextRequest) {
   const db = createAdminClient();
   const receivedAt = p.timestamp ?? new Date().toISOString();
   // replyBody: stripped version for display in the Replies UI (no quoted chain).
-  // The full p.reply_text is passed separately to process-reply for AI context.
+  // It is also what the on-demand drafter reads back as the prospect's message.
   const replyBody = stripQuotedText(p.reply_text) ?? p.reply_text_snippet ?? null;
 
   // 2) Idempotency key (sha256 of timestamp+email+event+email_id)
@@ -224,8 +223,8 @@ export async function POST(req: NextRequest) {
         interestApplied = true;
         patch.interest_status = interest;
         // Instantly's own AI is the sole source of truth for lead_temperature (team
-        // decision). We no longer run our own LLM classifier on replies — see
-        // app/api/internal/process-reply/route.ts, which now only drafts, never classifies.
+        // decision). We do not run our own LLM classifier on replies — our only LLM
+        // pass over a reply is the human-triggered drafter, which never classifies.
         // This is the ONLY place in the codebase that sets lead_temperature.
         const temp = INTEREST_TO_TEMPERATURE[interest as number];
         if (temp) patch.lead_temperature = temp;
@@ -321,55 +320,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // A deleted lead's late replies stay in history but must not spawn new AI
-  // drafts — the person was removed from outreach (planning.md Phase 5 / Q7).
-  let leadWasDeleted = false;
-  if (p.event_type === "reply_received" && p.lead_email && !leadId) {
-    const { data: deletedLead } = await db
-      .from("leads")
-      .select("id")
-      .ilike("email", p.lead_email)
-      .eq("is_deleted", true)
-      .limit(1)
-      .maybeSingle();
-    leadWasDeleted = !!deletedLead;
-  }
-
-  if (p.event_type === "reply_received" && process.env.INTERNAL_SECRET && !leadWasDeleted) {
-    // we need the reply_events row id we just upserted
-    const { data: ev } = await db
-      .from("reply_events")
-      .select("id")
-      .eq("event_uid", eventUid)
-      .maybeSingle();
-
-    if (ev?.id) {
-      const baseUrl = internalAppBaseUrl(req);
-      const secret = process.env.INTERNAL_SECRET;
-      const evId = ev.id;
-      // after() ensures the reply-draft worker is actually invoked before the
-      // webhook lambda freezes — otherwise a customer's reply could silently
-      // never get an AI draft. (§1.2)
-      after(async () => {
-        await fetch(`${baseUrl}/api/internal/process-reply`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-internal-secret": secret,
-          },
-          body: JSON.stringify({
-            reply_event_id: evId,
-            reply_text: p.reply_text ?? p.reply_text_snippet ?? "",
-            reply_subject: p.reply_subject ?? null,
-            email_id: p.email_id ?? null,
-            campaign_lead_id: campaignLeadId,
-            master_campaign_id: masterId,
-            lead_email: p.lead_email ?? null,
-          }),
-        }).catch(() => {});
-      });
-    }
-  }
+  // NOTE: an inbound reply deliberately does NOT start an AI draft any more.
+  // Drafting is human-triggered only, via the "AI draft" button in Unibox /
+  // campaign Outbox (POST /api/v1/reply-drafts/generate). Firing it from here
+  // burned LLM calls on every reply — including ones nobody ever opened — and
+  // pre-empted the reviewer's choice of how to answer. Do not re-add it.
 
   return NextResponse.json({ ok: true });
 }

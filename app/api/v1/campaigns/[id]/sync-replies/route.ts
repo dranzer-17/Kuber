@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
-import { internalAppBaseUrl } from "@/lib/internal-url";
 import { listInstantlyCampaignReplies, getInstantlyLeadStatus, getInstantlyEmail } from "@/lib/services/instantly";
 import { ingestInstantlyEmail } from "@/lib/services/unibox";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
@@ -74,8 +73,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   let found = 0;
   let backfilled = 0;
-
-  const baseUrl = internalAppBaseUrl(req);
 
   for (const sub of subs) {
     let replies: Awaited<ReturnType<typeof listInstantlyCampaignReplies>>;
@@ -232,25 +229,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         continue;
       }
 
-      // Fire process-reply to generate AI draft (new replies only)
-      if (process.env.INTERNAL_SECRET && replyEventId) {
-        fetch(`${baseUrl}/api/internal/process-reply`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-internal-secret": process.env.INTERNAL_SECRET,
-          },
-          body: JSON.stringify({
-            reply_event_id: replyEventId,
-            reply_text: replyText ?? "",
-            reply_subject: email.subject ?? null,
-            email_id: email.id ?? null,
-            campaign_lead_id: campaignLeadId,
-            master_campaign_id: masterCampaignId,
-            lead_email: fromEmail,
-          }),
-        }).catch(() => {});
-      }
+      // No AI draft is started here. Backfilling a missed reply is a data-repair
+      // job; deciding to answer it with the LLM is the reviewer's, via the
+      // "AI draft" button (POST /api/v1/reply-drafts/generate).
 
       existingKeys.add(dedupeKey);
       if (email.id) existingEmailIds.add(email.id);

@@ -1155,6 +1155,15 @@ export async function sendReplyDraft(token: string, id: string): Promise<{ sent:
 export async function regenerateReplyDraft(token: string, id: string, instruction?: string): Promise<ReplyDraft> {
   return apiFetch(`/api/v1/reply-drafts/${id}/regenerate`, { method: "POST", body: JSON.stringify({ instruction }) }, token);
 }
+/** Starts the first AI draft for a conversation that has none — the "AI draft"
+ *  button. Replies no longer get drafted automatically on arrival, so this is
+ *  what creates the reply_drafts row that regenerateReplyDraft then works off. */
+export async function generateReplyDraftForThread(
+  token: string,
+  target: { thread_id?: string; campaign_lead_id?: string; instruction?: string },
+): Promise<ReplyDraft> {
+  return apiFetch("/api/v1/reply-drafts/generate", { method: "POST", body: JSON.stringify(target) }, token);
+}
 
 // ─── Unibox ──────────────────────────────────────────────────────────────────
 
@@ -1241,7 +1250,7 @@ export async function markThreadRead(token: string, threadId: string) {
   return apiFetch(`/api/v1/unibox/threads/${threadId}/read`, { method: "POST" }, token);
 }
 
-export async function syncUnibox(token: string): Promise<{ ingested: number; pages: number }> {
+export async function syncUnibox(token: string): Promise<{ ingested: number; pages: number; failed: number }> {
   return apiFetch("/api/v1/unibox/sync", { method: "POST" }, token);
 }
 

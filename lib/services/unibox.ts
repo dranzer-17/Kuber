@@ -847,39 +847,62 @@ async function saveSyncState(db: Db, state: SyncState): Promise<void> {
   }, { onConflict: "key" });
 }
 
-export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: number; pages: number }> {
+export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: number; pages: number; failed: number }> {
   const state = await getSyncState(db);
   const cursor = state.last_timestamp_created;
   let startingAfter: string | undefined;
   let ingested = 0;
+  let failed = 0;
   let pages = 0;
   let maxTs = cursor;
+  // Oldest message we could not ingest this run. The cursor is never advanced
+  // past it, so the next run retries it (and everything after it) instead of
+  // silently leaving a hole in the mirror.
+  let earliestFailedTs: string | null = null;
 
-  for (let i = 0; i < maxPages; i++) {
-    const result = await listEmails({
-      limit: 100,
-      sort_order: "asc",
-      ...(cursor ? { min_timestamp_created: cursor } : {}),
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-    pages++;
-    for (const email of result.items) {
-      await ingestInstantlyEmail(db, email);
-      ingested++;
-      if (email.timestamp_created && (!maxTs || email.timestamp_created > maxTs)) {
-        maxTs = email.timestamp_created;
+  // Whatever happens below, persist the progress we did make. Without this the
+  // cursor only ever moved on a fully clean run, so one unluckily-shaped email
+  // (or one Instantly hiccup on page 3) froze the inbox at its last good
+  // timestamp and every later sync re-attempted — and re-failed on — the exact
+  // same message. New mail then only ever arrived via the webhook or a campaign
+  // Outbox backfill.
+  try {
+    for (let i = 0; i < maxPages; i++) {
+      const result = await listEmails({
+        limit: 100,
+        sort_order: "asc",
+        ...(cursor ? { min_timestamp_created: cursor } : {}),
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      pages++;
+      for (const email of result.items) {
+        try {
+          await ingestInstantlyEmail(db, email);
+          ingested++;
+        } catch (e) {
+          // Skip it and keep going: one unusable message must not hold back
+          // every message behind it.
+          failed++;
+          console.error(`[unibox-sync] ingest failed for ${email.id}:`, (e as Error).message);
+          if (email.timestamp_created && (!earliestFailedTs || email.timestamp_created < earliestFailedTs)) {
+            earliestFailedTs = email.timestamp_created;
+          }
+        }
+        if (email.timestamp_created && (!maxTs || email.timestamp_created > maxTs)) {
+          maxTs = email.timestamp_created;
+        }
       }
+      if (!result.next_starting_after || result.items.length === 0) break;
+      startingAfter = result.next_starting_after;
     }
-    if (!result.next_starting_after || result.items.length === 0) break;
-    startingAfter = result.next_starting_after;
+  } finally {
+    await saveSyncState(db, {
+      last_timestamp_created: earliestFailedTs ?? maxTs,
+      last_full_sync_at: new Date().toISOString(),
+    });
   }
 
-  await saveSyncState(db, {
-    last_timestamp_created: maxTs,
-    last_full_sync_at: new Date().toISOString(),
-  });
-
-  return { ingested, pages };
+  return { ingested, pages, failed };
 }
 
 /** Build campaign replies thread shape from unibox data (Phase 2). */

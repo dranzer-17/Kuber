@@ -171,7 +171,11 @@ export function UniboxClient() {
     setSyncing(true);
     try {
       const r = await syncUnibox(token);
-      toast.success(`Synced ${r.ingested} emails (${r.pages} pages)`);
+      toast.success(
+        r.failed > 0
+          ? `Synced ${r.ingested} emails (${r.pages} pages) — ${r.failed} could not be read`
+          : `Synced ${r.ingested} emails (${r.pages} pages)`,
+      );
       await loadThreads(false);
       if (selectedId) await loadDetail(selectedId);
     } catch (e) {

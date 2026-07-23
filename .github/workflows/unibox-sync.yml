@@ -1,0 +1,42 @@
+name: Unibox sync
+
+# Pulls new Instantly mail into unibox_emails. This ran as a vercel.json cron
+# ("*/5 * * * *") until 2026-07-20, when it was dropped because the Hobby plan
+# only allows once-a-day crons — but unlike the watchdog and retry jobs it was
+# never given a replacement, so from then on the inbox only gained new mail when
+# the Instantly webhook happened to land or when someone opened a campaign's
+# Outbox (which runs its own per-campaign backfill). That is why Unibox looked
+# like it only synced after Outbox did. This restores the schedule.
+#
+# GitHub's scheduler is best-effort and skips ticks under load; that is fine,
+# the sync is cursor-based and simply picks up where it left off.
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes (UTC)
+  workflow_dispatch:          # adds a manual "Run workflow" button in the Actions tab
+
+# A slow sync must not stack on top of the next tick — the cursor is shared.
+concurrency:
+  group: unibox-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping unibox/sync
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$INTERNAL_SECRET" ]; then
+            echo "::error::APP_URL and INTERNAL_SECRET repository secrets are not set."
+            exit 1
+          fi
+          curl -sS --fail-with-body \
+            --retry 3 --retry-delay 10 --retry-all-errors \
+            -X POST "$APP_URL/api/v1/unibox/sync" \
+            -H "x-internal-secret: $INTERNAL_SECRET" \
+            -w $'\nHTTP %{http_code}\n'

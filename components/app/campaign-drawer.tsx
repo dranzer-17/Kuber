@@ -41,7 +41,7 @@ import {
   approveReplyDraft,
   rejectReplyDraft,
   sendReplyDraft,
-  regenerateReplyDraft,
+  generateReplyDraftForThread,
   regenerateFollowUpStepTemplate,
   saveCampaignSteps,
   uploadCampaignLeadAttachment,
@@ -65,6 +65,7 @@ import { DiscussionComment } from "@/components/app/discussion-comment";
 import { CampaignKanban } from "@/components/app/campaign-kanban";
 import { CampaignReportView, type CampaignReportData } from "@/components/app/campaign-report";
 import { ReplyDraftBox, replyDraftHasContent } from "@/components/app/reply-draft-box";
+import { ManualReplyBox } from "@/components/app/manual-reply-box";
 import { LeadDrawer } from "@/components/app/lead-drawer";
 import { OrgDrawer } from "@/components/app/org-drawer";
 import { supabase } from "@/lib/supabase";
@@ -121,6 +122,12 @@ const DRAFT_STATUS_LABEL: Record<string, string> = {
   rejected:   "Rejected",
 };
 
+/** In-flight wording, kept apart from status labels — this is an activity, not a stored status. */
+const DRAFT_ACTIVITY_LABEL: Record<"generating" | "regenerating", string> = {
+  generating:   "Generating",
+  regenerating: "Regenerating",
+};
+
 const DRAFT_STATUS_STYLE: Record<string, string> = {
   generating: "bg-amber-500/10 text-amber-400",
   draft:      "bg-blue-500/10 text-blue-400",
@@ -144,8 +151,17 @@ type CampaignLead = {
   created_at: string;
   leads: { first_name: string | null; last_name: string | null; email: string | null; title: string | null; country: string | null; company_name: string | null } | null;
   email_drafts: { id: string; subject: string | null; body: string | null; status: string; step_number?: number | null; created_at?: string } | null;
+  /**
+   * Set by the leads API when a step-1 draft row is mid-generation. It cannot be
+   * read off `email_drafts`: draft_id only points at the new row once generation
+   * succeeds, so until then a first draft looks like no draft at all and a
+   * regeneration looks like the old row demoted to 'rejected'.
+   */
+  draft_activity?: DraftActivity;
   attachment?: AttachmentInfo;
 };
+
+type DraftActivity = "generating" | "regenerating" | null;
 
 type DraftProgress = {
   total: number; generating: number; draft: number; approved: number;
@@ -410,6 +426,10 @@ export function CampaignDetail({
   const [saving, setSaving] = useState(false);
   const [certifying, setCertifying] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  // campaign_lead ids whose regeneration this tab kicked off. The server only
+  // starts reporting `draft_activity` on the next poll, so without this the row
+  // shows its old (now superseded) status for up to a full refresh cycle.
+  const [locallyRegenerating, setLocallyRegenerating] = useState<Set<string>>(new Set());
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [configOpen, setConfigOpen] = useState(false);
@@ -680,12 +700,14 @@ export function CampaignDetail({
     setOutboxReplyStartBlank(true);
   }, [selectedId]);
 
-  async function handleStartNewOutboxReply(anchorDraftId: string) {
+  /** The "AI draft" button — the only thing that starts an LLM reply now.
+   *  Opening the composer no longer generates anything on its own. */
+  async function handleGenerateOutboxReply(campaignLeadId: string) {
     setOutboxNewReplyLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      await regenerateReplyDraft(session.access_token, anchorDraftId);
+      await generateReplyDraftForThread(session.access_token, { campaign_lead_id: campaignLeadId });
       await loadReplies();
     } catch (e) {
       toast.error((e as Error).message);
@@ -878,13 +900,27 @@ export function CampaignDetail({
     ? progress.draft + progress.approved + progress.sent + progress.failed
     : 0;
 
+  /**
+   * What this lead is doing right now, if anything. The server reports it from
+   * the live `generating` row; `locallyRegenerating` covers the gap between
+   * clicking Regenerate and the next poll, so the badge never blinks back to
+   * "No draft" in between.
+   */
+  function getDraftActivity(cl: CampaignLead): DraftActivity {
+    if (locallyRegenerating.has(cl.id)) return "regenerating";
+    return cl.draft_activity ?? null;
+  }
+
   function getDisplayStatus(cl: CampaignLead): string {
+    const activity = getDraftActivity(cl);
+    if (activity) return DRAFT_ACTIVITY_LABEL[activity];
     if (cl.email_drafts?.status) return DRAFT_STATUS_LABEL[cl.email_drafts.status] ?? cl.crm_status;
     if (cl.crm_status === "new" || cl.crm_status === "enriched") return isGenerating ? "Pending" : "No draft";
     return cl.crm_status;
   }
 
   function getStatusStyle(cl: CampaignLead): string {
+    if (getDraftActivity(cl)) return DRAFT_STATUS_STYLE.generating;
     const ds = cl.email_drafts?.status;
     if (ds && DRAFT_STATUS_STYLE[ds]) return DRAFT_STATUS_STYLE[ds];
     return "bg-secondary text-muted-foreground";
@@ -1101,9 +1137,19 @@ export function CampaignDetail({
     }
   }
 
+  function markRegenerating(campaignLeadIds: string[], on: boolean) {
+    setLocallyRegenerating((prev) => {
+      const next = new Set(prev);
+      for (const id of campaignLeadIds) { if (on) next.add(id); else next.delete(id); }
+      return next;
+    });
+  }
+
   async function handleRegenerate() {
     if (!selected?.email_drafts?.id) return;
+    const clId = selected.id;
     setRegenerating(true);
+    markRegenerating([clId], true);
     setRegenOpen(false);
     setError("");
     try {
@@ -1119,12 +1165,15 @@ export function CampaignDetail({
       toast.error((e as Error).message);
     } finally {
       setRegenerating(false);
+      markRegenerating([clId], false);
     }
   }
 
   async function handleRegenerateWithNewPrompt() {
     if (!selected?.email_drafts?.id) return;
+    const clId = selected.id;
     setRegenerating(true);
+    markRegenerating([clId], true);
     setError("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -1138,6 +1187,7 @@ export function CampaignDetail({
       toast.error((e as Error).message);
     } finally {
       setRegenerating(false);
+      markRegenerating([clId], false);
     }
   }
 
@@ -1190,6 +1240,7 @@ export function CampaignDetail({
 
   async function handleRetryOne(draftId: string, campaignLeadId: string) {
     setRetryingId(campaignLeadId);
+    markRegenerating([campaignLeadId], true);
     setError("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -1201,6 +1252,7 @@ export function CampaignDetail({
       toast.error((e as Error).message);
     } finally {
       setRetryingId(null);
+      markRegenerating([campaignLeadId], false);
     }
   }
 
@@ -1971,12 +2023,17 @@ export function CampaignDetail({
                           <td className="px-6 py-3 border-r border-border">
                             <div className="flex flex-wrap gap-1">
                               {(() => {
+                                const activity = getDraftActivity(cl);
                                 const ds = cl.email_drafts?.status;
                                 const crm = cl.crm_status;
                                 const pills: { label: string; cls: string }[] = [];
 
-                                // Draft pill
-                                if (ds === "draft") {
+                                // Draft pill — an in-flight generation/regeneration
+                                // outranks the stored status, which is still the
+                                // superseded version until the new one lands.
+                                if (activity) {
+                                  pills.push({ label: `${DRAFT_ACTIVITY_LABEL[activity]}…`, cls: "bg-blue-500/15 text-blue-500 border border-blue-500/30" });
+                                } else if (ds === "draft") {
                                   pills.push({ label: "Draft", cls: "bg-amber-500/15 text-amber-600 border border-amber-500/30" });
                                 } else if (ds === "generating") {
                                   pills.push({ label: "Generating…", cls: "bg-blue-500/15 text-blue-500 border border-blue-500/30" });
@@ -2251,16 +2308,24 @@ export function CampaignDetail({
                   );
                 }
 
+                const activity = getDraftActivity(cl);
                 const status = cl.email_drafts?.status ?? "none";
+                const inFlightCls = "bg-yellow-500/15 text-yellow-500 border-yellow-500/25";
                 const statusConfig: Record<string, { label: string; cls: string }> = {
-                  generating: { label: "Generating", cls: "bg-yellow-500/15 text-yellow-500 border-yellow-500/25" },
+                  generating: { label: "Generating", cls: inFlightCls },
                   draft:      { label: "Draft",       cls: "bg-primary/15 text-primary border-primary/25" },
                   approved:   { label: "Certified",   cls: "bg-green-500/15 text-green-500 border-green-500/25" },
                   sent:       { label: "Sent",        cls: "bg-muted text-muted-foreground border-border" },
                   failed:     { label: "Failed",      cls: "bg-destructive/15 text-destructive border-destructive/25" },
                   none:       { label: "No draft",    cls: "bg-muted text-muted-foreground border-border" },
                 };
-                const sc = statusConfig[status] ?? statusConfig.none;
+                // An in-flight row wins over whatever draft_id still resolves to:
+                // during a regeneration that's the superseded ('rejected') version,
+                // which has no entry here and would otherwise fall through to
+                // "No draft" — exactly the blink this is meant to remove.
+                const sc = activity
+                  ? { label: DRAFT_ACTIVITY_LABEL[activity], cls: inFlightCls }
+                  : statusConfig[status] ?? statusConfig.none;
                 const showCheckbox = status !== "sent";
                 const canCheck = showCheckbox;
                 return (
@@ -2295,7 +2360,8 @@ export function CampaignDetail({
                       <Avatar name={name} size="sm" />
                       <div className="flex-1 min-w-0">
                         <p className={cn("text-xs font-medium truncate", isActive ? "text-primary" : "text-foreground")}>{name}</p>
-                        <span className={cn("mt-0.5 inline-flex px-1.5 py-0.5 rounded border text-[10px] font-semibold", sc.cls)}>
+                        <span className={cn("mt-0.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold", sc.cls)}>
+                          {activity && <Loader2 className="size-2.5 animate-spin" />}
                           {sc.label}
                         </span>
                       </div>
@@ -2324,7 +2390,7 @@ export function CampaignDetail({
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {selected.email_drafts && (
+                    {(selected.email_drafts || getDraftActivity(selected)) && (
                       <DraftStatusBadge
                         label={getDisplayStatus(selected)}
                         styleClass={getStatusStyle(selected)}
@@ -2343,10 +2409,14 @@ export function CampaignDetail({
                 </div>
 
                 {/* Initial email — editor while pending, bubble once sent */}
-                {selected.email_drafts?.status === "generating" || regenerating ? (
+                {selected.email_drafts?.status === "generating" || regenerating || getDraftActivity(selected) ? (
                   <div className="max-w-2xl mx-auto flex flex-col items-center py-20 gap-3 rounded-xl border border-border bg-card">
                     <Loader2 className="size-6 text-muted-foreground animate-spin" />
-                    <p className="text-sm text-muted-foreground">Generating personalised email…</p>
+                    <p className="text-sm text-muted-foreground">
+                      {getDraftActivity(selected) === "regenerating" || regenerating
+                        ? "Regenerating personalised email…"
+                        : "Generating personalised email…"}
+                    </p>
                   </div>
                 ) : selected.email_drafts && selected.email_drafts.status !== "sent" ? (
                   <div className="max-w-2xl mx-auto rounded-xl border border-border bg-card p-5 space-y-4">
@@ -2553,13 +2623,15 @@ export function CampaignDetail({
                   <EmptyState message="No draft available for this lead." className="max-w-2xl mx-auto" />
                 )}
 
-                {/* Reply — AI-generated draft (with manual rich-text edit) for the latest inbound message */}
+                {/* Reply to the latest inbound message. Opens a plain composer;
+                    the AI only writes a draft when "AI draft" is pressed. */}
                 {selectedThread && (() => {
                   const lastMsg = selectedThread.messages[selectedThread.messages.length - 1] ?? null;
                   if (!lastMsg) return null;
                   const latestDraft = lastMsg.reply_drafts[lastMsg.reply_drafts.length - 1] ?? null;
                   const hasDraftReady = !!latestDraft && latestDraft.status !== "generating" && latestDraft.status !== "sent" && latestDraft.status !== "rejected";
                   const isGenerating = latestDraft?.status === "generating" || outboxNewReplyLoading;
+                  const campaignLeadId = selectedThread.campaign_lead_id;
 
                   function handleReplyClick() {
                     if (outboxReplyOpen) {
@@ -2575,9 +2647,13 @@ export function CampaignDetail({
                     setOutboxReplyStartBlank(
                       !latestDraft || latestDraft.status === "sent" || latestDraft.status === "rejected" || !hasContent,
                     );
-                    if (latestDraft && (latestDraft.status === "sent" || latestDraft.status === "rejected")) {
-                      void handleStartNewOutboxReply(latestDraft.id);
-                    }
+                  }
+
+                  function handleAiDraftClick() {
+                    if (!campaignLeadId) return;
+                    setOutboxReplyOpen(true);
+                    setOutboxReplyStartBlank(false);
+                    void handleGenerateOutboxReply(campaignLeadId);
                   }
 
                   return (
@@ -2585,7 +2661,6 @@ export function CampaignDetail({
                       <div className="flex items-center gap-2">
                         <Button
                           size="sm"
-                          disabled={isGenerating}
                           onClick={handleReplyClick}
                           className="gap-1.5 rounded-full px-4"
                         >
@@ -2593,17 +2668,26 @@ export function CampaignDetail({
                           Reply
                           <ChevronDown className={cn("size-3.5 transition-transform", outboxReplyOpen && "rotate-180")} />
                         </Button>
-                        {isGenerating && (
-                          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                            <Loader2 className="size-3 animate-spin" />
-                            Generating draft…
-                          </span>
-                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={isGenerating || !campaignLeadId}
+                          onClick={handleAiDraftClick}
+                          className="gap-1.5 rounded-full px-4 text-primary"
+                          title="Write this reply with AI"
+                        >
+                          {isGenerating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                          {isGenerating ? "Generating…" : hasDraftReady ? "New AI draft" : "AI draft"}
+                        </Button>
                       </div>
 
                       {outboxReplyOpen && (
                         <div className="mt-3">
-                          {hasDraftReady ? (
+                          {isGenerating ? (
+                            <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
+                              <Loader2 className="size-4 animate-spin" /> Writing reply draft…
+                            </div>
+                          ) : hasDraftReady ? (
                             <ReplyDraftBox
                               key={latestDraft!.id}
                               draft={latestDraft!}
@@ -2611,12 +2695,14 @@ export function CampaignDetail({
                               onChanged={() => void loadReplies()}
                               startBlank={outboxReplyStartBlank && !replyDraftHasContent(latestDraft)}
                             />
-                          ) : isGenerating ? (
-                            <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
-                              <Loader2 className="size-4 animate-spin" /> Generating reply draft…
-                            </div>
                           ) : (
-                            <div className="text-sm text-muted-foreground py-2 text-center w-full">No reply draft available for this message.</div>
+                            <ManualReplyBox
+                              threadId={selectedThread.thread_key}
+                              token={appSession?.access_token ?? ""}
+                              replyToSubject={selectedThread.original_email?.subject ?? null}
+                              onSent={() => { setOutboxReplyOpen(false); void loadReplies(); }}
+                              onCancel={() => setOutboxReplyOpen(false)}
+                            />
                           )}
                         </div>
                       )}
