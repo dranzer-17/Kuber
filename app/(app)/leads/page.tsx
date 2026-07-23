@@ -695,21 +695,34 @@ export default function LeadsPage() {
   // the browser — without this, the list/Kanban silently goes stale and looks
   // like data disappeared even though the database is fine. Poll quietly
   // while this page is open; skip a tick if a load is already in flight.
+  // Guarded through a ref, not the dep array: listing `loadingLeads` there tore
+  // the interval down and rebuilt it twice per poll, so the 30s clock restarted
+  // constantly and a busy page could starve the refresh entirely. Also skip
+  // hidden tabs — a backgrounded Leads page polling every 30s is pure waste.
+  const loadingLeadsRef = useRef(loadingLeads);
+  loadingLeadsRef.current = loadingLeads;
+
   useEffect(() => {
     if (!session) return;
     const interval = setInterval(() => {
-      if (!loadingLeads) void loadLeads(session.access_token);
+      if (document.visibilityState !== "visible") return;
+      if (loadingLeadsRef.current) return;
+      void loadLeads(session.access_token);
     }, 30_000);
     return () => clearInterval(interval);
-  }, [session, loadingLeads, loadLeads]);
+  }, [session, loadLeads]);
 
-  // Fetch import batches for the batch filter dropdown; re-run when leads refresh
+  // Fetch import batches for the batch filter dropdown. Keyed on leads.length,
+  // not `leads`: the 30s poll replaces the array with a fresh (equal-length)
+  // one every tick, so depending on the array itself refetched this on every
+  // poll forever. Length still changes when a new page or import lands, which
+  // is the only time a new batch can actually appear.
   useEffect(() => {
     if (!session) return;
     fetchImports(session.access_token)
       .then((r) => setImportBatches(r.imports))
       .catch(() => {});
-  }, [session, leads]);
+  }, [session, leads.length]);
 
   // Search runs against the whole DB, not just whatever's currently paged
   // into `leads` — a lead further back than the loaded window would

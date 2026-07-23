@@ -163,53 +163,53 @@ export function AppProvider({
   // us actually reach `total`, whatever that per-request cap happens to be.
   const LEADS_PAGE_SIZE = 500;
 
+  // Both loaders fetch exactly ONE page. They used to call a fetchLeadsUpTo()
+  // helper that restarted from page 1 and walked forward every time, which made
+  // the cost quadratic: with 1627 leads loaded, each "Show more" re-downloaded
+  // every earlier page to append one, and the 30s poll below re-downloaded all
+  // four pages — 2000 rows of `select *` plus three joined tables and an exact
+  // count, every 30 seconds, for as long as the tab stayed open. Measured at
+  // 4.2s / 7.2s / 8.5s for successive clicks. One page per call is flat instead.
+  //
   // Offset pagination (page/limit) drifts under concurrent writes: a row
   // fetched on page 1 can reappear on page 2 if a newer lead got inserted
   // in between (it shifts everything after it down by one in the
-  // created_at-desc ordering). Dedupe by id while merging pages rather than
+  // created_at-desc ordering). Both merges below dedupe by id rather than
   // trying to hold the underlying table still — the alternative is keyset
   // pagination, which isn't worth it for an admin list view like this.
-  const fetchLeadsUpTo = useCallback(async (token: string, count: number) => {
-    const seen = new Set<string>();
-    const all: Lead[] = [];
-    let total = 0;
-    for (let page = 1; all.length < count; page++) {
-      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page });
-      for (const lead of res.leads) {
-        if (seen.has(lead.id)) continue;
-        seen.add(lead.id);
-        all.push(lead);
-      }
-      total = res.total;
-      if (res.leads.length < LEADS_PAGE_SIZE) break; // server had no more to give
-    }
-    return { leads: all, total };
-  }, []);
 
-  // Re-fetches however many leads are already loaded (not just the first
-  // page) so the 30s background poll refreshes statuses without discarding
-  // anything loadMoreLeads had pulled in.
+  /** Refreshes the newest page in place. Rows already paged in beyond it are
+   *  kept (slightly staler) rather than discarded, which is what lets the
+   *  background poll run without throwing away anything loadMoreLeads pulled
+   *  in — enrichment churns the newest leads, so page 1 is where changes are. */
   const loadLeads = useCallback(async (token: string) => {
     setLoadingLeads(true);
     try {
-      const targetCount = Math.max(leads.length, LEADS_PAGE_SIZE);
-      const { leads: list, total } = await fetchLeadsUpTo(token, targetCount);
-      setLeads(list);
-      setLeadsTotal(total);
+      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page: 1 });
+      setLeads((prev) => {
+        if (prev.length <= res.leads.length) return res.leads;
+        const fresh = new Set(res.leads.map((l) => l.id));
+        return [...res.leads, ...prev.filter((l) => !fresh.has(l.id))];
+      });
+      setLeadsTotal(res.total);
     } catch { /* silently ignore */ }
     finally { setLoadingLeads(false); }
-  }, [leads.length, fetchLeadsUpTo]);
+  }, []);
 
+  /** Appends the next page only. */
   const loadMoreLeads = useCallback(async (token: string) => {
     setLoadingMoreLeads(true);
     try {
-      const targetCount = leads.length + LEADS_PAGE_SIZE;
-      const { leads: list, total } = await fetchLeadsUpTo(token, targetCount);
-      setLeads(list);
-      setLeadsTotal(total);
+      const nextPage = Math.floor(leads.length / LEADS_PAGE_SIZE) + 1;
+      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page: nextPage });
+      setLeads((prev) => {
+        const known = new Set(prev.map((l) => l.id));
+        return [...prev, ...res.leads.filter((l) => !known.has(l.id))];
+      });
+      setLeadsTotal(res.total);
     } catch { /* silently ignore */ }
     finally { setLoadingMoreLeads(false); }
-  }, [leads.length, fetchLeadsUpTo]);
+  }, [leads.length]);
 
   // Runs the search against the DB (not the client-loaded `leads` subset) so
   // it finds a match anywhere in the table, not just among the leads already
