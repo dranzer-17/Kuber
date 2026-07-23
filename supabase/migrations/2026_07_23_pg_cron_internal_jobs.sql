@@ -84,3 +84,14 @@ select cron.schedule(
   '*/15 * * * *',
   $$select public.ping_internal_route('/api/v1/unibox/sync', 60000)$$
 );
+
+-- Retention. cron.log_run is on and pg_cron never prunes job_run_details, so the
+-- two jobs above would add ~190 rows a day forever — pure log noise steadily
+-- eating a 500 MB free-tier database. pg_net needs no equivalent: pg_net.ttl is
+-- 6 hours, so net._http_response expires itself. Seven days is plenty of history
+-- to debug "did the watchdog run last night?".
+select cron.schedule(
+  'purge-cron-history',
+  '20 3 * * *',
+  $$delete from cron.job_run_details where end_time < now() - interval '7 days'$$
+);
