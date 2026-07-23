@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { fail, ok } from "@/lib/api-response";
 import { ApolloSearchSchema } from "@/lib/validators/leads";
 import { searchPeople } from "@/lib/services/apollo";
+import { getServiceSecret } from "@/lib/services/service-keys";
 import { resolveApolloKeyword } from "@/lib/constants";
 // Only used here for counting/ids (the actual enrich pass re-queries its own
 // full target shape) — deliberately a narrower local type, not EnrichTarget.
@@ -22,7 +23,12 @@ export async function POST(req: NextRequest) {
 
   const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy } = parsed.data;
 
-  if (!process.env.APOLLO_API_KEY) return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured");
+  // Resolve through Settings > Keys (DB first, .env as the last-resort tier) —
+  // the same path searchPeople() itself uses. Checking process.env directly
+  // here 503'd every deployment that stores its key in the UI instead of an
+  // env var (i.e. production), even with a healthy Apollo key configured.
+  const apolloKey = await getServiceSecret("apollo");
+  if (!apolloKey) return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured — add one in Settings > Keys");
 
   // ── Preview mode ──────────────────────────────────────────────────────────
   if (preview) {
@@ -264,7 +270,7 @@ export async function POST(req: NextRequest) {
   const baseUrl = internalAppBaseUrl(req);
   const authHeader = req.headers.get("authorization") ?? "";
 
-  if (importId && newLeadTargets.length > 0 && process.env.APOLLO_API_KEY) {
+  if (importId && newLeadTargets.length > 0 && apolloKey) {
     after(() =>
       fetch(`${baseUrl}/api/v1/leads/enrich`, {
         method: "POST",

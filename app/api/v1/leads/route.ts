@@ -7,6 +7,7 @@ import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
 import { logLeadEvent } from "@/lib/services/lead-events";
+import { getServiceSecret } from "@/lib/services/service-keys";
 
 async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -243,7 +244,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Fire enrichment if a domain was provided (new org will be queued)
-  if (organization_domain && process.env.FIRECRAWL_API_KEY && process.env.INTERNAL_SECRET) {
+  if (organization_domain && process.env.INTERNAL_SECRET && (await getServiceSecret("firecrawl"))) {
     const baseUrl = internalAppBaseUrl(req);
     const secret = process.env.INTERNAL_SECRET;
     after(() =>

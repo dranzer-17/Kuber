@@ -597,7 +597,10 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         }),
       });
       const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json?.message ?? `Request failed: ${response.status}`);
+      // fail() nests the reason at error.message (lib/api-response.ts) — reading
+      // json.message meant every failure here surfaced as a bare status code
+      // with the actual cause thrown away.
+      if (!response.ok) throw new Error(json?.error?.message ?? `Request failed: ${response.status}`);
       const inserted = json?.data?.inserted ?? 0;
       const warnings: string[] = json?.data?.warnings ?? [];
       if (inserted === 0) {

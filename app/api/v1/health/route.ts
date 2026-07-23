@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { getActiveKey } from "@/lib/services/provider-keys";
 
 export async function GET(_req: NextRequest) {
   const db = createAdminClient();
@@ -13,11 +14,22 @@ export async function GET(_req: NextRequest) {
     dbStatus = String(e);
   }
 
+  // Provider keys resolve DB-first (Settings > Keys) with .env as the fallback
+  // tier, so report what getActiveKey() would actually return — reading
+  // process.env alone showed every provider as missing on deployments that
+  // configure keys through the UI.
+  const [apollo, firecrawl, openrouter, openai] = await Promise.all(
+    (["apollo", "firecrawl", "openrouter", "openai"] as const).map((p) =>
+      getActiveKey(db, p).then((k) => !!k).catch(() => false),
+    ),
+  );
+
   const env = {
-    apollo: !!process.env.APOLLO_API_KEY,
-    firecrawl: !!process.env.FIRECRAWL_API_KEY,
-    openrouter: !!process.env.OPENROUTER_API_KEY,
-    openai: !!process.env.OPENAI_API_KEY,
+    apollo,
+    firecrawl,
+    openrouter,
+    openai,
+    // Genuinely env-only — these have no Settings > Keys equivalent.
     supabase_service_role: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
     supabase_jwt_secret: !!process.env.SUPABASE_JWT_SECRET,
   };

@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { EnrichSchema } from "@/lib/validators/leads";
 import { enrichLeads, type EnrichTarget } from "@/lib/services/enrich-leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { getServiceSecret } from "@/lib/services/service-keys";
 
 export const maxDuration = 300;
 
@@ -24,7 +25,11 @@ export async function POST(req: NextRequest) {
   const parsed = EnrichSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  if (!process.env.APOLLO_API_KEY) return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured");
+  // DB-first key resolution (Settings > Keys), matching bulkMatch()'s own path
+  // — an env-only check 503s the whole email-reveal pass in production.
+  if (!(await getServiceSecret("apollo"))) {
+    return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured — add one in Settings > Keys");
+  }
 
   const db = createAdminClient();
 
@@ -82,7 +87,7 @@ export async function POST(req: NextRequest) {
   const secret = process.env.INTERNAL_SECRET;
 
   // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
-  if (stats.enriched_org_ids.length > 0 && process.env.FIRECRAWL_API_KEY && secret) {
+  if (stats.enriched_org_ids.length > 0 && secret && (await getServiceSecret("firecrawl"))) {
     after(() =>
       fetch(`${baseUrl}/api/enrich/scrape-orgs`, {
         method: "POST",
