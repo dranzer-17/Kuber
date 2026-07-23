@@ -1213,6 +1213,25 @@ export default function LeadsPage() {
               </SelectContent>
             </Select>
           </Field>
+          {/* Kanban had a "Show more" button but list view never did, so the
+              paginator could only page within the leads already fetched — its
+              "of N" counts loaded rows, not leadsTotal. With 1627 leads and a
+              500-lead first page that silently stranded everything older than
+              the newest 500 (every unassigned lead among them) unless someone
+              thought to switch to Kanban, load more there, and switch back.
+              Hidden while searching: searchLeads already pulls every match. */}
+          {!q && leadsTotal !== null && leads.length < leadsTotal && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => session && loadMoreLeads(session.access_token)}
+              disabled={loadingMoreLeads}
+              className="h-8 text-xs"
+            >
+              {loadingMoreLeads ? "Loading…" : `Show more (${leads.length} of ${leadsTotal})`}
+            </Button>
+          )}
           <div className="flex items-center gap-3">
             <span className="font-mono text-xs text-muted-foreground tabular-nums">
               Page {safePage} of {totalPages}
