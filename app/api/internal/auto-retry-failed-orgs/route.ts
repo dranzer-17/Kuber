@@ -17,9 +17,19 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 //   there's no new data for a fresh attempt to find.
 // - Only orgs that failed a while ago (3h+), so this never fights with a
 //   manual retry or the watchdog's own resumption of an active run.
-// - Resets enrichment_attempts to 0 — a genuinely transient issue deserves a
-//   full fresh set of 3 tries after a real gap, not to continue a stale count.
+// - Caps an org at MAX_TOTAL_ATTEMPTS enrichment attempts for its whole life.
+//   This used to reset enrichment_attempts to 0 on every pass, on the theory
+//   that a real gap earns a fresh set of tries — but that defeated scrape-orgs'
+//   own 3-attempt cap completely: an org already parked at
+//   ENRICHMENT_FAILED_PERMANENT got resurrected, handed 3 fresh attempts, and
+//   failed again every 3h indefinitely (35 orgs sat in that loop on 2026-07-23,
+//   and a single run requeued 62 orgs — ~5% of the table doing nothing but
+//   repeat work). Letting the count accumulate instead means a site that stays
+//   broken is tried 3 times, spaced 3h+ apart, and then left alone for good.
+//   "Retry all" and per-org rescrape still zero the counter, so a human can
+//   always override — that is the deliberate manual escape hatch.
 const STALE_FAILURE_HOURS = 3;
+const MAX_TOTAL_ATTEMPTS = 3;
 
 async function autoRetryStaleFailures(req: NextRequest) {
   const db = createAdminClient();
@@ -31,6 +41,7 @@ async function autoRetryStaleFailures(req: NextRequest) {
     .eq("enrichment_stage", "failed")
     .not("enrichment_status", "in", '("NO_DOMAIN","NO_EMAILED_LEADS")')
     .not("domain", "is", null)
+    .lt("enrichment_attempts", MAX_TOTAL_ATTEMPTS)
     .lt("updated_at", staleBefore);
 
   if (error) return fail(500, "INTERNAL", error.message);
@@ -56,7 +67,10 @@ async function autoRetryStaleFailures(req: NextRequest) {
       has_scraped: false,
       enrichment_stage: "queued",
       enrichment_status: "SCRAPE_QUEUED",
-      enrichment_attempts: 0,
+      // enrichment_attempts is deliberately left alone: it is the lifetime
+      // budget this job now respects. markFailed() keeps incrementing it and
+      // parks the org at ENRICHMENT_FAILED_PERMANENT on reaching the cap, which
+      // the filter above then excludes from every future pass.
       last_error: null,
       updated_at: new Date().toISOString(),
     })
