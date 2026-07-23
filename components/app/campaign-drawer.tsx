@@ -2658,32 +2658,19 @@ export function CampaignDetail({
 
                   return (
                     <div className="pt-2 w-full">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          onClick={handleReplyClick}
-                          className="gap-1.5 rounded-full px-4"
-                        >
-                          <Reply className="size-3.5" />
-                          Reply
-                          <ChevronDown className={cn("size-3.5 transition-transform", outboxReplyOpen && "rotate-180")} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isGenerating || !campaignLeadId}
-                          onClick={handleAiDraftClick}
-                          className="gap-1.5 rounded-full px-4 text-primary"
-                          title="Write this reply with AI"
-                        >
-                          {isGenerating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                          {isGenerating ? "Generating…" : hasDraftReady ? "New AI draft" : "AI draft"}
-                        </Button>
-                      </div>
+                      <Button
+                        size="sm"
+                        onClick={handleReplyClick}
+                        className="gap-1.5 rounded-full px-4"
+                      >
+                        <Reply className="size-3.5" />
+                        Reply
+                        <ChevronDown className={cn("size-3.5 transition-transform", outboxReplyOpen && "rotate-180")} />
+                      </Button>
 
                       {outboxReplyOpen && (
                         <div className="mt-3">
-                          {isGenerating ? (
+                          {isGenerating && !hasDraftReady ? (
                             <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-4 justify-center w-full">
                               <Loader2 className="size-4 animate-spin" /> Writing reply draft…
                             </div>
@@ -2694,6 +2681,8 @@ export function CampaignDetail({
                               token={appSession?.access_token ?? ""}
                               onChanged={() => void loadReplies()}
                               startBlank={outboxReplyStartBlank && !replyDraftHasContent(latestDraft)}
+                              onNewAiDraft={campaignLeadId ? handleAiDraftClick : undefined}
+                              newAiDraftPending={isGenerating}
                             />
                           ) : (
                             <ManualReplyBox
@@ -2702,6 +2691,8 @@ export function CampaignDetail({
                               replyToSubject={selectedThread.original_email?.subject ?? null}
                               onSent={() => { setOutboxReplyOpen(false); void loadReplies(); }}
                               onCancel={() => setOutboxReplyOpen(false)}
+                              onNewAiDraft={campaignLeadId ? handleAiDraftClick : undefined}
+                              newAiDraftPending={isGenerating}
                             />
                           )}
                         </div>

@@ -44,9 +44,21 @@ interface ReplyDraftBoxProps {
    *  prefilling the AI-generated content — the user can opt into AI via the
    *  "Generate with AI" button instead. */
   startBlank?: boolean;
+  /** Writes a brand-new AI draft for the thread, discarding what is in the
+   *  editor. Sits beside Regenerate, which instead rewrites this draft and can
+   *  take an instruction. Omit to hide it. */
+  onNewAiDraft?: () => void;
+  newAiDraftPending?: boolean;
 }
 
-export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: ReplyDraftBoxProps) {
+export function ReplyDraftBox({
+  draft,
+  token,
+  onChanged,
+  startBlank = false,
+  onNewAiDraft,
+  newAiDraftPending = false,
+}: ReplyDraftBoxProps) {
   const [draftId, setDraftId] = useState(draft.id);
   const [status, setStatus] = useState(draft.status);
   const [subject, setSubject] = useState(startBlank ? "" : draft.subject ?? "");
@@ -195,25 +207,43 @@ export function ReplyDraftBox({ draft, token, onChanged, startBlank = false }: R
             {status}
           </Badge>
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={regenerating}
-          onClick={() => (aiUsed ? setRegenOpen((o) => !o) : void handleRegenerate())}
-          className={cn(
-            "h-6 gap-1 text-[11px] px-2",
-            aiUsed ? "text-muted-foreground hover:text-foreground" : "text-primary hover:text-primary",
+        <div className="flex items-center gap-1">
+          {/* Only meaningful once there is AI text to throw away — while the box
+              is still blank the button on the right already reads
+              "Generate with AI" and does the same job. */}
+          {aiUsed && onNewAiDraft && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={regenerating || newAiDraftPending}
+              onClick={onNewAiDraft}
+              className="h-6 gap-1 text-[11px] px-2 text-primary hover:text-primary"
+              title="Write a fresh AI draft, discarding what is in the editor"
+            >
+              {newAiDraftPending ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+              {newAiDraftPending ? "Generating…" : "New AI draft"}
+            </Button>
           )}
-        >
-          {regenerating ? (
-            <Loader2 className="size-3 animate-spin" />
-          ) : aiUsed ? (
-            <RotateCcw className="size-3" />
-          ) : (
-            <Sparkles className="size-3" />
-          )}
-          {regenerating ? "Generating…" : aiUsed ? "Regenerate" : "Generate with AI"}
-        </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={regenerating || newAiDraftPending}
+            onClick={() => (aiUsed ? setRegenOpen((o) => !o) : void handleRegenerate())}
+            className={cn(
+              "h-6 gap-1 text-[11px] px-2",
+              aiUsed ? "text-muted-foreground hover:text-foreground" : "text-primary hover:text-primary",
+            )}
+          >
+            {regenerating ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : aiUsed ? (
+              <RotateCcw className="size-3" />
+            ) : (
+              <Sparkles className="size-3" />
+            )}
+            {regenerating ? "Generating…" : aiUsed ? "Regenerate" : "Generate with AI"}
+          </Button>
+        </div>
       </div>
       <div className="p-4 space-y-3">
         <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm font-medium" />

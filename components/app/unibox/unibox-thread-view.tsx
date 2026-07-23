@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import Link from "next/link";
-import { ChevronDown, ExternalLink, Loader2, Reply, Sparkles } from "lucide-react";
+import { ChevronDown, ExternalLink, Loader2, Reply } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { splitQuotedBody, emailPreview } from "@/lib/email-display";
@@ -256,33 +256,20 @@ export function UniboxThreadView({
 
       <div className="px-6 pb-6 pt-4">
         {canReply && (
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              onClick={handleReplyClick}
-              className="gap-1.5 rounded-full px-4"
-            >
-              <Reply className="size-3.5" />
-              Reply
-              <ChevronDown className={cn("size-3.5 transition-transform", replyOpen && "rotate-180")} />
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={isGenerating}
-              onClick={() => void handleGenerateClick()}
-              className="gap-1.5 rounded-full px-4 text-primary"
-              title="Write this reply with AI"
-            >
-              {isGenerating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-              {isGenerating ? "Generating…" : hasDraftReady ? "New AI draft" : "AI draft"}
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            onClick={handleReplyClick}
+            className="gap-1.5 rounded-full px-4"
+          >
+            <Reply className="size-3.5" />
+            Reply
+            <ChevronDown className={cn("size-3.5 transition-transform", replyOpen && "rotate-180")} />
+          </Button>
         )}
 
         {replyOpen && canReply && (
           <div className="pl-0 mt-3">
-            {isGenerating ? (
+            {isGenerating && !hasDraftReady ? (
               <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground py-4">
                 <Loader2 className="size-4 animate-spin" />
                 Writing reply…
@@ -296,6 +283,8 @@ export function UniboxThreadView({
                 // persistence behavior as Campaign Outbox.
                 startBlank={!replyDraftHasContent(latestDraft)}
                 onChanged={onChanged}
+                onNewAiDraft={() => void handleGenerateClick()}
+                newAiDraftPending={isGenerating}
               />
             ) : (
               <ManualReplyBox
@@ -307,6 +296,8 @@ export function UniboxThreadView({
                   setReplyOpen(false);
                 }}
                 onCancel={() => setReplyOpen(false)}
+                onNewAiDraft={() => void handleGenerateClick()}
+                newAiDraftPending={isGenerating}
               />
             )}
           </div>

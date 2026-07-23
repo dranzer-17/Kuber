@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { sendUniboxReply } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -19,12 +19,19 @@ export function ManualReplyBox({
   replyToSubject,
   onSent,
   onCancel,
+  onNewAiDraft,
+  newAiDraftPending = false,
 }: {
   threadId: string;
   token: string;
   replyToSubject: string | null;
   onSent: () => void;
   onCancel: () => void;
+  /** Hands the reply over to the AI instead. This is the only place the first
+   *  draft of a thread can be started from, since with no draft row there is no
+   *  ReplyDraftBox header to carry the button. Omit to hide it. */
+  onNewAiDraft?: () => void;
+  newAiDraftPending?: boolean;
 }) {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -61,15 +68,31 @@ export function ManualReplyBox({
           <p className="eyebrow">Manual reply</p>
           <span className="font-display text-xs font-semibold text-primary">Your reply</span>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onCancel}
-          className="h-auto px-0 py-0 text-[11px] font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
-        >
-          Cancel
-        </Button>
+        <div className="flex items-center gap-2">
+          {onNewAiDraft && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={newAiDraftPending}
+              onClick={onNewAiDraft}
+              className="h-6 gap-1 text-[11px] px-2 text-primary hover:text-primary"
+              title="Write this reply with AI"
+            >
+              {newAiDraftPending ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+              {newAiDraftPending ? "Generating…" : "AI draft"}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            className="h-auto px-0 py-0 text-[11px] font-normal text-muted-foreground hover:text-foreground hover:bg-transparent"
+          >
+            Cancel
+          </Button>
+        </div>
       </div>
       <div className="p-4 space-y-3">
         <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="text-sm" />
