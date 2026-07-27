@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import {
   LayoutDashboard, Users, Megaphone, Settings, Inbox,
-  Menu,
+  Menu, Bug,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useApp } from "@/lib/app-context";
@@ -35,6 +35,7 @@ const AddLeadsDrawer = dynamic(
 );
 
 const SIDEBAR_COLLAPSED_KEY = "kuber_sidebar_collapsed";
+const BUG_REPORT_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdzYy8kUC3a9JSyhrWZJjvrmde9V3qBVycKMRSpLLUpQqkWug/viewform";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard",  icon: LayoutDashboard, exact: true,  managerOnly: false },
@@ -219,7 +220,23 @@ function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className={cn("border-t border-border", sidebarCollapsed ? "p-2 flex justify-center" : "p-3")}>
+          <div className={cn("border-t border-border", sidebarCollapsed ? "p-2 flex flex-col items-center gap-2" : "p-3 space-y-2")}>
+            {/* External Google Form — a plain `<a target="_blank">`, not next/link,
+                since this leaves the app entirely rather than routing within it. */}
+            <a
+              href={BUG_REPORT_FORM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={sidebarCollapsed ? "Report an issue" : undefined}
+              className={cn(
+                "flex items-center rounded-lg text-muted-foreground hover:bg-secondary/50 hover:text-foreground transition-colors",
+                sidebarCollapsed ? "size-7 justify-center" : "gap-2 px-1 py-1 text-xs font-medium",
+              )}
+            >
+              <Bug className="size-3.5 shrink-0" />
+              {!sidebarCollapsed && <span>Report an issue</span>}
+            </a>
+
             {sidebarCollapsed ? (
               <div
                 className="size-7 rounded-full bg-secondary flex items-center justify-center text-[10px] font-semibold text-muted-foreground shrink-0"
