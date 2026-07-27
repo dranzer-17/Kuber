@@ -25,11 +25,27 @@ import { LOCATION_CATEGORIES } from "@/lib/constants";
 import {
   fetchUsers, createUser, patchUser,
   fetchOversight,
-  type Profile,
+  type Profile, type HandoverStrategy, type HandoverSummary,
 } from "@/lib/api-client";
 
 const TERRITORY_HELP =
   "Which countries' leads route to this person under territory-based assignment. Tick a region header to take the whole region.";
+
+// Where a departing employee's book goes. Mirrors the Leads-page bulk-assign
+// strategies, plus "pool" — the one option that still works when there is
+// nobody left to hand the work to.
+const HANDOVER_OPTIONS: {
+  value: HandoverStrategy;
+  label: string;
+  description: string;
+  /** Round-robin and territory need at least one active, online employee. */
+  needsEligible: boolean;
+}[] = [
+  { value: "manual", label: "One person takes over", description: "Hand every lead and campaign to a single employee you pick.", needsEligible: false },
+  { value: "pool", label: "Return to the pool", description: "Unassign everything and leave it in the manager pool to route later.", needsEligible: false },
+  { value: "round_robin", label: "Round robin", description: "Split the leads evenly across the rest of the active team.", needsEligible: true },
+  { value: "territory", label: "Territory-based", description: "Route each lead to whoever covers its country. Anything uncovered stays in the pool.", needsEligible: true },
+];
 
 function roleLabel(u: Profile): string {
   if (u.is_super_admin) return "Super Admin";
@@ -54,8 +70,15 @@ export function TeamView() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [reassignTarget, setReassignTarget] = useState<Profile | null>(null);
+  // What the SERVER says is still held, from the REASSIGN_REQUIRED response.
+  // The roster's own campaign_count means "campaigns containing this person's
+  // leads", which is not the same thing as "campaigns assigned to them" — and
+  // it is the latter that a handover actually moves.
+  const [handoverCounts, setHandoverCounts] = useState<{ held_leads: number; held_campaigns: number } | null>(null);
   const [reassignTo, setReassignTo] = useState("");
+  const [handoverStrategy, setHandoverStrategy] = useState<HandoverStrategy>("manual");
   const [reassigning, setReassigning] = useState(false);
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loadingSession && role !== "manager") router.replace("/dashboard");
@@ -100,46 +123,84 @@ export function TeamView() {
     }
   }
 
-  async function handlePatch(id: string, patch: Partial<{ role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: "online" | "offline"; reassign_to: string }>) {
-    if (!session) return;
+  // Resolves to the updated profile on success (carrying the handover summary
+  // when the patch performed one) and null on failure, so callers can report
+  // what actually happened rather than just that something did.
+  async function handlePatch(
+    id: string,
+    patch: Partial<{ role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: "online" | "offline"; handover_strategy: HandoverStrategy; reassign_to: string }>,
+  ): Promise<(Profile & { handover?: HandoverSummary }) | null> {
+    if (!session) return null;
     try {
       const updated = await patchUser(session.access_token, id, patch);
       setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
-      return true;
+      return updated;
     } catch (e) {
-      const err = e as Error & { code?: string };
-      // Backend requires an explicit reassignment target before deactivating
+      const err = e as Error & { code?: string; details?: unknown };
+      // Backend requires an explicit handover decision before deactivating
       // someone who still holds leads/campaigns — pop the picker instead of
-      // just erroring out (client-side counts can also be stale).
+      // just erroring out.
       if (err.code === "REASSIGN_REQUIRED" && patch.is_active === false) {
         const target = users.find((u) => u.id === id);
-        if (target) setReassignTarget(target);
-        return false;
+        const held = err.details as { held_leads?: number; held_campaigns?: number } | undefined;
+        if (target) openHandover(target, { held_leads: held?.held_leads ?? 0, held_campaigns: held?.held_campaigns ?? 0 });
+        return null;
       }
       toast.error(err.message);
-      return false;
+      return null;
     }
   }
 
-  function handleDeactivateClick(u: Profile) {
-    const leadCount = counts[u.id]?.assigned_lead_count ?? 0;
-    const campaignCount = counts[u.id]?.campaign_count ?? 0;
-    if (leadCount > 0 || campaignCount > 0) {
-      setReassignTarget(u);
-      return;
+  // Round-robin and territory both need somebody active AND online who isn't the
+  // person leaving; default to whichever strategy can actually run, so the modal
+  // never opens on a disabled option.
+  function openHandover(u: Profile, held: { held_leads: number; held_campaigns: number }) {
+    const hasEligible = users.some(
+      (e) => e.role === "employee" && e.is_active && e.availability_status === "online" && e.id !== u.id,
+    );
+    setHandoverStrategy(hasEligible ? "manual" : "pool");
+    setReassignTo("");
+    setHandoverCounts(held);
+    setReassignTarget(u);
+  }
+
+  // Always asks the server first rather than gating on the roster's counts:
+  // those are a different measure (see handoverCounts) and can be stale anyway.
+  // Someone holding nothing is deactivated by this single call; anyone still
+  // holding work comes back as REASSIGN_REQUIRED and opens the modal with the
+  // real numbers.
+  async function handleDeactivateClick(u: Profile) {
+    setDeactivatingId(u.id);
+    try {
+      await handlePatch(u.id, { is_active: false });
+    } finally {
+      setDeactivatingId(null);
     }
-    void handlePatch(u.id, { is_active: false });
   }
 
   async function handleConfirmReassign() {
-    if (!reassignTarget || !reassignTo) return;
+    if (!reassignTarget) return;
+    if (handoverStrategy === "manual" && !reassignTo) return;
     setReassigning(true);
     try {
-      const ok = await handlePatch(reassignTarget.id, { is_active: false, reassign_to: reassignTo });
-      if (ok) {
-        toast.success(`Reassigned ${reassignTarget.full_name || reassignTarget.email}'s leads and campaigns, and deactivated the account.`);
+      const updated = await handlePatch(reassignTarget.id, {
+        is_active: false,
+        handover_strategy: handoverStrategy,
+        ...(handoverStrategy === "manual" ? { reassign_to: reassignTo } : {}),
+      });
+      if (updated) {
+        const name = reassignTarget.full_name || reassignTarget.email;
+        toast.success(`${name} deactivated.`, { description: describeHandover(updated.handover, users) });
+        // Their book is gone, so the roster's workload column is now wrong for
+        // both them and whoever inherited it.
+        if (session) {
+          fetchOversight(session.access_token)
+            .then((o) => setCounts(Object.fromEntries(o.employees.map((e) => [e.id, { assigned_lead_count: e.assigned_lead_count, campaign_count: e.campaign_count }]))))
+            .catch(() => { /* the roster is still correct; only the counts are stale */ });
+        }
         setReassignTarget(null);
         setReassignTo("");
+        setHandoverCounts(null);
       }
     } finally {
       setReassigning(false);
@@ -435,14 +496,16 @@ export function TeamView() {
                           <Button
                             size="sm"
                             variant="outline"
+                            disabled={deactivatingId === u.id}
                             className={cn(
                               "h-8 text-xs",
                               u.is_active
                                 ? "border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
                                 : "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400",
                             )}
-                            onClick={() => (u.is_active ? handleDeactivateClick(u) : void handlePatch(u.id, { is_active: true }))}
+                            onClick={() => (u.is_active ? void handleDeactivateClick(u) : void handlePatch(u.id, { is_active: true }))}
                           >
+                            {deactivatingId === u.id && <RefreshCw className="size-3 mr-1.5 animate-spin" />}
                             {u.is_active ? "Deactivate" : "Reactivate"}
                           </Button>
                         ) : (
@@ -459,25 +522,70 @@ export function TeamView() {
       </div>
 
       {reassignTarget && (
-        <ReassignBeforeDeactivateModal
+        <HandoverBeforeDeactivateModal
           target={reassignTarget}
-          counts={counts[reassignTarget.id]}
+          held={handoverCounts}
           employees={users.filter((u) => u.role === "employee" && u.is_active && u.id !== reassignTarget.id)}
+          strategy={handoverStrategy}
+          onStrategyChange={setHandoverStrategy}
           value={reassignTo}
           onChange={setReassignTo}
           saving={reassigning}
           onConfirm={handleConfirmReassign}
-          onCancel={() => { setReassignTarget(null); setReassignTo(""); }}
+          onCancel={() => { setReassignTarget(null); setReassignTo(""); setHandoverCounts(null); }}
         />
       )}
     </div>
   );
 }
 
-function ReassignBeforeDeactivateModal({
+/** One-line account of where the work actually went, for the success toast. */
+function describeHandover(handover: HandoverSummary | undefined, users: Profile[]): string {
+  if (!handover) return "They held no leads or campaigns.";
+
+  const nameOf = (id: string) => {
+    const u = users.find((x) => x.id === id);
+    return u ? u.full_name || u.email : "an employee";
+  };
+  const parts: string[] = [];
+
+  if (handover.strategy === "pool") {
+    parts.push(`${handover.leads_total} lead${handover.leads_total !== 1 ? "s" : ""} and ${handover.campaigns_total} campaign${handover.campaigns_total !== 1 ? "s" : ""} returned to the pool`);
+  } else {
+    if (handover.leads_reassigned > 0) {
+      const people = handover.per_assignee.filter((a) => a.leads > 0);
+      const who = people.length === 1
+        ? nameOf(people[0].employee_id)
+        : `${people.length} employees`;
+      parts.push(`${handover.leads_reassigned} lead${handover.leads_reassigned !== 1 ? "s" : ""} → ${who}`);
+    }
+    if (handover.campaigns_reassigned > 0) {
+      parts.push(`${handover.campaigns_reassigned} campaign${handover.campaigns_reassigned !== 1 ? "s" : ""} reassigned`);
+    }
+    // Territory routing leaves anything nobody covers behind — say so, because
+    // those leads are now sitting in the pool waiting for a manager.
+    const leftOver = [
+      handover.leads_to_pool > 0 ? `${handover.leads_to_pool} lead${handover.leads_to_pool !== 1 ? "s" : ""}` : null,
+      handover.campaigns_to_pool > 0 ? `${handover.campaigns_to_pool} campaign${handover.campaigns_to_pool !== 1 ? "s" : ""}` : null,
+    ].filter(Boolean).join(" and ");
+    if (leftOver) {
+      parts.push(
+        handover.strategy === "territory"
+          ? `${leftOver} left in the pool — nobody covers them`
+          : `${leftOver} left in the pool`,
+      );
+    }
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : "Nothing needed to move.";
+}
+
+function HandoverBeforeDeactivateModal({
   target,
-  counts,
+  held,
   employees,
+  strategy,
+  onStrategyChange,
   value,
   onChange,
   saving,
@@ -485,8 +593,12 @@ function ReassignBeforeDeactivateModal({
   onCancel,
 }: {
   target: Profile;
-  counts?: { assigned_lead_count: number; campaign_count: number };
+  /** Server-reported counts of what this handover will actually move. */
+  held: { held_leads: number; held_campaigns: number } | null;
+  /** Active employees other than the one leaving — the manual-target candidates. */
   employees: Profile[];
+  strategy: HandoverStrategy;
+  onStrategyChange: (v: HandoverStrategy) => void;
   value: string;
   onChange: (v: string) => void;
   saving: boolean;
@@ -494,39 +606,110 @@ function ReassignBeforeDeactivateModal({
   onCancel: () => void;
 }) {
   const displayName = target.full_name || target.email;
-  const leadCount = counts?.assigned_lead_count ?? 0;
-  const campaignCount = counts?.campaign_count ?? 0;
+  const leadCount = held?.held_leads ?? 0;
+  const campaignCount = held?.held_campaigns ?? 0;
+
+  // Manual may name an offline employee (a deliberate manager choice, warned
+  // about). Round-robin and territory only ever draw from online employees, so
+  // they are the ones that can run out of candidates.
+  const eligible = employees.filter((e) => e.availability_status === "online");
+  const awayCount = employees.length - eligible.length;
+  const targetIsOffline = !!value && employees.find((e) => e.id === value)?.availability_status === "offline";
+
+  const blocked = strategy === "manual" && !value;
 
   return (
     <div className="fixed inset-0 z-200 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
-      <div className="swatch-bar relative z-10 w-full max-w-md mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 pl-7 space-y-4 enter">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={saving ? undefined : onCancel} />
+      <div className="swatch-bar relative z-10 w-full max-w-md mx-4 rounded-2xl border border-border bg-card shadow-2xl p-6 pl-7 space-y-4 enter max-h-[90vh] overflow-y-auto">
         <div>
           <p className="eyebrow">Handover required</p>
-          <p className="font-display text-base font-semibold mt-0.5">Reassign before deactivating</p>
+          <p className="font-display text-base font-semibold mt-0.5">Where does this work go?</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {displayName} still holds {leadCount} lead{leadCount !== 1 ? "s" : ""} and {campaignCount} campaign{campaignCount !== 1 ? "s" : ""}.
-            Pick who takes over before this account is deactivated.
+            {displayName} still holds{" "}
+            {[
+              leadCount > 0 ? `${leadCount.toLocaleString()} lead${leadCount !== 1 ? "s" : ""}` : null,
+              campaignCount > 0 ? `${campaignCount} campaign${campaignCount !== 1 ? "s" : ""}` : null,
+            ].filter(Boolean).join(" and ")}.{" "}
+            Choose where it goes before this account is deactivated.
           </p>
         </div>
-        <div className="space-y-1.5">
-          <Label>Reassign all leads and campaigns to</Label>
-          <Select value={value} onValueChange={onChange}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
-            <SelectContent className="z-300">
-              {employees.map((e) => (
-                <SelectItem key={e.id} value={e.id}>{e.full_name || e.email}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {employees.length === 0 && (
-            <p className="text-xs text-destructive">No other active employee is available to reassign to.</p>
-          )}
+
+        <div className="grid gap-2">
+          {HANDOVER_OPTIONS.map((o) => {
+            const disabled = o.needsEligible && eligible.length === 0;
+            return (
+              <label
+                key={o.value}
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border border-border p-3",
+                  disabled
+                    ? "opacity-50 cursor-not-allowed"
+                    : "cursor-pointer hover:bg-secondary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="handover-strategy"
+                  className="mt-1"
+                  disabled={disabled || saving}
+                  checked={strategy === o.value}
+                  onChange={() => onStrategyChange(o.value)}
+                />
+                <div>
+                  <p className="text-sm font-medium">{o.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {o.description}
+                    {disabled && " Needs at least one other active, online employee."}
+                  </p>
+                </div>
+              </label>
+            );
+          })}
         </div>
+
+        {strategy === "manual" && (
+          <div className="space-y-1.5">
+            <Label>Hand everything to</Label>
+            <Select value={value} onValueChange={onChange}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Choose an employee" /></SelectTrigger>
+              <SelectContent className="z-300">
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.full_name || e.email}{e.availability_status === "offline" ? " (offline)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {employees.length === 0 && (
+              <p className="text-xs text-destructive">
+                No other active employee exists. Use &ldquo;Return to the pool&rdquo; instead.
+              </p>
+            )}
+            {targetIsOffline && (
+              <p className="text-xs text-amber-400">
+                This employee is marked offline — they will still receive the whole book.
+              </p>
+            )}
+          </div>
+        )}
+
+        {(strategy === "round_robin" || strategy === "territory") && (
+          <div className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
+            <p>
+              Splitting across <span className="text-foreground font-medium">{eligible.length}</span> active, online
+              employee{eligible.length !== 1 ? "s" : ""}
+              {awayCount > 0 && <> ({awayCount} offline {awayCount !== 1 ? "are" : "is"} excluded)</>}.
+            </p>
+            {campaignCount > 0 && <p>Each campaign follows whoever inherits most of its leads.</p>}
+            {strategy === "territory" && <p>Leads in countries nobody covers stay in the pool.</p>}
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
-          <Button type="button" onClick={onConfirm} disabled={saving || !value}>
-            {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />} Reassign & deactivate
+          <Button type="button" onClick={onConfirm} disabled={saving || blocked}>
+            {saving && <RefreshCw className="size-3.5 mr-1.5 animate-spin" />} Hand over &amp; deactivate
           </Button>
         </div>
       </div>

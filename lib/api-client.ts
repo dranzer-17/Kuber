@@ -832,9 +832,25 @@ export async function createUser(token: string, body: {
   return apiFetch("/api/v1/settings/users", { method: "POST", body: JSON.stringify(body) }, token);
 }
 
+// Where a deactivated employee's leads and campaigns go. "pool" is the only one
+// that works when no other employee is available to take them.
+export type HandoverStrategy = "manual" | "pool" | "round_robin" | "territory";
+
+export type HandoverSummary = {
+  strategy: HandoverStrategy;
+  leads_total: number;
+  leads_reassigned: number;
+  leads_to_pool: number;
+  campaigns_total: number;
+  campaigns_reassigned: number;
+  campaigns_to_pool: number;
+  eligible_employee_count: number;
+  per_assignee: { employee_id: string; leads: number; campaigns: number }[];
+};
+
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: AvailabilityStatus; password: string; reassign_to: string;
-}>): Promise<Profile> {
+  full_name: string; role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: AvailabilityStatus; password: string; handover_strategy: HandoverStrategy; reassign_to: string;
+}>): Promise<Profile & { handover?: HandoverSummary }> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }
 

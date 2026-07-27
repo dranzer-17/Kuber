@@ -27,18 +27,38 @@ export const CreateUserSchema = z
     }
   });
 
-export const PatchUserSchema = z.object({
-  full_name: z.string().min(1).max(200).optional(),
-  role: z.enum(["manager", "employee"]).optional(),
-  territory_countries: TerritoryCountriesSchema.optional(),
-  is_active: z.boolean().optional(),
-  // Online/offline availability (spec §2B) — separate from is_active.
-  availability_status: z.enum(["online", "offline"]).optional(),
-  password: z.string().min(8).optional(),
-  // Required when deactivating someone who still holds leads/campaigns —
-  // the manager must explicitly pick who inherits that work.
-  reassign_to: z.string().uuid().optional(),
-});
+// Where a departing employee's leads and campaigns go when the account is
+// deactivated. "manual" names one successor; "pool" hands everything back to
+// the manager pool (the only option that works when nobody else is available);
+// "round_robin" and "territory" reuse the same engines as normal assignment.
+export const HandoverStrategySchema = z.enum(["manual", "pool", "round_robin", "territory"]);
+
+export const PatchUserSchema = z
+  .object({
+    full_name: z.string().min(1).max(200).optional(),
+    role: z.enum(["manager", "employee"]).optional(),
+    territory_countries: TerritoryCountriesSchema.optional(),
+    is_active: z.boolean().optional(),
+    // Online/offline availability (spec §2B) — separate from is_active.
+    availability_status: z.enum(["online", "offline"]).optional(),
+    password: z.string().min(8).optional(),
+    // How the held work is redistributed on deactivation. Omitting it while the
+    // user still holds leads/campaigns is what triggers REASSIGN_REQUIRED.
+    handover_strategy: HandoverStrategySchema.optional(),
+    // The successor, for the "manual" strategy. A bare reassign_to with no
+    // strategy still means "manual" — that was the only option this endpoint
+    // had before handover_strategy existed.
+    reassign_to: z.string().uuid().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.handover_strategy === "manual" && !data.reassign_to) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reassign_to"],
+        message: "Pick the employee who takes this work over",
+      });
+    }
+  });
 
 // Self-service availability toggle (spec §2B) — an employee marking themselves
 // available/unavailable. Own profile only; enforced in the /me/availability route.

@@ -4,6 +4,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchUserSchema } from "@/lib/validators/users";
 import { canonicalCountryList } from "@/lib/territory";
+import {
+  handoverEmployeeWork,
+  NoEligibleEmployeesError,
+  InvalidHandoverTargetError,
+  type HandoverStrategy,
+  type HandoverSummary,
+} from "@/lib/services/handover";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let caller: Awaited<ReturnType<typeof requireManager>>;
@@ -13,7 +20,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
   const parsed = PatchUserSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
-  const { password, role, territory_countries, full_name, is_active, availability_status, reassign_to } = parsed.data;
+  const { password, role, territory_countries, full_name, is_active, availability_status, reassign_to, handover_strategy } = parsed.data;
 
   const db = createAdminClient();
 
@@ -55,8 +62,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   // Deactivating someone who still holds leads/campaigns requires the manager
-  // to explicitly pick who inherits that work — no silent orphaning, and no
-  // auto-guessed reassignment either.
+  // to explicitly say where that work goes — no silent orphaning, and no
+  // auto-guessed handover either. They may hand it to one named successor,
+  // release it to the manager pool, or redistribute it round-robin / by
+  // territory across the rest of the team.
+  //
+  // Deliberately runs BEFORE the account is actually deactivated: if the
+  // handover fails, the worst outcome is "nothing moved and the account is
+  // still active" — visible and retryable. Deactivating first would risk
+  // leaving a book stranded on a locked-out account. The departing user is
+  // excluded from every candidate list inside the service, so the window in
+  // which they are still active cannot route their own leads back to them.
+  let handover: HandoverSummary | undefined;
   if (is_active === false) {
     const [{ count: heldCampaigns }, { count: heldLeads }] = await Promise.all([
       db.from("campaigns").select("id", { count: "exact", head: true }).eq("assigned_to", id).eq("is_deleted", false),
@@ -64,55 +81,36 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     ]);
 
     if ((heldCampaigns ?? 0) > 0 || (heldLeads ?? 0) > 0) {
-      if (!reassign_to) {
+      // A bare reassign_to (no strategy) is the pre-handover contract: one
+      // named successor takes everything.
+      const strategy: HandoverStrategy | undefined = handover_strategy ?? (reassign_to ? "manual" : undefined);
+
+      if (!strategy) {
         return fail(
           400,
           "REASSIGN_REQUIRED",
-          "This user still holds leads/campaigns. Pick someone to reassign them to before deactivating.",
+          "This user still holds leads/campaigns. Choose where that work goes before deactivating.",
           { held_campaigns: heldCampaigns ?? 0, held_leads: heldLeads ?? 0 },
         );
       }
-      if (reassign_to === id) {
-        return fail(400, "VALIDATION_ERROR", "Cannot reassign to the account being deactivated.");
+
+      try {
+        handover = await handoverEmployeeWork(db, id, strategy, reassign_to ?? null, caller.id);
+      } catch (e) {
+        if (e instanceof NoEligibleEmployeesError) {
+          // Same contract as the leads bulk-assign endpoint. Silently pooling
+          // everything when the manager asked for round-robin would be a
+          // surprise; the pool has to be an explicit choice.
+          return fail(409, "NO_ELIGIBLE_EMPLOYEES", e.message, {
+            held_campaigns: heldCampaigns ?? 0,
+            held_leads: heldLeads ?? 0,
+          });
+        }
+        if (e instanceof InvalidHandoverTargetError) {
+          return fail(400, "INVALID_ASSIGNEE", e.message);
+        }
+        return fail(500, "INTERNAL", (e as Error).message);
       }
-
-      const { data: newOwner } = await db
-        .from("profiles")
-        .select("id, role, is_active")
-        .eq("id", reassign_to)
-        .maybeSingle();
-      if (!newOwner || !newOwner.is_active || newOwner.role !== "employee") {
-        return fail(400, "INVALID_ASSIGNEE", "Reassignment target must be an active employee.");
-      }
-
-      const now = new Date().toISOString();
-
-      const { data: heldCampaignRows } = await db
-        .from("campaigns")
-        .select("id")
-        .eq("assigned_to", id)
-        .eq("is_deleted", false);
-      if (heldCampaignRows && heldCampaignRows.length > 0) {
-        await db
-          .from("campaigns")
-          .update({ assigned_to: reassign_to, assigned_at: now, updated_by: caller.id })
-          .eq("assigned_to", id)
-          .eq("is_deleted", false);
-        await db.from("campaign_assignments").insert(
-          heldCampaignRows.map((c) => ({
-            campaign_id: c.id as string,
-            assigned_to: reassign_to,
-            assigned_by: caller.id,
-            previous_assignee: id,
-          })),
-        );
-      }
-
-      await db
-        .from("leads")
-        .update({ assigned_to: reassign_to, assigned_at: now })
-        .eq("assigned_to", id)
-        .eq("is_deleted", false);
     }
   }
 
@@ -149,5 +147,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (error) return fail(500, "INTERNAL", error.message);
 
-  return ok(data);
+  // `handover` rides along on the profile so the caller can report the actual
+  // split ("620 leads to 3 people, 380 to the pool") rather than guessing.
+  return ok(handover ? { ...data, handover } : data);
 }

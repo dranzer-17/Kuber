@@ -17,14 +17,20 @@ export type AssignmentStrategy = "manual" | "round_robin" | "territory";
  * is_active=true, AND availability_status='online'. Deactivated users can't be
  * assigned at all; offline users are temporarily excluded from round-robin and
  * territory routing (but can still receive a manual assignment, with a warning).
+ *
+ * `excludeId` drops one employee who would otherwise qualify. Handover needs it:
+ * the person being deactivated is still active and online at the moment their
+ * book is redistributed, so without this they would be a candidate to receive
+ * their own leads back.
  */
-async function getEligibleEmployees(db: Db): Promise<string[]> {
-  const { data } = await db.from("profiles")
+export async function getEligibleEmployees(db: Db, excludeId?: string | null): Promise<string[]> {
+  let q = db.from("profiles")
     .select("id")
     .eq("role", "employee")
     .eq("is_active", true)
-    .eq("availability_status", "online")
-    .order("id");
+    .eq("availability_status", "online");
+  if (excludeId) q = q.neq("id", excludeId);
+  const { data } = await q.order("id");
   return (data ?? []).map((row) => row.id as string);
 }
 
@@ -39,14 +45,17 @@ async function getEligibleEmployees(db: Db): Promise<string[]> {
  *
  * Employees with an empty territory are dropped here rather than filtered
  * later: they cover nowhere, so they can never be a candidate.
+ *
+ * `excludeId` behaves as in getEligibleEmployees.
  */
-async function getCoverage(db: Db): Promise<Coverage[]> {
-  const { data } = await db.from("profiles")
+export async function getCoverage(db: Db, excludeId?: string | null): Promise<Coverage[]> {
+  let q = db.from("profiles")
     .select("id, territory_countries")
     .eq("role", "employee")
     .eq("is_active", true)
-    .eq("availability_status", "online")
-    .order("id");
+    .eq("availability_status", "online");
+  if (excludeId) q = q.neq("id", excludeId);
+  const { data } = await q.order("id");
 
   return (data ?? [])
     .map((row) => ({
@@ -72,7 +81,7 @@ async function getExclusionCounts(db: Db): Promise<{ excluded_offline: number; e
  * arbitrary per-employee country lists there is no fixed set of regions to keep
  * cursors for, and the allocator balances within the batch instead.
  */
-type Lane = "global";
+export type Lane = "global";
 
 /**
  * The next `count` assignees for `lane`, in order — rotation, not load-balancing.
@@ -88,7 +97,7 @@ type Lane = "global";
  * Returns [] only when the lane has no candidates at all; callers treat a short
  * result as "leave in the pool" rather than assigning to undefined.
  */
-async function pickRoundRobin(db: Db, lane: Lane, candidateIds: string[], count: number): Promise<string[]> {
+export async function pickRoundRobin(db: Db, lane: Lane, candidateIds: string[], count: number): Promise<string[]> {
   if (candidateIds.length === 0 || count < 1) return [];
   const { data, error } = await db.rpc("assignment_pick_round_robin", {
     p_lane: lane,

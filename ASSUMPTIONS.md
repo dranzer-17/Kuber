@@ -42,6 +42,55 @@ the new logic.
 - A manual target that is **offline** is allowed but the summary flags
   `manual_target_offline` so the UI warns.
 
+### Deactivation handover (NEW)
+Deactivating an employee who still holds work used to demand a single named
+successor — leaving a one-employee workspace unable to deactivate anyone at all
+("No other active employee is available to reassign to", with the confirm button
+dead). `PATCH /api/v1/settings/users/[id]` now takes a `handover_strategy`:
+
+| Strategy | Leads | Campaigns |
+| --- | --- | --- |
+| `manual` | all → the named `reassign_to` | all → the same person |
+| `pool` | all unassigned | all unassigned |
+| `round_robin` | rotated via the shared `assignment_cursors` lane | see below |
+| `territory` | routed by lead country; anything uncovered → pool | see below |
+
+- A bare `reassign_to` with no strategy still means `manual` — the pre-existing
+  contract is unchanged, so nothing that already worked broke.
+- `pool` is the only strategy with no eligibility requirement, and is therefore
+  the escape hatch when the departing employee is the last one standing. The UI
+  defaults to it (and disables round-robin/territory) when nobody is eligible.
+- `round_robin` / `territory` with **zero eligible employees** is a hard `409
+  NO_ELIGIBLE_EMPLOYEES`, matching the bulk-assign contract — silently pooling
+  a book the manager asked to *distribute* would be a surprise.
+- **Campaigns follow their own leads**: a campaign goes to whoever inherited the
+  most of its leads in this handover (ties break on employee id, so a rerun lands
+  the same way). Round-robining campaigns independently of their leads would
+  manufacture the §2.7 ownership drift on every single handover. A campaign with
+  no signal — none of the moved leads, or all of them pooled — falls back to a
+  round-robin draw under `round_robin`, and to the pool under `territory` (a
+  campaign has no country of its own to route on).
+
+Two things this deliberately does **not** reuse from normal assignment:
+- **The readiness gate.** `bulkAssignByStrategy` refuses to assign a lead that is
+  not `enriched`/`input_required` — correct for routine routing, wrong here: the
+  lead already belongs to someone who is leaving, so skipping it would strand it
+  on a deactivated account. Every held lead moves, whatever its status.
+- **The candidate list.** The departing user is still `is_active`/`online` at
+  handover time, so `getEligibleEmployees`/`getCoverage` take an `excludeId` —
+  without it, round-robin and territory would hand their own leads back to them.
+
+Reads are **paged** (a book larger than PostgREST's row cap would otherwise be
+half-transferred) and writes are **batched by destination** (1700 single-row
+updates would not finish inside a serverless request). The handover runs
+**before** the account is deactivated: if it fails, nothing moved and the account
+is still active — visible and retryable, never orphaned.
+
+The modal's "still holds N leads and M campaigns" now comes from the server's
+`REASSIGN_REQUIRED` response rather than the Team roster, because the roster's
+`campaign_count` means "campaigns *containing* their leads" (§6 below) while a
+handover moves "campaigns *assigned to* them" — different numbers.
+
 ### §5 Campaign = multi-employee container (REVERSAL)
 - Reversed the earlier "force one campaign = one employee at creation" behavior.
   A campaign is now a **container**: its leads keep their existing owners, and
