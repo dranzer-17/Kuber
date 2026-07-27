@@ -199,7 +199,18 @@ button:disabled, [role="button"][aria-disabled="true"] { cursor: not-allowed; }
 
 @media (prefers-reduced-motion: no-preference) {
   .enter {
-    animation: enter-fade-up 180ms var(--ease-out-quart, ease-out) both;
+    /* No `both`/`forwards`: that fill-mode freezes the "to" keyframe's
+       transform: translateY(0) on the element forever, and a non-`none`
+       transform — even the identity one translateY(0) computes to — creates a
+       permanent CSS stacking context. Any absolutely-positioned dropdown
+       inside a `.enter` container (e.g. the Team page's territory picker)
+       then has its z-index scoped to that trapped context instead of the
+       page, so it paints *underneath* whatever normal-flow content comes
+       after it in the DOM instead of floating above it. Dropping the fill
+       mode is a no-op visually — the animation's resting state (opacity 1,
+       no transform) is exactly the browser's default once the animation
+       ends — and removes the stacking context the moment the 180ms is up. */
+    animation: enter-fade-up 180ms var(--ease-out-quart, ease-out);
   }
 }
 @keyframes enter-fade-up {

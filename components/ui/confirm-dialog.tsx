@@ -26,12 +26,16 @@ interface ConfirmDialogProps {
  * drawers (z-50/z-60), so it needs its own z-[200] overlay.
  *
  * Portaled to `document.body` rather than rendered in place — callers often
- * nest this inside an element carrying the app's `.enter` fade-up animation
- * class, and that class's `transform: translateY(0)` final keyframe (kept by
- * `animation-fill-mode: both`) makes that ancestor a containing block for
- * `position: fixed` descendants. Without the portal, this dialog's "fixed,
- * full-viewport" overlay gets sized and positioned relative to that ancestor
- * box instead of the viewport, instead of covering the whole screen.
+ * nest this inside an `overflow-hidden` card or a transformed ancestor (a
+ * hover-scale utility, an animation library), any of which either clips this
+ * dialog's overlay or turns it into a containing block for `position: fixed`
+ * descendants, sizing and positioning the "fixed, full-viewport" overlay
+ * relative to that ancestor's box instead of the viewport. (`.enter` used to
+ * be exactly such an ancestor — its fade-up animation permanently kept a
+ * `transform: translateY(0)` after finishing, via `animation-fill-mode:
+ * both` — until that was fixed in globals.css; nothing in this app's `.enter`
+ * elements does this anymore, but the portal stays as the general-case
+ * defense against whichever ancestor does it next.)
  *
  * `pointer-events: auto` is forced on the root below because a Radix `Dialog`
  * left open behind this one sets `document.body.style.pointerEvents = "none"`
