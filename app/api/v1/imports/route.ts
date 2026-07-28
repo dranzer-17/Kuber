@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data, error } = await db
     .from("imports")
     .select("*")

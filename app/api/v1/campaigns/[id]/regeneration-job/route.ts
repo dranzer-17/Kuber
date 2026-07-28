@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok } from "@/lib/api-response";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { getLatestJob } from "@/lib/services/regeneration-jobs";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 /**
  * The campaign's live regeneration job, or the most recent finished one.
@@ -18,7 +18,7 @@ export async function GET(
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const url = new URL(req.url);

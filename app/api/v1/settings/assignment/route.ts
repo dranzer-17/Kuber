@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 const PatchAssignmentSchema = z.object({
   strategy: z.enum(["manual", "round_robin", "territory"]),
@@ -12,9 +12,10 @@ const PatchAssignmentSchema = z.object({
 // Phase 4.4 — previously frozen: nothing in the app could change it).
 // "manual" = off; leads wait in the manager pool.
 export async function GET(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data, error } = await db
     .from("assignment_settings")
     .select("strategy")
@@ -26,13 +27,14 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = PatchAssignmentSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data: existing } = await db.from("assignment_settings").select("id").limit(1).maybeSingle();
 
   if (existing) {

@@ -1,19 +1,20 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { checkSpecificKey } from "@/lib/services/provider-credits";
 import { PROVIDER_META } from "@/lib/services/providers/registry";
 import type { ProviderId } from "@/lib/services/providers/types";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Live-validates ONE specific stored key right now — bypasses the "currently
 // active key" resolution and the 5-minute cache entirely (the whole point of
 // the Re-check button is to test this exact key immediately).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const { data: keyRow } = await db.from("provider_keys").select("id, provider, secret_vault_id").eq("id", id).maybeSingle();
   if (!keyRow) return fail(404, "NOT_FOUND", "Key not found");

@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok } from "@/lib/api-response";
 import { getUniboxScope } from "@/lib/auth/scope";
 import { getThreads, type UniboxReadState, type UniboxTab } from "@/lib/services/unibox";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 function parseInterest(raw: string | null): number | "lead" | undefined {
   if (!raw) return undefined;
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const sp = req.nextUrl.searchParams;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const campaignIdsRaw = sp.get("campaign_ids");
   const campaign_ids = campaignIdsRaw

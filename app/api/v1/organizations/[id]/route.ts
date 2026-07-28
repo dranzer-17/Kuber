@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
 import { requireAuth, requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchOrgSchema } from "@/lib/validators/organizations";
 import { normalizeDomain } from "@/lib/utils/domain";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // Employees may read an org only if they have a lead of their own under it
   // (spec §5) — everything else is manager territory.
@@ -45,14 +45,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
   const body = await req.json().catch(() => null);
   const parsed = PatchOrgSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // This route previously spread `domain` straight into the update with no
   // normalization at all — the least-guarded of the four org-domain write

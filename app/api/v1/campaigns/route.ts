@@ -1,18 +1,18 @@
 import { NextRequest } from "next/server";
 import { requireAuth, requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateCampaignSchema } from "@/lib/validators/campaigns";
 import { buildDefaultCampaignSteps } from "@/lib/constants";
 import { getAccessibleCampaignIds } from "@/lib/auth/scope";
 import { computeCampaignStats } from "@/lib/campaign-status";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 
 export async function GET(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // A campaign is a container that may hold leads from several employees
   // (spec §5). An employee sees any campaign that contains at least one lead
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
   const parsed = CreateCampaignSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const { data, error } = await db
     .from("campaigns")

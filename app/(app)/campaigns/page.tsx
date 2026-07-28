@@ -1,16 +1,11 @@
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
-import { getUserRole } from "@/lib/auth/roles";
 import { getCampaigns } from "@/lib/server/campaigns";
+import { requireAppSessionContext } from "@/lib/server/session";
 import { CampaignsClient } from "./campaigns-client";
 
 export default async function CampaignsPage() {
-  const db = createAdminClient();
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const role = getUserRole(user);
+  const { db, userId, role } = await requireAppSessionContext();
   const isManager = role === "manager";
 
-  const campaigns = await getCampaigns(db, isManager ? undefined : user?.id);
+  const campaigns = await getCampaigns(db, isManager ? undefined : userId);
   return <CampaignsClient initialCampaigns={campaigns} />;
 }

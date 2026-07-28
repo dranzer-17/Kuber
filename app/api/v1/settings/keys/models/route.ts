@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PROVIDER_META } from "@/lib/services/providers/registry";
 import { getActiveKey } from "@/lib/services/provider-keys";
 import type { ProviderId } from "@/lib/services/providers/types";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export type ProviderModelOption = { id: string; name: string | null };
 
@@ -49,7 +49,8 @@ async function listAnthropicModels(secret: string): Promise<ProviderModelOption[
  *  without a catalog integration return an empty list and the UI falls back
  *  to its static options / freeform input. */
 export async function GET(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const provider = req.nextUrl.searchParams.get("provider") as ProviderId | null;
   if (!provider || !(provider in PROVIDER_META)) {
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
     return fail(400, "INVALID_PROVIDER", `${provider} has no model catalog`);
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const key = await getActiveKey(db, provider);
 
   try {

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createScopedClient } from "@/lib/supabase/scoped";
 import sanitizeHtml from "sanitize-html";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { emailPreview, stripQuotedText, ueTypeToDirection } from "@/lib/email-display";
@@ -828,8 +829,12 @@ export async function getUnreadCount(db: Db, scope?: UniboxScope): Promise<numbe
 
 type SyncState = { last_timestamp_created: string | null; last_full_sync_at: string | null };
 
+// The cursor lives in `system_state`, not `settings`: both companies share one
+// Instantly workspace and this function does ONE pass over it, so there is
+// exactly one cursor. It also has to be writable by the unscoped cron client,
+// which cannot satisfy settings.company_id (NOT NULL).
 async function getSyncState(db: Db): Promise<SyncState> {
-  const { data } = await db.from("settings").select("value").eq("key", SYNC_STATE_KEY).maybeSingle();
+  const { data } = await db.from("system_state").select("value").eq("key", SYNC_STATE_KEY).maybeSingle();
   if (!data?.value) return { last_timestamp_created: null, last_full_sync_at: null };
   try {
     return JSON.parse(data.value) as SyncState;
@@ -840,19 +845,36 @@ async function getSyncState(db: Db): Promise<SyncState> {
 
 async function saveSyncState(db: Db, state: SyncState): Promise<void> {
   const now = new Date().toISOString();
-  await db.from("settings").upsert({
+  await db.from("system_state").upsert({
     key: SYNC_STATE_KEY,
     value: JSON.stringify(state),
     updated_at: now,
   }, { onConflict: "key" });
 }
 
-export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: number; pages: number; failed: number }> {
+/**
+ * The company that owns an Instantly sub-campaign. Null when the id is unknown
+ * to us — an Instantly campaign created outside the app, or one whose row was
+ * deleted. Takes the UNSCOPED client on purpose: the sync runs cross-company
+ * and this lookup is what decides which company it is.
+ */
+async function resolveCompanyIdForEmail(db: Db, instantlyCampaignId: string | null | undefined): Promise<string | null> {
+  if (!instantlyCampaignId) return null;
+  const { data } = await db
+    .from("instantly_campaigns")
+    .select("company_id")
+    .eq("instantly_campaign_id", instantlyCampaignId)
+    .maybeSingle();
+  return (data?.company_id as string | undefined) ?? null;
+}
+
+export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: number; pages: number; failed: number; skippedUnmapped: number }> {
   const state = await getSyncState(db);
   const cursor = state.last_timestamp_created;
   let startingAfter: string | undefined;
   let ingested = 0;
   let failed = 0;
+  let skippedUnmapped = 0;
   let pages = 0;
   let maxTs = cursor;
   // Oldest message we could not ingest this run. The cursor is never advanced
@@ -877,7 +899,15 @@ export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: n
       pages++;
       for (const email of result.items) {
         try {
-          await ingestInstantlyEmail(db, email);
+          // Both tenants share one Instantly workspace, so a page of results can
+          // mix companies. The sub-campaign identifies the owner; ingest through
+          // a client scoped to it so each message lands in the right tenant and
+          // cannot be read by the other. An email we cannot attribute to any
+          // campaign belongs to no tenant and would be invisible to every
+          // scoped read anyway, so it is skipped rather than stored orphaned.
+          const companyId = await resolveCompanyIdForEmail(db, email.campaign_id);
+          if (!companyId) { skippedUnmapped++; continue; }
+          await ingestInstantlyEmail(createScopedClient(companyId), email);
           ingested++;
         } catch (e) {
           // Skip it and keep going: one unusable message must not hold back
@@ -902,7 +932,7 @@ export async function runUniboxSync(db: Db, maxPages = 8): Promise<{ ingested: n
     });
   }
 
-  return { ingested, pages, failed };
+  return { ingested, pages, failed, skippedUnmapped };
 }
 
 /** Build campaign replies thread shape from unibox data (Phase 2). */

@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth, type AuthedUser } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchSettingsSchema, SETTINGS_KEYS, KNOWLEDGE_SETTINGS_KEYS } from "@/lib/validators/settings";
+import { dbForUser } from "@/lib/supabase/scoped";
 
-async function readSettings(db: ReturnType<typeof createAdminClient>) {
+async function readSettings(db: SupabaseClient) {
   const { data, error } = await db.from("settings").select("key, value").in("key", [...SETTINGS_KEYS]);
   if (error) throw fail(500, "INTERNAL", error.message);
 
@@ -19,9 +20,10 @@ async function readSettings(db: ReturnType<typeof createAdminClient>) {
 // Everyone may READ company settings (the UI shows e.g. the company-default
 // prompt as the inherited fallback); only managers may change them.
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try {
     return ok(await readSettings(db));
   } catch (r) {
@@ -53,7 +55,7 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(caller);
 
   for (const [key, value] of Object.entries(parsed.data)) {
     if (value === undefined) continue;

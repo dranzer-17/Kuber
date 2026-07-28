@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { DraftsQuerySchema } from "@/lib/validators/drafts";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 
 export async function GET(req: NextRequest) {
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
   const { campaign_id, status, page, limit } = parsed.data;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   let ownedCampaignIds: string[] | null = null;
   if (user.role === "employee") {

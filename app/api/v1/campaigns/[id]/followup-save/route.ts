@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { FollowUpSaveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/instantly";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { logLeadEvent } from "@/lib/services/lead-events";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Save for a follow-up: persist + approve + sync to Instantly in one atomic
 // action, entirely separate from /drafts/[id] PATCH (whose "edit" action
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const parsed = FollowUpSaveSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: cl } = await db

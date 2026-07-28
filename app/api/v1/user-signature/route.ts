@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(req: NextRequest) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data } = await db
     .from("user_signatures")
     .select("full_name, title, contact")
@@ -16,9 +16,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const body = await req.json().catch(() => ({})) as { full_name?: string; title?: string; contact?: string };
 
   const { error } = await db.from("user_signatures").upsert({

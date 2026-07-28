@@ -2,12 +2,12 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { assertLeadAccess } from "@/lib/auth/scope";
 import { ok, fail } from "@/lib/api-response";
-import { createAdminClient } from "@/lib/supabase/admin";
 import {
   isCommentReactionEmoji,
   loadCommentReactionGroups,
   type CommentReactionGroup,
 } from "@/lib/comment-reactions";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 /** Toggle a reaction on a lead comment. Body: `{ emoji: "👍" }`. */
 export async function POST(
@@ -18,7 +18,7 @@ export async function POST(
   try { user = await requireAuth(req); } catch (response) { return response as Response; }
 
   const { id, commentId } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertLeadAccess(db, user, id); } catch (response) { return response as Response; }
 
   let payload: unknown;

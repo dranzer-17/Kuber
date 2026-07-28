@@ -1,22 +1,23 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateOrgSchema, OrgListQuerySchema } from "@/lib/validators/organizations";
 import { normalizeDomain } from "@/lib/utils/domain";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Organizations are enrichment territory — manager-only (planning.md D8).
 // Employees reach org data only through their own leads' drawers
 // (GET /organizations/[id], scoped there).
 export async function GET(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
   const parsed = OrgListQuerySchema.safeParse(sp);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
   const { search, industry, has_scraped, unsubscribed, page, limit } = parsed.data;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   let q = db.from("organizations").select("*", { count: "exact" });
 
@@ -34,14 +35,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateOrgSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
   const { name, domain, ...rest } = parsed.data;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const normalizedDomain = domain ? (normalizeDomain(domain) || null) : null;
 

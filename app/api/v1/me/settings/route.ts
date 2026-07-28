@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchUserSettingsSchema } from "@/lib/validators/settings";
 import {
@@ -10,10 +10,11 @@ import {
   getClientContext,
   getUserSettings,
 } from "@/lib/services/settings";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 const SERVICE_ROLE_USER_ID = "00000000-0000-0000-0000-000000000000";
 
-type Db = ReturnType<typeof createAdminClient>;
+type Db = SupabaseClient;
 
 // Personal settings for the signed-in user (planning.md Phase 1). Every value
 // is nullable — null means "inherit the company default". The response carries
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
     return fail(400, "NO_PROFILE", "The service-role caller has no personal settings");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   return ok(await buildResponse(db, user.id, user.isSuperAdmin));
 }
 
@@ -75,7 +76,7 @@ export async function PATCH(req: NextRequest) {
     patch[key] = typeof value === "string" && value.trim() === "" ? null : value;
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   if (Object.keys(patch).length > 0) {
     const { error } = await db.from("user_settings").upsert(

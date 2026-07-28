@@ -1,9 +1,9 @@
 import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function POST(
   req: NextRequest,
@@ -13,7 +13,7 @@ export async function POST(
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: campaign } = await db

@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { normalizeReplyBodyHtml } from "@/lib/reply-body-html";
 import { assertReplyDraftAccess } from "@/lib/auth/scope";
 import { z } from "zod";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 const PatchSchema = z.object({
   action: z.enum(["edit", "approve", "reject"]),
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertReplyDraftAccess(db, user, id); } catch (r) { return r as Response; }
   const { data } = await db.from("reply_drafts").select("*").eq("id", id).maybeSingle();
   if (!data) return fail(404, "NOT_FOUND", "Reply draft not found");
@@ -30,7 +30,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const parsed = PatchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertReplyDraftAccess(db, user, id); } catch (r) { return r as Response; }
   const now = new Date().toISOString();
   const p = parsed.data;

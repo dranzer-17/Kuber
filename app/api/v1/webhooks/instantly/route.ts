@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createScopedClient } from "@/lib/supabase/scoped";
 import { createHash } from "crypto";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { getInstantlyEmail } from "@/lib/services/instantly";
@@ -105,23 +106,33 @@ export async function POST(req: NextRequest) {
   //    p.campaign_id here is Instantly's UUID (instantly_campaigns.instantly_campaign_id)
   let subId: string | null = null;
   let masterId: string | null = null;
+  let companyId: string | null = null;
   if (p.campaign_id) {
     const { data: sub } = await db
       .from("instantly_campaigns")
-      .select("id,campaign_id")
+      .select("id,campaign_id,company_id")
       .eq("instantly_campaign_id", p.campaign_id)
       .maybeSingle();
-    if (sub) { subId = sub.id; masterId = sub.campaign_id; }
+    if (sub) { subId = sub.id; masterId = sub.campaign_id; companyId = sub.company_id; }
   }
+
+  // Both tenants share one Instantly workspace, so Instantly posts every
+  // company's replies to this single URL — the handler itself must be
+  // cross-company. The sub-campaign is what identifies the owner, so from here
+  // on use a client scoped to it: that keeps the lead lookup from matching a
+  // same-email lead in the OTHER tenant, and stamps company_id on the rows
+  // written below. Falls back to the unscoped client only for events we could
+  // not attribute to a campaign at all, which are stored unmapped as before.
+  const cdb = companyId ? createScopedClient(companyId) : db;
 
   // Resolved once and reused below: which lead this event is about. Steps 4/6/7
   // and the activity log all need it, and it cannot change mid-request.
-  const leadId = p.lead_email ? await findActiveLeadIdByEmail(db, p.lead_email) : null;
+  const leadId = p.lead_email ? await findActiveLeadIdByEmail(cdb, p.lead_email) : null;
 
   // 4) Resolve campaign_lead via master + lead
   let campaignLeadId: string | null = null;
   if (masterId && leadId) {
-    const { data: cl } = await db
+    const { data: cl } = await cdb
       .from("campaign_leads")
       .select("id")
       .eq("campaign_id", masterId)
@@ -141,7 +152,7 @@ export async function POST(req: NextRequest) {
         `[webhook] reply_received: campaign+lead resolved but no active campaign_leads link — ` +
         `master_campaign=${masterId} lead_id=${leadId} lead_email=${p.lead_email}`,
       );
-      await db.from("audit_log").insert({
+      await cdb.from("audit_log").insert({
         action: "reply_unmapped_stale_campaign_link",
         entity_type: "reply_event",
         diff: { master_campaign_id: masterId, lead_id: leadId, lead_email: p.lead_email, instantly_sub_campaign: p.campaign_id ?? null },
@@ -155,7 +166,7 @@ export async function POST(req: NextRequest) {
   // so an empty result means Instantly re-delivered an event we already have.
   // The activity log below keys off that: without it, every webhook retry would
   // add another "Reply received" line to the lead's timeline.
-  const { data: insertedEvents } = await db.from("reply_events").upsert(
+  const { data: insertedEvents } = await cdb.from("reply_events").upsert(
     {
       event_uid:              eventUid,
       campaign_id:            masterId,
@@ -185,7 +196,7 @@ export async function POST(req: NextRequest) {
     //     CHANGES for this lead — not on every duplicate/retried webhook delivery of the
     //     same event, which would otherwise double-count, and
     // (3) the cross-campaign echo check below.
-    const { data: beforeState } = await db
+    const { data: beforeState } = await cdb
       .from("campaign_leads")
       .select("crm_status, interest_status, last_reply_at")
       .eq("id", campaignLeadId)
@@ -208,7 +219,7 @@ export async function POST(req: NextRequest) {
       // lead in just one campaign (the common case) this is always true.
       let isFreshestThread = true;
       if (leadId) {
-        const { data: siblings } = await db
+        const { data: siblings } = await cdb
           .from("campaign_leads")
           .select("id, last_reply_at")
           .eq("lead_id", leadId);
@@ -236,7 +247,7 @@ export async function POST(req: NextRequest) {
       patch.last_reply_body = replyBody;
     }
     if (Object.keys(patch).length > 1) {
-      await db.from("campaign_leads").update(patch).eq("id", campaignLeadId);
+      await cdb.from("campaign_leads").update(patch).eq("id", campaignLeadId);
     }
 
     // Increment campaign-level replied_count ONLY the first time this lead replies.
@@ -244,7 +255,7 @@ export async function POST(req: NextRequest) {
     // producing reply rates above 100% — confirmed bug in test campaigns.
     if (p.event_type === "reply_received" && masterId && !wasAlreadyReplied) {
       try {
-        await db.rpc("increment_campaign_counter", {
+        await cdb.rpc("increment_campaign_counter", {
           p_campaign_id: masterId,
           p_column: "replied_count",
         });
@@ -259,9 +270,9 @@ export async function POST(req: NextRequest) {
       const temp = INTEREST_TO_TEMPERATURE[interest as number];
       try {
         if (temp === "hot") {
-          await db.rpc("increment_campaign_counter", { p_campaign_id: masterId, p_column: "hot_count" });
+          await cdb.rpc("increment_campaign_counter", { p_campaign_id: masterId, p_column: "hot_count" });
         } else if (temp === "cold") {
-          await db.rpc("increment_campaign_counter", { p_campaign_id: masterId, p_column: "cold_count" });
+          await cdb.rpc("increment_campaign_counter", { p_campaign_id: masterId, p_column: "cold_count" });
         }
       } catch { /* non-fatal */ }
     }
@@ -274,7 +285,7 @@ export async function POST(req: NextRequest) {
   if (leadId && isFirstDelivery) {
     const mapped = LEAD_EVENT_BY_INSTANTLY_EVENT[p.event_type];
     if (mapped) {
-      await logLeadEvent(db, leadId, mapped.event, mapped.detail(p.step ?? null), {
+      await logLeadEvent(cdb, leadId, mapped.event, mapped.detail(p.step ?? null), {
         metadata: { campaign_id: masterId, step: p.step ?? null, variant: p.variant ?? null },
       });
     }
@@ -284,7 +295,7 @@ export async function POST(req: NextRequest) {
     // exact confusion this guard exists to prevent.
     const interestDetail = interestApplied ? INTEREST_DETAIL_BY_EVENT[p.event_type] : undefined;
     if (interestDetail) {
-      await logLeadEvent(db, leadId, "interest_changed", interestDetail, {
+      await logLeadEvent(cdb, leadId, "interest_changed", interestDetail, {
         metadata: { campaign_id: masterId, interest_status: INTEREST_BY_EVENT[p.event_type] ?? null },
       });
     }
@@ -292,13 +303,13 @@ export async function POST(req: NextRequest) {
 
   // 7) Org-level hard opt-out: unsubscribe blocks the whole org
   if (p.event_type === "lead_unsubscribed" && leadId) {
-    const { data: lead } = await db
+    const { data: lead } = await cdb
       .from("leads")
       .select("organization_id")
       .eq("id", leadId)
       .maybeSingle();
     if (lead?.organization_id) {
-      await db
+      await cdb
         .from("organizations")
         .update({ unsubscribed: true })
         .eq("id", lead.organization_id);
@@ -309,8 +320,8 @@ export async function POST(req: NextRequest) {
   if ((p.event_type === "reply_received" || p.event_type === "email_sent") && p.email_id) {
     try {
       const email = await getInstantlyEmail(p.email_id);
-      const { data: ev } = await db.from("reply_events").select("id").eq("event_uid", eventUid).maybeSingle();
-      await ingestInstantlyEmail(db, email, {
+      const { data: ev } = await cdb.from("reply_events").select("id").eq("event_uid", eventUid).maybeSingle();
+      await ingestInstantlyEmail(cdb, email, {
         replyEventId: ev?.id,
         masterCampaignId: masterId,
         campaignLeadId: campaignLeadId ?? undefined,

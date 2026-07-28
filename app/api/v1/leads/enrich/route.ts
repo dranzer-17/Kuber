@@ -1,11 +1,11 @@
 import { NextRequest, after } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { EnrichSchema } from "@/lib/validators/leads";
 import { enrichLeads, type EnrichTarget } from "@/lib/services/enrich-leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { getServiceSecret } from "@/lib/services/service-keys";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 300;
 
@@ -19,7 +19,8 @@ export const maxDuration = 300;
 const ENRICH_BATCH_SIZE = 150;
 
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = EnrichSchema.safeParse(body);
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
     return fail(503, "UPSTREAM_APOLLO", "Apollo API key not configured — add one in Settings > Keys");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   let q = db
     .from("leads")

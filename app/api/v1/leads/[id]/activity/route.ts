@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { assertLeadAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 type EventMeta = {
   assignee_id?: string;
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   // Employees may only see their own assigned leads' activity.
   try { await assertLeadAccess(db, user, id); } catch (r) { return r as Response; }
 

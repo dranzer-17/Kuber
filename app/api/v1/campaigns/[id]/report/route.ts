@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import {
   CAMPAIGN_BUCKET_LABELS,
@@ -9,6 +8,7 @@ import {
   type CampaignKanbanBucket,
 } from "@/lib/campaign-status";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 type DraftRow = { status: string } | { status: string }[] | null;
 
@@ -25,7 +25,7 @@ export async function GET(
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: campaign } = await db

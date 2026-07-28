@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Surfaces recent upstream credit/auth failures so the UI can show a clear
 // "top up / fix your API key" banner instead of leaving managers to decode raw
@@ -20,9 +20,10 @@ const LOOKBACK_HOURS = 6;
 type ServiceIssue = { service: string; kind: "credits" | "auth"; message: string; severity: "warning" | "critical" };
 
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const since = new Date(Date.now() - LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
 
   const { data: rows } = await db

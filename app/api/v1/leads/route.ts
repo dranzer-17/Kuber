@@ -1,13 +1,13 @@
 import { NextRequest, after } from "next/server";
 import crypto from "crypto";
 import { requireAuth, requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateLeadSchema, LeadListQuerySchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
 import { logLeadEvent } from "@/lib/services/lead-events";
 import { getServiceSecret } from "@/lib/services/service-keys";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 async function upsertOrg(
   db: ReturnType<typeof import("@/lib/supabase/admin").createAdminClient>,
@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
   const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, q: search, page, limit } = parsed.data;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   let q = db
     .from("leads")
@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
 
   const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, assigned_to: requestedAssignedTo, ...leadFields } = parsed.data;
   const assigned_to = requestedAssignedTo ?? null;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // A manager-supplied assignee must be a real, active user — same check the
   // Apollo/Excel import paths perform.

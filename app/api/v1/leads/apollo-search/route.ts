@@ -1,6 +1,5 @@
 import { NextRequest, after } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { fail, ok } from "@/lib/api-response";
 import { ApolloSearchSchema } from "@/lib/validators/leads";
 import { searchPeople } from "@/lib/services/apollo";
@@ -10,11 +9,12 @@ import { resolveApolloKeyword } from "@/lib/constants";
 // full target shape) — deliberately a narrower local type, not EnrichTarget.
 type NewLeadTarget = { id: string; apollo_id: string; first_name: string | null; organization_id: string | null; org_name: string | null };
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireManager>>;
   try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Phase 1: Search all keywords/pages, batch-insert leads ───────────────
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   if (assigned_to) {
     const { data: employee } = await db.from("profiles").select("id, is_active").eq("id", assigned_to).maybeSingle();

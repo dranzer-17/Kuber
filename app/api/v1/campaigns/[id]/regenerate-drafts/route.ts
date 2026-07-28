@@ -1,12 +1,12 @@
 import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { BulkRegenerateSchema } from "@/lib/validators/drafts";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { getActiveJob, resolveRegenerationTargets } from "@/lib/services/regeneration-jobs";
 import { SERVICE_ROLE_USER_ID } from "@/lib/constants";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 /**
  * Enqueue a bulk draft regeneration for a campaign.
@@ -31,7 +31,7 @@ export async function POST(
   const parsed = BulkRegenerateSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const stepNumber = parsed.data.step_number;
@@ -125,7 +125,7 @@ export async function GET(
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const url = new URL(req.url);

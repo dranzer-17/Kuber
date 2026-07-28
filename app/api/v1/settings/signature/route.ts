@@ -1,14 +1,14 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 /** GET — returns the calling admin's signature (or empty defaults). */
 export async function GET(req: NextRequest) {
-  let user: { id: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data } = await db
     .from("user_signatures")
     .select("full_name, title, contact, email")
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
 /** PUT — upsert the calling admin's signature. */
 export async function PUT(req: NextRequest) {
-  let user: { id: string; email?: string };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
@@ -28,7 +28,7 @@ export async function PUT(req: NextRequest) {
     return fail(400, "VALIDATION_ERROR", "full_name is required");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { error } = await db.from("user_signatures").upsert(
     {
       user_id: user.id,

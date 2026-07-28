@@ -1,5 +1,6 @@
 import { NextRequest, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createScopedClient } from "@/lib/supabase/scoped";
 import { complete } from "@/lib/services/llm";
 import { scrapePage } from "@/lib/services/firecrawl";
 import { internalAppBaseUrl } from "@/lib/internal-url";
@@ -639,8 +640,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: claimError.message }, { status: 500 });
   }
 
-  const orgs = ((claimedOrgs ?? []) as Array<{ id: string; domain: string | null; name: string; scraped_markdown: string | null; scraped_at: string | null }>)
-    .map((o) => ({ id: o.id, domain: o.domain, name: o.name, scraped_markdown: o.scraped_markdown, scraped_at: o.scraped_at }));
+  // company_id rides along from claim_queued_orgs (it returns SETOF
+  // organizations) so each org can be processed through its OWN company's
+  // scoped client below — the relay itself is cross-company.
+  const orgs = ((claimedOrgs ?? []) as Array<{ id: string; company_id: string; domain: string | null; name: string; scraped_markdown: string | null; scraped_at: string | null }>)
+    .map((o) => ({ id: o.id, company_id: o.company_id, domain: o.domain, name: o.name, scraped_markdown: o.scraped_markdown, scraped_at: o.scraped_at }));
 
   if (orgs.length === 0) {
     await insertLog(db, {
@@ -664,21 +668,26 @@ export async function POST(req: NextRequest) {
   // state between orgs in this batch either. Running them one at a time was
   // the single biggest throughput bottleneck: 5 orgs sequentially could take
   // 5x as long as running them together, for no correctness benefit.
-  const failedOrgIds: string[] = [];
+  const failedOrgIds: Array<{ orgId: string; companyId: string }> = [];
   const results = await Promise.allSettled(orgs.map(async (org) => {
+    // A batch can legitimately mix companies, so every write this org triggers
+    // (enrichment_logs, lead updates, lead_events, auto-assignment) goes through
+    // a client scoped to the org's own tenant. Nothing downstream needs to know
+    // about companies — the scoped client stamps and filters for them.
+    const orgDb = createScopedClient(org.company_id);
     try {
-      const outcome = await processOneOrg(db, org);
-      if (outcome === "merged") return { orgId: org.id, ok: true };
+      const outcome = await processOneOrg(orgDb, org);
+      if (outcome === "merged") return { orgId: org.id, companyId: org.company_id, ok: true };
       // Check if it completed (vs failed inside processOneOrg)
-      const { data: updated } = await db
+      const { data: updated } = await orgDb
         .from("organizations")
         .select("enrichment_stage")
         .eq("id", org.id)
         .single();
-      return { orgId: org.id, ok: updated?.enrichment_stage === "done" };
+      return { orgId: org.id, companyId: org.company_id, ok: updated?.enrichment_stage === "done" };
     } catch {
-      await markFailed(db, org.id, "SCRAPE_FAILED", "Unexpected error in processOneOrg").catch(() => {});
-      return { orgId: org.id, ok: false };
+      await markFailed(orgDb, org.id, "SCRAPE_FAILED", "Unexpected error in processOneOrg").catch(() => {});
+      return { orgId: org.id, companyId: org.company_id, ok: false };
     }
   }));
 
@@ -691,7 +700,9 @@ export async function POST(req: NextRequest) {
       succeeded++;
     } else {
       failed++;
-      failedOrgIds.push(result.status === "fulfilled" ? result.value.orgId : "unknown");
+      if (result.status === "fulfilled") {
+        failedOrgIds.push({ orgId: result.value.orgId, companyId: result.value.companyId });
+      }
     }
   }
 
@@ -699,8 +710,8 @@ export async function POST(req: NextRequest) {
   // whose enrichment FAILED become input_required and are now campaign-eligible via
   // the generic template — assign them too, so they don't silently pile up in the
   // manager's pool under a non-manual assignment strategy. (§2.6)
-  for (const orgId of failedOrgIds) {
-    await autoAssignEnrichedLeads(db, orgId).catch(() => {});
+  for (const { orgId, companyId } of failedOrgIds) {
+    await autoAssignEnrichedLeads(createScopedClient(companyId), orgId).catch(() => {});
   }
 
   // ── Step 4: Self-trigger if more queued orgs remain ───────────────────────

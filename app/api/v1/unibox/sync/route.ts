@@ -14,6 +14,10 @@ export async function POST(req: NextRequest) {
     try { await requireAuth(req); } catch (r) { return r as Response; }
   }
 
+  // Cross-company by design: both tenants share one Instantly workspace, so the
+  // sync pulls the whole mailbox and runUniboxSync resolves each email's
+  // company from the campaign it belongs to. Auth above is only a gate on who
+  // may trigger a sync, not a tenant scope.
   const result = await runUniboxSync(createAdminClient(), 8);
   return ok(result);
 }

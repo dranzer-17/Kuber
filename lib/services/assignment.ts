@@ -99,7 +99,22 @@ export type Lane = "global";
  */
 export async function pickRoundRobin(db: Db, lane: Lane, candidateIds: string[], count: number): Promise<string[]> {
   if (candidateIds.length === 0 || count < 1) return [];
+
+  // The cursor is per-company (assignment_cursors is keyed on company_id, lane),
+  // so each tenant rotates over its own employees independently. Resolve the
+  // company from a candidate rather than taking it as a parameter: candidates
+  // are always profiles of one company, and this stays correct whether the
+  // caller handed us a company-scoped client or the enrichment relay's
+  // unscoped admin client. One lookup per batch, not per lead.
+  const { data: owner } = await db
+    .from("profiles")
+    .select("company_id")
+    .eq("id", candidateIds[0])
+    .maybeSingle();
+  if (!owner?.company_id) return [];
+
   const { data, error } = await db.rpc("assignment_pick_round_robin", {
+    p_company_id: owner.company_id,
     p_lane: lane,
     p_candidate_ids: candidateIds,
     p_count: count,

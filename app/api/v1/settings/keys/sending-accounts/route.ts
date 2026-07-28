@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireManager, requireSuperAdmin } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { getSendingAccounts, SENDING_ACCOUNTS_SETTING_KEY } from "@/lib/services/service-keys";
 import { listInstantlyAccounts } from "@/lib/services/instantly";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 const BodySchema = z.object({
   email: z.string().trim().email("Select a valid sending account"),
@@ -20,9 +20,10 @@ const STATUS_LABEL: Record<number, string> = {
 };
 
 export async function GET(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try {
     const [accounts, configured] = await Promise.all([
       listInstantlyAccounts(),
@@ -45,7 +46,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  try { await requireSuperAdmin(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireSuperAdmin>>;
+  try { user = await requireSuperAdmin(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = BodySchema.safeParse(body);
@@ -72,7 +74,7 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { error } = await db.from("settings").upsert(
     { key: SENDING_ACCOUNTS_SETTING_KEY, value: selected.email.toLowerCase() },
     { onConflict: "key" },

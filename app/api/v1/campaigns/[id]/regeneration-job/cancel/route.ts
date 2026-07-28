@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { getActiveJob } from "@/lib/services/regeneration-jobs";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 /**
  * Cancel the campaign's running regeneration.
@@ -21,7 +21,7 @@ export async function POST(
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => ({})) as { step_number?: number };

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 30;
 
@@ -16,7 +16,7 @@ const ALLOWED = new Set([
 const MAX_BYTES = 10 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
-  let _user: { id: string };
+  let _user: Awaited<ReturnType<typeof requireAuth>>;
   try { _user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const form = await req.formData();
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (!ALLOWED.has(file.type)) return fail(400, "VALIDATION_ERROR", `Unsupported file type: ${file.type}`);
   if (file.size > MAX_BYTES) return fail(400, "VALIDATION_ERROR", "File exceeds 10MB limit");
 
-  const db = createAdminClient();
+  const db = dbForUser(_user);
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `uploads/${crypto.randomUUID()}/${safeName}`;
 

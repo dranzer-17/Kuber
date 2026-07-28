@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 30;
 
@@ -20,9 +21,10 @@ async function getSignedLogoUrl(db: ReturnType<typeof createAdminClient>, path: 
 }
 
 export async function GET(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data, error } = await db
     .from("settings")
     .select("key, value")
@@ -36,7 +38,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const form = await req.formData();
   const file = form.get("file") as File | null;
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest) {
   if (!ALLOWED.has(file.type)) return fail(400, "VALIDATION_ERROR", `Unsupported file type: ${file.type}`);
   if (file.size > MAX_BYTES) return fail(400, "VALIDATION_ERROR", "Logo exceeds 2MB limit");
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const safeName = sanitizeFilename(file.name || "logo");
   const path = `branding/logo/${crypto.randomUUID()}-${safeName}`;
 
@@ -72,9 +75,10 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data, error } = await db
     .from("settings")
     .select("value")

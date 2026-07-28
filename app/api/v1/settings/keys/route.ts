@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateProviderKeySchema } from "@/lib/validators/provider-keys";
 import { getLlmTierRoles, PROVIDER_META, resolveLlmTierOrder } from "@/lib/services/providers/registry";
 import { ENV_KEY_VARS } from "@/lib/services/provider-keys";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 type ProviderKeyRow = {
   id: string; provider: string; label: string; secret_last4: string;
@@ -18,9 +18,10 @@ type ProviderKeyRow = {
 const KEY_SELECT = "id, provider, label, secret_last4, priority, is_active, status, cooling_off_until, last_used_at, last_checked_at, last_error, last_error_at, created_at";
 
 export async function GET(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const [{ data: keys }, { data: settings }, tierRoles, tierOrder] = await Promise.all([
     db.from("provider_keys").select(KEY_SELECT).order("priority", { ascending: true }),
     db.from("provider_settings").select("provider, selected_model"),
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
   // constraint — adding a new provider later never needs a migration.
   if (!(provider in PROVIDER_META)) return fail(400, "INVALID_PROVIDER", `Unknown provider "${provider}"`);
 
-  const db = createAdminClient();
+  const db = dbForUser(caller);
 
   const { data: vaultId, error: vaultError } = await db.rpc("provider_key_create_secret", {
     p_secret: secret,

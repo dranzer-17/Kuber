@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { BulkApproveSchema } from "@/lib/validators/drafts";
 import { syncApprovedDraftToInstantly } from "@/lib/services/draft-sync";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { logLeadEvent } from "@/lib/services/lead-events";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   const parsed = BulkApproveSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const now = new Date().toISOString();
 
   let approved = 0;

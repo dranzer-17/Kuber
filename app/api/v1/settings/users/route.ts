@@ -1,14 +1,15 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CreateUserSchema } from "@/lib/validators/users";
 import { canonicalCountryList } from "@/lib/territory";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { data, error } = await db
     .from("profiles")
     .select("id, email, full_name, role, territory_countries, is_active, availability_status, is_super_admin, created_at")
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
     return fail(403, "FORBIDDEN", "Only the Super Admin can create manager accounts.");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(caller);
 
   const { data: created, error: createError } = await db.auth.admin.createUser({
     email,

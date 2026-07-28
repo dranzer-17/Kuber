@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchUserSchema } from "@/lib/validators/users";
 import { canonicalCountryList } from "@/lib/territory";
@@ -11,6 +10,7 @@ import {
   type HandoverStrategy,
   type HandoverSummary,
 } from "@/lib/services/handover";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let caller: Awaited<ReturnType<typeof requireManager>>;
@@ -22,7 +22,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
   const { password, role, territory_countries, full_name, is_active, availability_status, reassign_to, handover_strategy } = parsed.data;
 
-  const db = createAdminClient();
+  const db = dbForUser(caller);
 
   const { data: existing, error: existingErr } = await db
     .from("profiles")

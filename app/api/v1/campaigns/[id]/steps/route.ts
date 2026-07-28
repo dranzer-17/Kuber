@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireAuth, requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { CampaignStepsSchema } from "@/lib/validators/campaigns";
 import { patchInstantlySequences, type InstantlyStep } from "@/lib/services/instantly";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(
   req: NextRequest,
@@ -13,7 +13,7 @@ export async function GET(
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
   const { data } = await db
     .from("campaign_steps")
@@ -38,7 +38,7 @@ export async function PUT(
   const parsed = CampaignStepsSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid steps", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   // Replace all steps for this campaign

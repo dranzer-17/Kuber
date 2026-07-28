@@ -1,6 +1,4 @@
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
-import { getUserRole } from "@/lib/auth/roles";
+import { requireAppSessionContext } from "@/lib/server/session";
 import { getCampaigns } from "@/lib/server/campaigns";
 import { getDashboardAnalytics, getEmployeeDashboard, type DashboardAnalytics } from "@/lib/server/dashboard";
 import { getImports } from "@/lib/server/imports";
@@ -16,21 +14,16 @@ const EMPTY_ANALYTICS: DashboardAnalytics = {
 };
 
 export default async function DashboardPage() {
-  const db = createAdminClient();
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const role = getUserRole(user);
+  const { db, userId, role } = await requireAppSessionContext();
   const isManager = role === "manager";
 
   const [campaigns, analytics, imports] = await Promise.all([
-    getCampaigns(db, isManager ? undefined : user?.id),
+    getCampaigns(db, isManager ? undefined : userId),
     // Employees get the same dashboard, scoped to their own leads + campaigns
     // (planning.md Phase 7 / Q9).
     isManager
       ? getDashboardAnalytics(db)
-      : user?.id
-        ? getEmployeeDashboard(db, user.id)
-        : Promise.resolve(EMPTY_ANALYTICS),
+      : getEmployeeDashboard(db, userId),
     isManager ? getImports(db) : Promise.resolve([]),
   ]);
 

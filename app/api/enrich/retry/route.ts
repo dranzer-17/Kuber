@@ -1,17 +1,18 @@
 import { NextRequest, after } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function POST(req: NextRequest) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const orgId = body?.org_id;
   if (!orgId || typeof orgId !== "string") return fail(400, "VALIDATION_ERROR", "org_id is required");
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const { data: org, error } = await db
     .from("organizations")

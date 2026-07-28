@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { removeLeadFromOutreach } from "@/lib/services/lead-removal";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 120;
 
@@ -12,13 +12,14 @@ const BulkDeleteSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = BulkDeleteSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "ids must be a non-empty array of lead IDs", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const { error, count } = await db
     .from("leads")
     .update({ is_deleted: true }, { count: "exact" })

@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { getThreadMessages, sendThreadReply } from "@/lib/services/unibox";
 import { assertThreadAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     return fail(400, "VALIDATION_ERROR", "thread_id, subject, and body_html required");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const thread = await getThreadMessages(db, body.thread_id);
   try {
     await assertThreadAccess(db, user, {

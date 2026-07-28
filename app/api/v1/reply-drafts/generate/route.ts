@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { generateReplyDraft } from "@/lib/services/generate-reply";
 import { assertThreadAccess } from "@/lib/auth/scope";
 import { stripQuotedText } from "@/lib/email-display";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 55;
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     return fail(400, "VALIDATION_ERROR", "thread_id or campaign_lead_id required");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // Self-heal: any draft left in 'generating' by a crashed run would otherwise
   // keep the composer stuck on the spinner forever.

@@ -1,16 +1,17 @@
 import { NextRequest, after } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { internalAppBaseUrl } from "@/lib/internal-url";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Bulk version of the single-org rescrape/retry — requeues every failed org,
 // instead of managers clicking "retry" one company at a time (there was no
 // bulk path before this, and failures pile up fast on a large import).
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // One UPDATE with the same WHERE the SELECT would have used — not a
   // select-ids-then-.in(ids) round trip. At batch scale that id list runs to

@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import type { Session } from "@supabase/supabase-js";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { isAppUser } from "@/lib/auth/roles";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createScopedClient } from "@/lib/supabase/scoped";
 
 /** Cookie session validated via getUser — redirects if not a provisioned manager/employee. */
 export async function requireAppSession(): Promise<Session> {
@@ -17,6 +18,39 @@ export async function requireAppSession(): Promise<Session> {
   if (!session) redirect("/");
 
   return session;
+}
+
+/**
+ * Session, role and a COMPANY-SCOPED client for server components.
+ *
+ * Server components fetch their own data and never pass through the API layer's
+ * requireAuth, so without this they would run on the unscoped admin client and
+ * render every tenant's rows. Anything a page renders should come from the `db`
+ * returned here.
+ */
+export async function requireAppSessionContext(): Promise<{
+  session: Session;
+  userId: string;
+  role: "manager" | "employee";
+  companyId: string;
+  db: SupabaseClient;
+}> {
+  const session = await requireAppSession();
+  const { data: profile } = await createAdminClient()
+    .from("profiles")
+    .select("role, is_active, company_id")
+    .eq("id", session.user.id)
+    .maybeSingle();
+
+  if (!profile || !profile.is_active || !profile.company_id) redirect("/");
+
+  return {
+    session,
+    userId: session.user.id,
+    role: profile.role as "manager" | "employee",
+    companyId: profile.company_id as string,
+    db: createScopedClient(profile.company_id as string),
+  };
 }
 
 /**

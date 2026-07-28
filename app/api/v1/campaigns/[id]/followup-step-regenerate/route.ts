@@ -7,7 +7,8 @@ import { regenerateFollowUpTemplateText } from "@/lib/services/followup-regenera
 // Campaign-level follow-up template rewrite for the Sequences tab — no per-lead
 // draft writes; the client saves via PUT .../steps when the user clicks Save.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireAuth(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   await params; // campaign id validated by auth + client context
   const body = await req.json().catch(() => null);

@@ -1,16 +1,16 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { sendCampaign } from "@/lib/services/campaign-fanout";
 import { SendCampaignSchema } from "@/lib/validators/campaigns";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
-  try { await assertCampaignAccess(createAdminClient(), user, id); } catch (r) { return r as Response; }
+  try { await assertCampaignAccess(dbForUser(user), user, id); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => ({}));
   const parsed = SendCampaignSchema.safeParse(body);

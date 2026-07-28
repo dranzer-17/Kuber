@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { FollowUpRegenerateSchema } from "@/lib/validators/drafts";
 import { regenerateFollowUpText } from "@/lib/services/followup-regenerate";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { logLeadEvent } from "@/lib/services/lead-events";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Deliberately separate from /drafts/[id]/regenerate (the step-1 draft's
 // regenerate endpoint) and from generateOneDraft entirely. Follow-up
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const parsed = FollowUpRegenerateSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: cl } = await db

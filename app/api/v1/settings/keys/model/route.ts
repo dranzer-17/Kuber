@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { SetProviderModelSchema } from "@/lib/validators/provider-keys";
 import { PROVIDER_META } from "@/lib/services/providers/registry";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function PUT(req: NextRequest) {
   let caller: Awaited<ReturnType<typeof requireManager>>;
@@ -16,7 +16,7 @@ export async function PUT(req: NextRequest) {
 
   if (!(provider in PROVIDER_META)) return fail(400, "INVALID_PROVIDER", `Unknown provider "${provider}"`);
 
-  const db = createAdminClient();
+  const db = dbForUser(caller);
   // null clears back to the env var / hardcoded default (see resolveModel()).
   const { data, error } = await db
     .from("provider_settings")

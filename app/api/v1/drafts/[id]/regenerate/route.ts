@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { RegenerateDraftSchema } from "@/lib/validators/drafts";
 import { regenerateOneDraft } from "@/lib/services/regenerate-draft";
 import { assertDraftAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 60;
 
@@ -26,7 +26,7 @@ export async function POST(
   const parsed = RegenerateDraftSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertDraftAccess(db, user, id); } catch (r) { return r as Response; }
 
   const result = await regenerateOneDraft(db, id, {

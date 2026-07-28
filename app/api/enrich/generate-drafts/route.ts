@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createScopedClient } from "@/lib/supabase/scoped";
 import { after } from "next/server";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { safeSecretEqual } from "@/lib/auth/secret";
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   const { data: campaign } = await db
     .from("campaigns")
-    .select("id, name, human_in_loop, status, ai_prompt_context")
+    .select("id, name, human_in_loop, status, ai_prompt_context, company_id")
     .eq("id", campaignId)
     .maybeSingle();
 
@@ -38,18 +39,24 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Campaign not found" }, { status: 404 });
   }
 
+  // This route is triggered internally (shared secret, no user session), so it
+  // has no company of its own — the campaign it was handed supplies one. Every
+  // draft, prompt read and lead update below goes through a client scoped to
+  // it, which is also what stamps company_id on the email_drafts rows.
+  const cdb = createScopedClient(campaign.company_id as string);
+
   // Only STEP-1 runs drive the campaign's status (draft ↔ processing). A
   // follow-up (step > 1) run happens on an already-ACTIVE campaign — flipping
   // its status here dragged live campaigns back to "Draft" in the UI
   // (planning.md Phase 6.4).
   const drivesStatus = stepNumber === 1;
 
-  const targets = await fetchDraftTargets(db, campaignId, 10, stepNumber);
+  const targets = await fetchDraftTargets(cdb, campaignId, 10, stepNumber);
 
   if (targets.length === 0) {
-    const pending = await countPendingDrafts(db, campaignId);
+    const pending = await countPendingDrafts(cdb, campaignId);
     if (pending === 0 && drivesStatus && campaign.status === "processing") {
-      await db.from("campaigns").update({
+      await cdb.from("campaigns").update({
         status: "draft",
         updated_at: new Date().toISOString(),
       }).eq("id", campaignId);
@@ -58,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (drivesStatus && ["draft", "processing"].includes(campaign.status)) {
-    await db.from("campaigns").update({
+    await cdb.from("campaigns").update({
       status: "processing",
       updated_at: new Date().toISOString(),
     }).eq("id", campaignId);
@@ -69,7 +76,7 @@ export async function POST(req: NextRequest) {
 
   for (const target of targets) {
     const result = await generateOneDraft(
-      db,
+      cdb,
       target,
       campaignId,
       campaign.human_in_loop,
@@ -84,7 +91,7 @@ export async function POST(req: NextRequest) {
     else failed++;
   }
 
-  const remaining = await countPendingDrafts(db, campaignId);
+  const remaining = await countPendingDrafts(cdb, campaignId);
 
   if (remaining > 0) {
     const baseUrl = internalAppBaseUrl(req);
@@ -102,7 +109,7 @@ export async function POST(req: NextRequest) {
       }).catch(() => {});
     });
   } else if (drivesStatus) {
-    await db.from("campaigns").update({
+    await cdb.from("campaigns").update({
       status: "draft",
       updated_at: new Date().toISOString(),
     }).eq("id", campaignId);

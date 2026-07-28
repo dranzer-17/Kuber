@@ -88,7 +88,21 @@ export interface LlmTierRoles {
  *  null on a fresh install — the seeded llm_tier_config row always exists
  *  (see migration), so this is a plain PK lookup, never an empty table. */
 export async function getLlmTierRoles(db: SupabaseClient): Promise<LlmTierRoles> {
-  const { data } = await db.from("llm_tier_config").select("primary_provider, fallback_provider").eq("id", true).maybeSingle();
+  // .limit(1) matters since the multi-tenant split: llm_tier_config now holds
+  // one row PER COMPANY. A company-scoped client (every user-facing caller)
+  // sees exactly one and this is a no-op. The enrichment relay's pre-flight
+  // gate, though, calls this on the UNSCOPED client before it knows which
+  // companies its batch spans — without the limit that returns a
+  // "multiple rows" error, which this destructuring silently swallows, quietly
+  // ignoring the admin's configured Primary/Fallback and falling back to the
+  // hardcoded default order. Any company's row answers the pre-flight question
+  // ("is some LLM provider usable at all") because the keys are shared.
+  const { data } = await db
+    .from("llm_tier_config")
+    .select("primary_provider, fallback_provider")
+    .order("company_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
   const primary = data?.primary_provider as LlmProviderId | undefined;
   const fallback = data?.fallback_provider as LlmProviderId | undefined;
   return {

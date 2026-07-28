@@ -1,18 +1,19 @@
 import { NextRequest } from "next/server";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { ReorderProviderKeysSchema } from "@/lib/validators/provider-keys";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function PUT(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = ReorderProviderKeysSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
   const { provider, orderedIds } = parsed.data;
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
   const nowIso = new Date().toISOString();
   // Sequential updates keep this simple for the tiny row counts expected
   // here (a handful of keys per provider) — no bulk-upsert RPC needed.

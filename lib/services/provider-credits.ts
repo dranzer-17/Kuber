@@ -20,8 +20,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const FIRECRAWL_MIN_CREDITS = 5;
 const OPENROUTER_MIN_BALANCE_USD = 0.10;
 
+// Cached in `system_state`, not `settings`: the provider keys are shared across
+// companies, so the balance behind them is one global number — and this is
+// called both from a scoped route (service-health) and from the unscoped
+// enrichment relay, which cannot satisfy settings.company_id (NOT NULL).
 async function getCached(db: Db, key: string): Promise<CreditCheck | null> {
-  const { data } = await db.from("settings").select("value, updated_at").eq("key", key).maybeSingle();
+  const { data } = await db.from("system_state").select("value, updated_at").eq("key", key).maybeSingle();
   if (!data) return null;
   const age = Date.now() - new Date(data.updated_at).getTime();
   if (age > CACHE_TTL_MS) return null;
@@ -29,7 +33,7 @@ async function getCached(db: Db, key: string): Promise<CreditCheck | null> {
 }
 
 async function setCached(db: Db, key: string, value: CreditCheck): Promise<void> {
-  await db.from("settings").upsert(
+  await db.from("system_state").upsert(
     { key, value: JSON.stringify(value), updated_at: new Date().toISOString() },
     { onConflict: "key" },
   );

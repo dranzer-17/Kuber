@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createHash } from "crypto";
 import { listInstantlyCampaignReplies, getInstantlyLeadStatus, getInstantlyEmail } from "@/lib/services/instantly";
 import { ingestInstantlyEmail } from "@/lib/services/unibox";
 import { INTEREST_TO_TEMPERATURE } from "@/lib/constants";
 import { ok } from "@/lib/api-response";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 function stripQuotedText(text: string | null | undefined): string | null {
   if (!text) return null;
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id: masterCampaignId } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, masterCampaignId); } catch (r) { return r as Response; }
 
   // 1. Get all sub-campaign Instantly IDs for this master campaign

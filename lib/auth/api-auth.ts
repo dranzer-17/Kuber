@@ -6,7 +6,19 @@ import { SERVICE_ROLE_USER_ID } from "@/lib/constants";
 
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-export type AuthedUser = { id: string; email?: string; role: AppRole; isSuperAdmin: boolean };
+/**
+ * `companyId` is the tenant every query must be scoped to (see
+ * lib/supabase/scoped.ts). It is null only for the service-role bearer used by
+ * internal server-to-server calls, which legitimately operate across companies
+ * and carry company_id explicitly from the rows they process.
+ */
+export type AuthedUser = {
+  id: string;
+  email?: string;
+  role: AppRole;
+  isSuperAdmin: boolean;
+  companyId: string | null;
+};
 
 function unauthorized(message: string) {
   return Response.json(
@@ -35,7 +47,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
   }
 
   if (SERVICE_ROLE_KEY && token === SERVICE_ROLE_KEY) {
-    return { id: SERVICE_ROLE_USER_ID, email: "admin@service", role: "manager", isSuperAdmin: true };
+    return { id: SERVICE_ROLE_USER_ID, email: "admin@service", role: "manager", isSuperAdmin: true, companyId: null };
   }
 
   const verified = await verifyAccessToken(token);
@@ -46,7 +58,7 @@ export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
   const db = createAdminClient();
   const { data: profile } = await db
     .from("profiles")
-    .select("role, is_active, is_super_admin")
+    .select("role, is_active, is_super_admin, company_id")
     .eq("id", verified.id)
     .maybeSingle();
 
@@ -54,7 +66,20 @@ export async function requireAuth(request: NextRequest): Promise<AuthedUser> {
     throw unauthorized("Account is inactive or not provisioned");
   }
 
-  return { id: verified.id, email: verified.email, role: profile.role as AppRole, isSuperAdmin: profile.is_super_admin };
+  // A provisioned profile always has a company (company_id is NOT NULL). Treat a
+  // missing one as unprovisioned rather than falling through to an unscoped
+  // client, which would expose every tenant's data.
+  if (!profile.company_id) {
+    throw unauthorized("Account is not assigned to a company");
+  }
+
+  return {
+    id: verified.id,
+    email: verified.email,
+    role: profile.role as AppRole,
+    isSuperAdmin: profile.is_super_admin,
+    companyId: profile.company_id as string,
+  };
 }
 
 /** Like requireAuth, but 403s unless the caller is a manager. */

@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { assertCampaignAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 30;
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!ALLOWED.has(file.type)) return fail(400, "BAD_TYPE", `Unsupported type: ${file.type}`);
   if (file.size > MAX_BYTES) return fail(400, "TOO_LARGE", "File exceeds 10MB");
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const { data: cl } = await db.from("campaign_leads").select("campaign_id").eq("id", id).maybeSingle();
   if (!cl) return fail(404, "NOT_FOUND", "Campaign lead not found");
@@ -70,7 +70,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // best-effort remove the stored object
   const { data: row } = await db.from("campaign_leads")

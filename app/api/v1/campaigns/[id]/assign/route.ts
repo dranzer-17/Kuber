@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { logLeadEvents } from "@/lib/services/lead-events";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 const AssignCampaignSchema = z.object({
   assigned_to: z.string().uuid().nullable(),   // null = return to the manager pool
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
   const { assigned_to, reassign_leads } = parsed.data;
 
-  const db = createAdminClient();
+  const db = dbForUser(caller);
 
   const { data: campaign, error: campaignErr } = await db
     .from("campaigns")

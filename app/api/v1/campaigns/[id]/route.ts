@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchCampaignSchema } from "@/lib/validators/campaigns";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { deleteCampaignInstantly } from "@/lib/services/campaign-lifecycle";
 import { computeCampaignStats } from "@/lib/campaign-status";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 60;
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
@@ -53,7 +53,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   try { user = await requireAuth(_req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 
@@ -81,7 +81,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const parsed = PatchCampaignSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   try { await assertCampaignAccess(db, user, id); } catch (r) { return r as Response; }
 

@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { assertDraftAccess } from "@/lib/auth/scope";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // Other sequence steps (e.g. the already-sent step 1) for the same lead in
 // this campaign — shown as read-only context next to a follow-up draft, not
@@ -15,7 +15,7 @@ export async function GET(
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertDraftAccess(db, user, id); } catch (r) { return r as Response; }
 
   const { data: draft } = await db

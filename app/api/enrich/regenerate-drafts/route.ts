@@ -1,5 +1,6 @@
 import { NextRequest, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createScopedClient } from "@/lib/supabase/scoped";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { safeSecretEqual } from "@/lib/auth/secret";
 import { regenerateOneDraft, BULK_REGENERATABLE_STATUSES } from "@/lib/services/regenerate-draft";
@@ -33,11 +34,15 @@ export async function POST(req: NextRequest) {
 
   const { data: job } = await db
     .from("draft_regeneration_jobs")
-    .select("id, campaign_id, status, custom_instruction, requested_by, succeeded, failed")
+    .select("id, campaign_id, status, custom_instruction, requested_by, succeeded, failed, company_id")
     .eq("id", jobId)
     .maybeSingle();
 
   if (!job) return Response.json({ error: "Job not found" }, { status: 404 });
+
+  // Internal trigger (shared secret, no user session): the job row supplies the
+  // company, and everything below writes through a client scoped to it.
+  const cdb = createScopedClient(job.company_id as string);
 
   // Cancelled between batches — stop without touching anything further.
   if (job.status === "cancelled" || job.status === "completed" || job.status === "failed") {
@@ -46,14 +51,14 @@ export async function POST(req: NextRequest) {
 
   const now = new Date().toISOString();
   if (job.status === "queued") {
-    await db.from("draft_regeneration_jobs").update({
+    await cdb.from("draft_regeneration_jobs").update({
       status: "running",
       started_at: now,
       heartbeat_at: now,
     }).eq("id", jobId);
   }
 
-  const { data: items } = await db
+  const { data: items } = await cdb
     .from("draft_regeneration_job_items")
     .select("id, campaign_lead_id, lead_id")
     .eq("job_id", jobId)
@@ -62,11 +67,11 @@ export async function POST(req: NextRequest) {
     .limit(BATCH_SIZE);
 
   if (!items || items.length === 0) {
-    await finishJob(db, jobId);
+    await finishJob(cdb, jobId);
     return Response.json({ processed: 0, status: "no_more_pending" });
   }
 
-  await db
+  await cdb
     .from("draft_regeneration_job_items")
     .update({ status: "running", updated_at: new Date().toISOString() })
     .in("id", items.map((i) => i.id));
@@ -78,18 +83,18 @@ export async function POST(req: NextRequest) {
     // The draft to regenerate is whatever campaign_leads points at NOW, not a
     // draft id captured at enqueue time — the user may have edited or the
     // generator may have replaced it during the minutes this job has been queued.
-    const { data: cl } = await db
+    const { data: cl } = await cdb
       .from("campaign_leads")
       .select("draft_id")
       .eq("id", item.campaign_lead_id)
       .maybeSingle();
 
     if (!cl?.draft_id) {
-      await markItem(db, item.id, "skipped", "Lead no longer has a draft");
+      await markItem(cdb, item.id, "skipped", "Lead no longer has a draft");
       continue;
     }
 
-    const result = await regenerateOneDraft(db, cl.draft_id, {
+    const result = await regenerateOneDraft(cdb, cl.draft_id, {
       userId: job.requested_by ?? undefined,
       customInstruction: job.custom_instruction ?? undefined,
       bulkJobId: jobId,
@@ -99,23 +104,23 @@ export async function POST(req: NextRequest) {
     });
 
     if (result.ok) {
-      await markItem(db, item.id, "done", null);
+      await markItem(cdb, item.id, "done", null);
       succeeded++;
     } else if (result.code === "CONFLICT") {
-      await markItem(db, item.id, "skipped", result.reason);
+      await markItem(cdb, item.id, "skipped", result.reason);
     } else {
-      await markItem(db, item.id, "failed", result.reason);
+      await markItem(cdb, item.id, "failed", result.reason);
       failed++;
     }
   }
 
-  const { data: fresh } = await db
+  const { data: fresh } = await cdb
     .from("draft_regeneration_jobs")
     .select("status, succeeded, failed")
     .eq("id", jobId)
     .maybeSingle();
 
-  await db.from("draft_regeneration_jobs").update({
+  await cdb.from("draft_regeneration_jobs").update({
     succeeded: (fresh?.succeeded ?? 0) + succeeded,
     failed: (fresh?.failed ?? 0) + failed,
     heartbeat_at: new Date().toISOString(),
@@ -126,7 +131,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ processed: items.length, succeeded, failed, status: "cancelled" });
   }
 
-  const remaining = await countPendingItems(db, jobId);
+  const remaining = await countPendingItems(cdb, jobId);
 
   if (remaining > 0 && process.env.INTERNAL_SECRET) {
     const baseUrl = internalAppBaseUrl(req);
@@ -141,7 +146,7 @@ export async function POST(req: NextRequest) {
       }).catch(() => {});
     });
   } else if (remaining === 0) {
-    await finishJob(db, jobId);
+    await finishJob(cdb, jobId);
   }
 
   return Response.json({ processed: items.length, succeeded, failed, remaining });

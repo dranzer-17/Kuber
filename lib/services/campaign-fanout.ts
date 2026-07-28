@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createScopedClient } from "@/lib/supabase/scoped";
 import { COUNTRY_TO_TIMEZONE } from "@/lib/constants";
 import {
   createInstantlyCampaign,
@@ -77,16 +78,21 @@ export async function sendCampaign(
   _actorId: string,
   opts?: { campaignLeadIds?: string[] },
 ): Promise<{ buckets: number; sent: number }> {
-  const db = createAdminClient();
+  // Bootstrap client: used only to look up which company owns this campaign.
+  // Everything after that runs on `db`, scoped to that company, so the
+  // instantly_campaigns / campaign_leads rows written below are stamped with it.
+  const rootDb = createAdminClient();
 
   // 1) Fetch master campaign
-  const { data: campaign, error: cErr } = await db
+  const { data: campaign, error: cErr } = await rootDb
     .from("campaigns")
-    .select("id,name,human_in_loop,window_from,window_to,send_days,schedule_timezone,daily_limit,sender_name,sent_count")
+    .select("id,name,human_in_loop,window_from,window_to,send_days,schedule_timezone,daily_limit,sender_name,sent_count,company_id")
     .eq("id", campaignId)
     .maybeSingle();
   if (cErr) throw new Error(cErr.message);
   if (!campaign) throw new Error("Campaign not found");
+
+  const db = createScopedClient(campaign.company_id as string);
 
   const fallbackTz = campaign.schedule_timezone ?? "Asia/Kolkata";
   const sendDays = (campaign.send_days as Record<string, boolean>) ?? {};

@@ -67,7 +67,17 @@ export async function getActiveKey(
 }
 
 export async function getConfiguredModel(db: Db, provider: ProviderId): Promise<string | null> {
-  const { data } = await db.from("provider_settings").select("selected_model").eq("provider", provider).maybeSingle();
+  // See getLlmTierRoles() — provider_settings is one row PER COMPANY per
+  // provider now. Scoped callers match exactly one; the unscoped enrichment
+  // relay would otherwise get a "multiple rows" error that this destructuring
+  // swallows, silently dropping the admin's selected model.
+  const { data } = await db
+    .from("provider_settings")
+    .select("selected_model")
+    .eq("provider", provider)
+    .order("company_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
   return data?.selected_model ?? null;
 }
 

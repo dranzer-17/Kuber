@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { ok, fail } from "@/lib/api-response";
-import { createAdminClient } from "@/lib/supabase/admin";
 import {
   loadCommentReactionGroups,
 } from "@/lib/comment-reactions";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 type CommentRow = {
   id: string;
@@ -15,7 +16,7 @@ type CommentRow = {
 };
 
 async function serializeComments(
-  db: ReturnType<typeof createAdminClient>,
+  db: SupabaseClient,
   rows: CommentRow[],
   currentUserId: string,
 ) {
@@ -61,7 +62,7 @@ export async function GET(
   try { user = await requireAuth(req); } catch (response) { return response as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (response) { return response as Response; }
 
   const { data, error } = await db
@@ -83,7 +84,7 @@ export async function POST(
   try { user = await requireAuth(req); } catch (response) { return response as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
   try { await assertCampaignAccess(db, user, id); } catch (response) { return response as Response; }
 
   let payload: unknown;

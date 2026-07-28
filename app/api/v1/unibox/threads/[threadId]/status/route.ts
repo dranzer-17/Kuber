@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { assertThreadAccessById } from "@/lib/auth/scope";
 import { setLeadInterestStatus } from "@/lib/services/unibox";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function PATCH(
   req: NextRequest,
@@ -12,13 +12,13 @@ export async function PATCH(
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { threadId } = await params;
-  try { await assertThreadAccessById(createAdminClient(), user, threadId); } catch (r) { return r as Response; }
+  try { await assertThreadAccessById(dbForUser(user), user, threadId); } catch (r) { return r as Response; }
   const body = await req.json().catch(() => null) as { interest_value?: number | null; lead_email?: string } | null;
   if (!body || !("interest_value" in body)) {
     return fail(400, "VALIDATION_ERROR", "interest_value required");
   }
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // Resolve the campaign_lead tied to THIS thread specifically — a lead can be
   // enrolled in multiple campaigns, and the status change must only apply to the

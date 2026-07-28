@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { bulkAssignByStrategy } from "@/lib/services/assignment";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 // skip_already_assigned (spec §4): when true, leads that already have an owner
 // are left untouched — only pool/unassigned leads are processed.
@@ -14,13 +14,14 @@ const BulkAssignSchema = z.discriminatedUnion("strategy", [
 ]);
 
 export async function POST(req: NextRequest) {
-  try { await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = BulkAssignSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // Deactivated target is rejected; an offline target is allowed but the
   // returned summary flags manual_target_offline so the UI can warn (spec §2B).

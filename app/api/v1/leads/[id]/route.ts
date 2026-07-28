@@ -1,17 +1,17 @@
 import { NextRequest } from "next/server";
 import { requireAuth, requireManager } from "@/lib/auth/api-auth";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { ok, fail } from "@/lib/api-response";
 import { PatchLeadSchema } from "@/lib/validators/leads";
 import { logLeadEvent } from "@/lib/services/lead-events";
 import { LEAD_STATUS_MAP } from "@/lib/mappers";
+import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(_req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const { data: lead, error } = await db
     .from("leads")
@@ -57,10 +57,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  try { await requireManager(_req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireManager>>;
+  try { user = await requireManager(_req); } catch (r) { return r as Response; }
 
   const { id } = await params;
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   const { error } = await db.from("leads").update({ is_deleted: true }).eq("id", id);
   if (error) return fail(500, "INTERNAL", error.message);
@@ -74,7 +75,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  let user: { id: string; role: "manager" | "employee" };
+  let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const { id } = await params;
@@ -82,7 +83,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const parsed = PatchLeadSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const db = createAdminClient();
+  const db = dbForUser(user);
 
   // Prior state, read before the update: gates the employee scope check and lets
   // the activity log report real transitions ("from X to Y") rather than echoing
