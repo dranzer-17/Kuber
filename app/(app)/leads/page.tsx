@@ -677,37 +677,58 @@ export default function LeadsPage() {
     if (filters.createdFrom)          params.set("from", filters.createdFrom.toISOString().slice(0, 10));
     if (filters.createdTo)            params.set("to",   filters.createdTo.toISOString().slice(0, 10));
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // Debounced. `searchQuery` is in the dep list and moves on every keystroke,
+    // and Next 15 defaults staleTimes.dynamic to 0 — a dynamic route is never
+    // reused from the client router cache — so each replace() refetched this
+    // route's RSC payload, re-running the server layout's session check and its
+    // exact count over the whole leads table once per character typed. The URL
+    // still lands on exactly the same value; it just settles after typing stops.
+    const handle = setTimeout(() => {
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }, 300);
+    return () => clearTimeout(handle);
   }, [searchQuery, leadsSort, leadsViewMode, leadsEntityMode, filters, pathname, router]);
 
   // Reset to page 1 whenever the filtered result set changes
   useEffect(() => { setPage(1); }, [searchQuery, filters, leadsSort]);
 
   // Load leads only when visiting this page (not globally on every route).
+  // Gated on a ref rather than `leads.length === 0`: an empty list is a
+  // perfectly valid answer — an employee with no assigned leads gets one every
+  // time, and so does anyone whose fetch failed, since loadLeads swallows
+  // errors and leaves the array empty. Inferring "not loaded yet" from it meant
+  // the effect re-fired the instant `loadingLeads` fell back to false, with
+  // nothing to ever satisfy the exit condition: an unbounded request loop that
+  // strobed the page skeleton on and off for as long as the tab stayed open.
+  // Keyed on the user id so a genuine account switch still forces a fresh load,
+  // while the repeated same-user session objects supabase-js emits on tab focus
+  // do not.
+  const loadedForUser = useRef<string | null>(null);
   useEffect(() => {
-    if (!session || loadingLeads) return;
-    if (leads.length > 0) return;
+    if (!session || loadedForUser.current === session.user.id) return;
+    loadedForUser.current = session.user.id;
     void loadLeads(session.access_token);
-  }, [session, leads.length, loadingLeads, loadLeads]);
+  }, [session, loadLeads]);
 
   // Background enrichment (email reveal, website scraping) keeps changing lead
   // status after this page's initial load, but nothing pushes those changes to
   // the browser — without this, the list/Kanban silently goes stale and looks
   // like data disappeared even though the database is fine. Poll quietly
-  // while this page is open; skip a tick if a load is already in flight.
-  // Guarded through a ref, not the dep array: listing `loadingLeads` there tore
-  // the interval down and rebuilt it twice per poll, so the 30s clock restarted
-  // constantly and a busy page could starve the refresh entirely. Also skip
-  // hidden tabs — a backgrounded Leads page polling every 30s is pure waste.
-  const loadingLeadsRef = useRef(loadingLeads);
-  loadingLeadsRef.current = loadingLeads;
-
+  // while this page is open. Skip hidden tabs — a backgrounded Leads page
+  // polling every 30s is pure waste.
+  //
+  // `background: true` is what makes it quiet: the tick refreshes the rows in
+  // place without touching `loadingLeads`, which the render below turns into a
+  // full-page skeleton. Previously every tick tore the table out and put the
+  // shimmer back for the length of the fetch — seconds, on a deployed serverless
+  // function — so a page nobody was touching appeared to reload itself twice a
+  // minute. Overlap protection moved into loadLeads with it (it now knows about
+  // background loads too; the old ref here only ever saw foreground ones).
   useEffect(() => {
     if (!session) return;
     const interval = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      if (loadingLeadsRef.current) return;
-      void loadLeads(session.access_token);
+      void loadLeads(session.access_token, { background: true });
     }, 30_000);
     return () => clearInterval(interval);
   }, [session, loadLeads]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isAppUser, getUserRole, type AppRole } from "@/lib/auth/roles";
 import { type Lead } from "@/lib/leads";
@@ -24,7 +24,7 @@ type AppContextValue = {
   leads: Lead[];
   setLeads: React.Dispatch<React.SetStateAction<Lead[]>>;
   leadsTotal: number | null;
-  loadLeads: (token: string) => Promise<void>;
+  loadLeads: (token: string, opts?: { background?: boolean }) => Promise<void>;
   loadingLeads: boolean;
   loadMoreLeads: (token: string) => Promise<void>;
   loadingMoreLeads: boolean;
@@ -147,7 +147,14 @@ export function AppProvider({
         setLoadingSession(false);
         return;
       }
-      setSession(s);
+      // supabase-js re-emits auth events on tab focus and on token refresh.
+      // Storing a fresh object every time changed `session`'s identity, and
+      // `session` is a dependency of essentially every timer and fetch effect
+      // in the app (the Leads 30s poll, the unibox-unread interval, the logo
+      // and imports fetches) — so merely focusing the tab tore all of them down
+      // and rebuilt them, restarting each clock from zero. Same access token
+      // means the same session; keep the object we already have.
+      setSession((prev) => (prev?.access_token === s.access_token ? prev : s));
       setLoadingSession(false);
     });
 
@@ -182,8 +189,23 @@ export function AppProvider({
    *  kept (slightly staler) rather than discarded, which is what lets the
    *  background poll run without throwing away anything loadMoreLeads pulled
    *  in — enrichment churns the newest leads, so page 1 is where changes are. */
-  const loadLeads = useCallback(async (token: string) => {
-    setLoadingLeads(true);
+  const leadsInFlight = useRef(false);
+  const loadLeads = useCallback(async (token: string, opts?: { background?: boolean }) => {
+    // `background` = the Leads page's 30s poll. It must NOT flip `loadingLeads`:
+    // that flag drives a full-page skeleton there, so every tick blanked the
+    // whole table for the length of the fetch (measured at seconds on
+    // serverless, where this page pulls 500 rows + 3 joined tables + an exact
+    // count) and read as the page reloading itself over and over. Foreground
+    // callers — first load, the Refresh button, post-mutation reloads — still
+    // get the spinner and skeleton they always did.
+    //
+    // A background tick also stands down if any fetch is already running: the
+    // page used to guard that itself via a loadingLeads ref, which only saw
+    // foreground loads, so a poll slower than 30s could overlap itself and race
+    // on setLeads. A foreground call is never skipped — the user asked for it.
+    if (opts?.background && leadsInFlight.current) return;
+    leadsInFlight.current = true;
+    if (!opts?.background) setLoadingLeads(true);
     try {
       const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page: 1 });
       setLeads((prev) => {
@@ -193,7 +215,10 @@ export function AppProvider({
       });
       setLeadsTotal(res.total);
     } catch { /* silently ignore */ }
-    finally { setLoadingLeads(false); }
+    finally {
+      leadsInFlight.current = false;
+      if (!opts?.background) setLoadingLeads(false);
+    }
   }, []);
 
   /** Appends the next page only. */
@@ -269,7 +294,13 @@ export function AppProvider({
     }
   }, [session, loadLeads]);
 
-  const value: AppContextValue = {
+  // Memoized: a bare object literal here was a new value on every provider
+  // render, so every consumer of useApp() re-rendered whenever any single piece
+  // of app state moved — the whole Leads table re-rendered on a keystroke in an
+  // unrelated search box. The useState setters are stable by contract and the
+  // three loaders are useCallback'd, so the real dependencies are just the
+  // state values themselves.
+  const value: AppContextValue = useMemo(() => ({
     session,
     loadingSession,
     role: getUserRole(session?.user),
@@ -303,7 +334,15 @@ export function AppProvider({
     setDeletingLead,
     deleteLeadLoading,
     setDeleteLeadLoading,
-  };
+  }), [
+    session, loadingSession,
+    leads, leadsTotal, loadLeads, loadingLeads, loadMoreLeads, loadingMoreLeads, searchLeads,
+    campaigns, loadCampaigns, loadingCampaigns,
+    enrichingIds, handleEnrichLead,
+    checkedIds, selectedLead, selectedOrgId,
+    showAddLeads, manualPrefill, showCreateCampaign,
+    deletingLead, deleteLeadLoading,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
