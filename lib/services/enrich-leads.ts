@@ -46,10 +46,18 @@ export interface EnrichTarget {
 // app, never asked about again) and removed from `leads` immediately, instead
 // of lingering as "has_email=true, email=null" to be re-charged on every
 // future enrichment pass.
+// A lead whose bulk_match call keeps genuinely failing (Apollo timeout/5xx,
+// not a credits problem) gets one more try per pass, up to this many lifetime
+// attempts, before being archived for good -- mirrors
+// organizations.enrichment_attempts on the scraping side, which already caps
+// retries instead of letting a stuck item loop forever.
+const MAX_ENRICH_ATTEMPTS = 3;
+
 async function archiveUnenrichableLead(
   db: SupabaseClient,
   target: EnrichTarget,
   linkedinUrl?: string | null,
+  reason: string = "no_email_available",
 ): Promise<void> {
   await db.from("unenrichable_leads").upsert({
     apollo_id: target.apollo_id,
@@ -61,6 +69,7 @@ async function archiveUnenrichableLead(
     city: target.city,
     state: target.state,
     linkedin_url: linkedinUrl ?? null,
+    reason,
   }, { onConflict: "apollo_id", ignoreDuplicates: true });
 
   await db.from("leads").delete().eq("id", target.id);
@@ -287,12 +296,59 @@ export async function enrichLeads(
       ? `Credits exhausted after ${matched} matched`
       : (err as Error).message;
 
-    // Release the claim lock on leads we never finished so a retry (after
-    // topping up credits, or the next watchdog nudge) can reclaim them
-    // immediately instead of waiting out the 10-minute lock for nothing.
-    const unresolvedIds = targets.map((t) => t.id).filter((id) => !resolvedLeadIds.has(id));
-    if (unresolvedIds.length > 0) {
-      await db.from("leads").update({ enrich_locked_at: null }).in("id", unresolvedIds).is("email", null);
+    const unresolved = targets.filter((t) => !resolvedLeadIds.has(t.id));
+
+    if (unresolved.length > 0 && creditsExhausted) {
+      // Not the lead's fault -- a billing gap, not a bad request. Release the
+      // claim lock so a retry (after topping up credits, or the next
+      // watchdog nudge) can reclaim them immediately instead of waiting out
+      // the 10-minute lock for nothing. Doesn't count against enrich_attempts.
+      await db.from("leads").update({ enrich_locked_at: null })
+        .in("id", unresolved.map((t) => t.id)).is("email", null);
+    } else if (unresolved.length > 0) {
+      // A genuine per-request failure (Apollo timeout/5xx/network, not
+      // credits). Bump each lead's lifetime attempt count; past
+      // MAX_ENRICH_ATTEMPTS, archive it for good instead of leaving it to be
+      // reclaimed (and Apollo re-charged for) by every future self-chain or
+      // 15-minute watchdog pass forever.
+      const { data: current } = await db.from("leads")
+        .select("id, enrich_attempts")
+        .in("id", unresolved.map((t) => t.id));
+      const attemptsById = new Map(
+        (current ?? []).map((r) => [r.id as string, (r.enrich_attempts as number) ?? 0]),
+      );
+
+      const toArchive: EnrichTarget[] = [];
+      const toBump: Array<{ target: EnrichTarget; nextAttempts: number }> = [];
+      for (const target of unresolved) {
+        const nextAttempts = (attemptsById.get(target.id) ?? 0) + 1;
+        if (nextAttempts >= MAX_ENRICH_ATTEMPTS) toArchive.push(target);
+        else toBump.push({ target, nextAttempts });
+      }
+
+      for (const target of toArchive) {
+        await archiveUnenrichableLead(db, target, null, "apollo_retry_exhausted");
+        archived++;
+        resolvedLeadIds.add(target.id);
+        if (target.organization_id) resolvedOrgIds.add(target.organization_id);
+      }
+      if (toArchive.length > 0) {
+        await db.from("enrichment_logs").insert({
+          source: "apollo",
+          event: "APOLLO_RETRY_EXHAUSTED",
+          error: warning?.slice(0, 500) ?? null,
+          payload: {
+            archived_lead_ids: toArchive.map((t) => t.id),
+            max_attempts: MAX_ENRICH_ATTEMPTS,
+          },
+        });
+      }
+
+      for (const { target, nextAttempts } of toBump) {
+        await db.from("leads")
+          .update({ enrich_attempts: nextAttempts, enrich_locked_at: null })
+          .eq("id", target.id).is("email", null);
+      }
     }
   }
 

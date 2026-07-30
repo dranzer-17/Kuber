@@ -10,6 +10,8 @@ import { resolveApolloKeyword } from "@/lib/constants";
 type NewLeadTarget = { id: string; apollo_id: string; first_name: string | null; organization_id: string | null; org_name: string | null };
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { dbForUser } from "@/lib/supabase/scoped";
+import { DEV_COMPANY_ID } from "@/lib/constants";
+import { checkApolloCredits } from "@/lib/services/provider-credits";
 
 export const maxDuration = 300;
 
@@ -17,11 +19,23 @@ export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireManager>>;
   try { user = await requireManager(req); } catch (r) { return r as Response; }
 
+  // provider_keys (Apollo included) are shared across every company — a
+  // search here spends real credits from the one pool the live client
+  // account also draws from. The dev/internal workspace has no business
+  // case for Apollo search, so it's blocked outright rather than trusted
+  // not to run one "just to test."
+  if (user.companyId === DEV_COMPANY_ID) {
+    return fail(403, "APOLLO_DISABLED_DEV", "Apollo search is disabled for the internal/dev workspace — Apollo credits are shared with the live client account.");
+  }
+
   const body = await req.json().catch(() => null);
   const parsed = ApolloSearchSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy } = parsed.data;
+  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy, max_leads_per_keyword } = parsed.data;
+  // Mutable: clamped down (never up) to Apollo's real remaining balance below,
+  // once we have a DB client to check it with.
+  let maxTotalLeads = parsed.data.max_total_leads;
 
   // Resolve through Settings > Keys (DB first, .env as the last-resort tier) —
   // the same path searchPeople() itself uses. Checking process.env directly
@@ -59,6 +73,17 @@ export async function POST(req: NextRequest) {
 
   // ── Phase 1: Search all keywords/pages, batch-insert leads ───────────────
   const db = dbForUser(user);
+
+  // Never request more than Apollo can actually pay for — if only 40 credits
+  // are left, this import gets clamped to 40, not attempted at 50 and left
+  // to fail (and archive-loop) partway through.
+  const apolloCredits = await checkApolloCredits(db);
+  if (apolloCredits.remaining != null && apolloCredits.remaining < maxTotalLeads) {
+    maxTotalLeads = Math.max(0, apolloCredits.remaining);
+  }
+  if (maxTotalLeads <= 0) {
+    return fail(402, "APOLLO_OUT_OF_CREDITS", "Apollo has no lead credits remaining — top up before importing.");
+  }
 
   if (assigned_to) {
     const { data: employee } = await db.from("profiles").select("id, is_active").eq("id", assigned_to).maybeSingle();
@@ -105,8 +130,18 @@ export async function POST(req: NextRequest) {
   const resolvedKeywords = [...new Map(keywords.map((label) => [resolveApolloKeyword(label), label])).entries()]
     .map(([query, label]) => ({ query, label }));
 
+  // Every lead inserted below eventually costs a paid Apollo bulk_match call
+  // — these two counters are the actual credit-spend ceilings for this
+  // import (lib/validators/leads.ts ApolloSearchSchema), independent of how
+  // many pages/keywords were selected.
+  let overallCapHit = false;
+
   for (const { query, label } of resolvedKeywords) {
+    if (overallCapHit) break;
+    let keywordInserted = 0;
+
     for (let page = 1; page <= max_pages; page++) {
+      if (overallCapHit || keywordInserted >= max_leads_per_keyword) break;
       let result;
       try {
         result = await searchPeople({
@@ -167,6 +202,20 @@ export async function POST(req: NextRequest) {
       }
 
       if (newPeople.length === 0) continue;
+
+      // Trim to whatever's left of the per-keyword and overall caps so we
+      // never insert (and later pay Apollo to reveal) more than requested,
+      // even mid-page.
+      const roomForKeyword = max_leads_per_keyword - keywordInserted;
+      const roomOverall = maxTotalLeads - inserted;
+      const room = Math.min(roomForKeyword, roomOverall);
+      if (room <= 0) break;
+      if (newPeople.length > room) {
+        if (roomOverall <= roomForKeyword) {
+          warnings.push(`Import cap of ${maxTotalLeads} leads reached — stopped partway through "${label}"`);
+        }
+        newPeople = newPeople.slice(0, room);
+      }
 
       // Batch org lookup
       const uniqueOrgNames = [...new Set(newPeople.map((p) => p.organization?.name ?? "Unknown"))];
@@ -233,6 +282,8 @@ export async function POST(req: NextRequest) {
       if (insertErr) { warnings.push(`Batch lead insert failed: ${insertErr.message}`); continue; }
 
       inserted += insertedLeads?.length ?? 0;
+      keywordInserted += insertedLeads?.length ?? 0;
+      if (inserted >= maxTotalLeads) overallCapHit = true;
 
       for (const newLead of insertedLeads ?? []) {
         const person = newPeople.find((p) => p.id === newLead.apollo_id);
@@ -298,6 +349,10 @@ export async function POST(req: NextRequest) {
     enrich_queued: newLeadTargets.length,
     assignment_skipped: assignmentSkipped,
     duplicate_owners: duplicateOwners,
+    // Lets the UI explain "you asked for 50 but only got 40" when Apollo's
+    // real balance was lower than the requested cap.
+    apollo_credits_remaining: apolloCredits.remaining,
+    effective_max_total_leads: maxTotalLeads,
     ...(warnings.length > 0 ? { warnings } : {}),
   });
 }

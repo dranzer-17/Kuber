@@ -70,7 +70,17 @@ export const ApolloSearchSchema = z.object({
   preview: z.boolean().optional(),
   assigned_to: z.string().uuid().nullable().optional(),
   assignment_strategy: ImportAssignmentStrategy,
-});
+  // Every lead inserted here eventually gets a paid Apollo bulk_match call —
+  // these are the actual credit-spend ceilings for the import, enforced
+  // server-side in apollo-search/route.ts regardless of what the client sends.
+  max_total_leads: z.number().int().min(25).max(1000).default(200),
+  max_leads_per_keyword: z.union([z.literal(25), z.literal(50)]).default(50),
+  // Strict mode trades range for safety: only the tightest tiers are allowed.
+  strict_cap: z.boolean().default(false),
+}).refine(
+  (data) => !data.strict_cap || [25, 50, 100].includes(data.max_total_leads),
+  { message: "Strict mode only allows 25, 50, or 100 total leads", path: ["max_total_leads"] },
+);
 
 export const ExcelImportSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("headers"), storage_path: z.string().min(1) }),

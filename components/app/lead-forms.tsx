@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -20,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor, resolveApolloKeyword } from "@/lib/constants";
 import { LocationsPicker } from "@/components/ui/locations-picker";
 import { InfoTip } from "@/components/ui/info-tip";
-import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
+import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, fetchUsage, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 import { TagInput } from "@/components/app/tag-input";
@@ -543,6 +544,12 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [seniorities,   setSeniorities  ] = useState<string[]>([]);
   const [locations,     setLocations    ] = useState<string[]>([]);
   const [maxPages,      setMaxPages     ] = useState(1);
+  // Actual credit-spend ceilings — every lead landed here eventually costs a
+  // paid Apollo reveal call, so these bound real spend, not just search pages.
+  const [maxTotalLeads, setMaxTotalLeads] = useState(200);
+  const [maxPerKeyword, setMaxPerKeyword] = useState<25 | 50>(50);
+  const [strictCap,     setStrictCap    ] = useState(false);
+  const [apolloRemaining, setApolloRemaining] = useState<number | null>(null);
   const [batchName,     setBatchName    ] = useState("");
   const [color,         setColor        ] = useState("violet");
   const [batchNameError, setBatchNameError] = useState(false);
@@ -552,11 +559,38 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [assignMode,    setAssignMode   ] = useState<ImportAssignMode>("manual");
   const employees = useAssignableEmployees(true);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = await getToken();
+        const { providers } = await fetchUsage(token);
+        const apollo = providers.find((p) => p.id === "apollo");
+        if (apollo?.remaining != null) setApolloRemaining(apollo.remaining);
+      } catch {
+        // Non-blocking — the server enforces the real cap regardless of
+        // whether this pre-flight number loaded.
+      }
+    })();
+  }, []);
+
   const APOLLO_STEPS = ["Criteria", "Settings", "Batch", "Assign"];
   const [step, setStep] = useState(0);
 
   function toggleSen(s: string) {
     setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
+  }
+
+  const STRICT_TIERS = [25, 50, 100] as const;
+  function toggleStrictCap(on: boolean) {
+    setStrictCap(on);
+    // Strict mode only allows the tightest tiers — snap down to the nearest
+    // one instead of silently failing server-side validation.
+    if (on && !(STRICT_TIERS as readonly number[]).includes(maxTotalLeads)) {
+      const nearest = [...STRICT_TIERS].reduce((best, tier) =>
+        Math.abs(tier - maxTotalLeads) < Math.abs(best - maxTotalLeads) ? tier : best
+      );
+      setMaxTotalLeads(nearest);
+    }
   }
 
   function goNext() {
@@ -597,6 +631,9 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           keywords,
           locations: effectiveLocations,
           max_pages: maxPages,
+          max_total_leads: maxTotalLeads,
+          max_leads_per_keyword: maxPerKeyword,
+          strict_cap: strictCap,
           titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
           seniorities: seniorities.length > 0 ? seniorities : undefined,
           batch_name: batchName,
@@ -624,6 +661,10 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
       // Phase 1 complete — leads are in the DB, redirect now.
       // Email enrichment runs in the background on the server.
       notifyDuplicateOwners(json?.data?.duplicate_owners, employees);
+      const effectiveCap = json?.data?.effective_max_total_leads;
+      if (typeof effectiveCap === "number" && effectiveCap < maxTotalLeads) {
+        toast.warning(`Apollo credits ran lower than expected — this import was capped to ${effectiveCap.toLocaleString()} leads instead of ${maxTotalLeads.toLocaleString()}.`);
+      }
       onImport(inserted);
     } catch (e) {
       setError((e as Error).message);
@@ -679,23 +720,67 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         )}
 
         {step === 1 && (
-          <div className="space-y-1.5 max-w-xs">
-            <Label>Pages to fetch (up to {APOLLO_LEADS_PER_PAGE} leads/page, per keyword)</Label>
-            <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
-              <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {[1,2,3,5,10].map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {n} page{n > 1 ? "s" : ""} (~{n * APOLLO_LEADS_PER_PAGE} leads per keyword)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-4 max-w-xs">
+            <div className="space-y-1.5">
+              <Label>Pages to fetch (up to {APOLLO_LEADS_PER_PAGE} leads/page, per keyword)</Label>
+              <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
+                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[1,2,3,5,10].map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} page{n > 1 ? "s" : ""} (~{n * APOLLO_LEADS_PER_PAGE} leads per keyword)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
+              <div className="space-y-0.5">
+                <Label className="text-xs">Strict cap</Label>
+                <p className="text-[11px] text-muted-foreground">Limit this import to a small, safe size (25/50/100)</p>
+              </div>
+              <Switch tone="success" checked={strictCap} onCheckedChange={toggleStrictCap} />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1">
+                <Label>Overall leads for this import</Label>
+                <InfoTip side="right" text="Every lead here costs a paid Apollo credit to reveal an email for — this is a hard cap on how many the import will spend, no matter how many pages/keywords are selected." />
+              </div>
+              <Select value={String(maxTotalLeads)} onValueChange={(v) => setMaxTotalLeads(Number(v))}>
+                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(strictCap ? STRICT_TIERS : [25, 50, 100, 250, 500, 1000]).map((n) => (
+                    <SelectItem key={n} value={String(n)} disabled={apolloRemaining != null && n > apolloRemaining}>
+                      {n.toLocaleString()} leads
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {apolloRemaining != null && apolloRemaining < maxTotalLeads && (
+                <p className="text-[11px] text-amber-500">
+                  Only ~{apolloRemaining.toLocaleString()} Apollo credits remaining — the import will stop there even if you pick a higher number.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Max leads per keyword</Label>
+              <Select value={String(maxPerKeyword)} onValueChange={(v) => setMaxPerKeyword(Number(v) as 25 | 50)}>
+                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {[25, 50].map((n) => (
+                    <SelectItem key={n} value={String(n)}>{n} leads per keyword</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <p className="text-[11px] text-muted-foreground">
-              Higher page counts take longer but return more leads per search. You selected{" "}
-              <strong>{keywordGroupCount}</strong> keyword group{keywordGroupCount === 1 ? "" : "s"} — Apollo is searched
-              once per group, so expect up to <strong>~{(maxPages * APOLLO_LEADS_PER_PAGE * keywordGroupCount).toLocaleString()} leads</strong> in
-              total, not just per keyword.
+              You selected <strong>{keywordGroupCount}</strong> keyword group{keywordGroupCount === 1 ? "" : "s"}. This
+              import will stop at <strong>{Math.min(maxTotalLeads, maxPerKeyword * keywordGroupCount).toLocaleString()} leads</strong>{" "}
+              total — whichever cap (overall or per-keyword) is reached first — regardless of how many pages are available.
             </p>
           </div>
         )}

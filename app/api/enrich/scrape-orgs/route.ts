@@ -635,7 +635,14 @@ export async function POST(req: NextRequest) {
   // calls comfortably clears in well under the 300s maxDuration, and keeps
   // the self-chain firing at a similar cadence rather than ballooning
   // per-batch wall time.
-  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: 15 });
+  //
+  // Also clamped to Firecrawl's real remaining balance when known — claiming
+  // 15 orgs while only ~6 credits remain would leave 9 of them claimed
+  // ("scraping") but unable to actually be scraped this pass.
+  const batchSize = firecrawlCredits.remaining != null
+    ? Math.max(1, Math.min(15, firecrawlCredits.remaining))
+    : 15;
+  const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: batchSize });
   if (claimError) {
     return Response.json({ error: claimError.message }, { status: 500 });
   }

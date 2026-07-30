@@ -19,6 +19,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 // OpenRouter's error in practice appears well before the balance hits $0).
 const FIRECRAWL_MIN_CREDITS = 5;
 const OPENROUTER_MIN_BALANCE_USD = 0.10;
+const APOLLO_MIN_CREDITS = 5;
 
 // Cached in `system_state`, not `settings`: the provider keys are shared across
 // companies, so the balance behind them is one global number — and this is
@@ -153,22 +154,55 @@ async function fetchGroqCredits(secret: string): Promise<CreditCheck> {
   }
 }
 
-// Apollo exposes remaining credits directly on this endpoint, so the
-// "Re-check" button can surface a real number rather than just valid/invalid.
+// Pull a numeric remaining/used/total triple out of Apollo's credit_usage
+// object without assuming one exact shape. Apollo's docs (Get Current User
+// Profile, ?include_credit_usage=true) describe several credit categories
+// (lead, direct_dial, export, ai, power_up) each nested under either a plain
+// {remaining|used|total} shape or a per-scope {team|user}: {limit|consumed}
+// shape depending on plan -- and the docs page doesn't publish the exact
+// field names without a live "Try It" call. Bulk_match (email-reveal) draws
+// from the "lead" credit category, so that's the one we look for; anything
+// we can't confidently parse falls back to "valid, balance unreadable"
+// rather than guessing wrong.
+function extractRemaining(node: unknown): number | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  if (typeof n.remaining === "number") return n.remaining;
+  if (typeof n.total === "number" && typeof n.used === "number") return n.total - n.used;
+  if (typeof n.limit === "number" && typeof n.consumed === "number") return n.limit - n.consumed;
+  // Team/user scoped shape: prefer whichever scope is present.
+  for (const scope of ["team", "user"]) {
+    const scoped = extractRemaining(n[scope]);
+    if (scoped != null) return scoped;
+  }
+  return null;
+}
+
 async function fetchApolloCredits(secret: string): Promise<CreditCheck> {
   try {
-    const res = await fetch("https://api.apollo.io/api/v1/auth/health", {
-      headers: { "x-api-key": secret, accept: "application/json" },
-    });
+    const res = await fetch(
+      "https://api.apollo.io/api/v1/users/api_profile?include_credit_usage=true",
+      { headers: { "x-api-key": secret, accept: "application/json" } },
+    );
     if (res.status === 401 || res.status === 403) {
       return { ok: false, remaining: null, message: "Apollo rejected the API key (401/403) — invalid key" };
     }
     if (!res.ok) return { ok: true, remaining: null, message: `Apollo key check failed (HTTP ${res.status}) — proceeding` };
-    const data = await res.json().catch(() => ({})) as { is_logged_in?: boolean };
-    if (data.is_logged_in === false) {
-      return { ok: false, remaining: null, message: "Apollo reports this key is not authenticated" };
+
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    const nested = data.data as Record<string, unknown> | undefined;
+    const creditUsage = (data.credit_usage ?? nested?.credit_usage) as Record<string, unknown> | undefined;
+    const leadCredits = creditUsage?.lead_credits ?? creditUsage?.lead;
+    const remaining = extractRemaining(leadCredits);
+
+    if (remaining == null) {
+      return { ok: true, remaining: null, message: "Apollo key is valid (couldn't read a credit balance from this response shape — check Settings > Keys > Re-check after Apollo's first real use to confirm parsing)" };
     }
-    return { ok: true, remaining: null, message: "Apollo key is valid" };
+    return {
+      ok: remaining >= APOLLO_MIN_CREDITS,
+      remaining,
+      message: remaining >= APOLLO_MIN_CREDITS ? "OK" : `Apollo is low on lead credits (${remaining} left)`,
+    };
   } catch {
     return { ok: true, remaining: null, message: "Apollo key check errored — proceeding" };
   }
@@ -225,6 +259,8 @@ async function checkCredits(db: Db, provider: ProviderId, settingsKey: string): 
 }
 
 export const checkFirecrawlCredits = (db: Db) => checkCredits(db, "firecrawl", "credit_check_firecrawl");
+export const checkApolloCredits = (db: Db) => checkCredits(db, "apollo", "credit_check_apollo");
+export const checkInstantlyCredits = (db: Db) => checkCredits(db, "instantly", "credit_check_instantly");
 export const checkOpenRouterCredits = (db: Db) => checkCredits(db, "openrouter", "credit_check_openrouter");
 export const checkOpenAICredits = (db: Db) => checkCredits(db, "openai", "credit_check_openai");
 export const checkAnthropicCredits = (db: Db) => checkCredits(db, "anthropic", "credit_check_anthropic");

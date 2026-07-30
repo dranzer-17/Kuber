@@ -5,6 +5,12 @@
 // pulling in the whole auth/next-server stack.
 export const SERVICE_ROLE_USER_ID = "00000000-0000-0000-0000-000000000000";
 
+// Fixed company UUID for "Kuber Internal (Dev)" (see 2026_07_28_multi_tenant_companies.sql).
+// provider_keys are shared across all companies (one Apollo/Firecrawl/etc.
+// balance for everyone), so anything that spends real provider credits must
+// never run against this company's data — it's dev/test only.
+export const DEV_COMPANY_ID = "00000000-0000-0000-0000-00000000000a";
+
 export const APOLLO_TITLES = [
   "purchase manager",
   "procurement manager",

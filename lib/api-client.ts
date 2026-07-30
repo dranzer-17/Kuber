@@ -260,6 +260,20 @@ export async function fetchProviderKeys(token: string): Promise<ProviderKeysData
   return apiFetch("/api/v1/settings/keys", {}, token);
 }
 
+export type ProviderUsage = {
+  id: string;
+  label: string;
+  status: "ok" | "low" | "out" | "unknown";
+  // Exact numbers are super-admin only — the API trims this to null for
+  // everyone else, so absence here just means "not shown to you."
+  remaining: number | null;
+  message: string;
+};
+
+export async function fetchUsage(token: string): Promise<{ providers: ProviderUsage[] }> {
+  return apiFetch("/api/v1/settings/usage", {}, token);
+}
+
 export async function createProviderKey(token: string, body: { provider: string; label: string; secret: string }): Promise<ProviderKey> {
   return apiFetch("/api/v1/settings/keys", { method: "POST", body: JSON.stringify(body) }, token);
 }
