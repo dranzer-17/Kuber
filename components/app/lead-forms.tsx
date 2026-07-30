@@ -17,7 +17,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor } from "@/lib/constants";
+import { LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor, resolveApolloKeyword } from "@/lib/constants";
 import { LocationsPicker } from "@/components/ui/locations-picker";
 import { InfoTip } from "@/components/ui/info-tip";
 import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
@@ -567,6 +567,14 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   function goBack() { setStep((s) => Math.max(s - 1, 0)); }
 
   const effectiveLocations = locations.map((l) => LOCATION_MAP[l] ?? l);
+  // Several keyword labels resolve to the same underlying Apollo query (e.g.
+  // all 4 "Masterbatch…" labels search for "masterbatch") — the server dedupes
+  // on this resolved value and runs ONE Apollo search per distinct group, each
+  // fetching up to 100 leads per page. So the real yield is pages × leads/page
+  // × groups, not just pages × leads/page — shown below so a big multi-keyword
+  // selection doesn't surprise anyone at import time.
+  const keywordGroupCount = new Set(keywords.map(resolveApolloKeyword)).size;
+  const APOLLO_LEADS_PER_PAGE = 100;
 
   async function handleImport(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -672,16 +680,23 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
         {step === 1 && (
           <div className="space-y-1.5 max-w-xs">
-            <Label>Pages to fetch (50 leads/page)</Label>
+            <Label>Pages to fetch (up to {APOLLO_LEADS_PER_PAGE} leads/page, per keyword)</Label>
             <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
               <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {[1,2,3,5,10].map((n) => (
-                  <SelectItem key={n} value={String(n)}>{n} page{n > 1 ? "s" : ""} (~{n * 50} leads)</SelectItem>
+                  <SelectItem key={n} value={String(n)}>
+                    {n} page{n > 1 ? "s" : ""} (~{n * APOLLO_LEADS_PER_PAGE} leads per keyword)
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground">Higher page counts take longer but return more leads per search.</p>
+            <p className="text-[11px] text-muted-foreground">
+              Higher page counts take longer but return more leads per search. You selected{" "}
+              <strong>{keywordGroupCount}</strong> keyword group{keywordGroupCount === 1 ? "" : "s"} — Apollo is searched
+              once per group, so expect up to <strong>~{(maxPages * APOLLO_LEADS_PER_PAGE * keywordGroupCount).toLocaleString()} leads</strong> in
+              total, not just per keyword.
+            </p>
           </div>
         )}
 

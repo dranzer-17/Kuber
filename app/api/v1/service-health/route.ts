@@ -74,7 +74,17 @@ export async function GET(req: NextRequest) {
     if (row.source === "firecrawl" && (err.includes("402") || err.includes("insufficient") || err.includes("credit"))) {
       add({ service: "Firecrawl", kind: "credits", severity: "critical", message: "Firecrawl is out of credits — company websites can't be read. Top up or update the Firecrawl API key." });
     }
-    if (err.includes("apollo") && (err.includes("401") || err.includes("403"))) {
+    // Apollo email-reveal (people/bulk_match) returns 422 "insufficient credits"
+    // on most plans and 402 on others — enrich logs CREDITS_EXHAUSTED for both.
+    // Without this branch the leads page just showed New forever with no banner.
+    if (row.event === "CREDITS_EXHAUSTED" || (row.source === "apollo" && (err.includes("insufficient credits") || err.includes("credits exhausted")))) {
+      add({
+        service: "Apollo",
+        kind: "credits",
+        severity: "critical",
+        message: "Apollo is out of lead credits — imported contacts can't get emails revealed. Top up credits or update the Apollo key in Settings > Keys.",
+      });
+    } else if (row.source === "apollo" && (err.includes("401") || err.includes("403"))) {
       add({ service: "Apollo", kind: "auth", severity: "critical", message: "Apollo rejected the API key — lead emails can't be revealed. Update the Apollo master key." });
     }
   }

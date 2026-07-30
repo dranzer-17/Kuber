@@ -87,6 +87,26 @@ export async function POST(req: NextRequest) {
   const baseUrl = internalAppBaseUrl(req);
   const secret = process.env.INTERNAL_SECRET;
 
+  // Persist the failure reason — after() discards the HTTP response body, so
+  // without this a credits 422 looked identical to a healthy enrich pass.
+  // `error` is what /api/v1/service-health reads for the dashboard banner;
+  // `payload` keeps the structured stats for debugging.
+  if (stats.warning) {
+    await db.from("enrichment_logs").insert({
+      source: "apollo",
+      event: stats.credits_exhausted ? "CREDITS_EXHAUSTED" : "EMAIL_REVEAL_FAILED",
+      error: stats.warning.slice(0, 500),
+      payload: {
+        warning: stats.warning,
+        requested: targets.length,
+        matched: stats.matched,
+        archived: stats.archived,
+        credits_consumed: stats.credits_consumed,
+        import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
+      },
+    });
+  }
+
   // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
   if (stats.enriched_org_ids.length > 0 && secret && (await getServiceSecret("firecrawl"))) {
     after(() =>
@@ -100,7 +120,9 @@ export async function POST(req: NextRequest) {
   // This batch was capped at ENRICH_BATCH_SIZE — if the import still has more
   // unrevealed leads, self-trigger another pass. Mirrors scrape-orgs' own
   // self-continuation so a large import can never outrun the 300s function cap.
-  if ("import_id" in parsed.data && secret) {
+  // Do NOT chain when Apollo is out of credits — that just re-claims batches,
+  // burns nothing useful, and (before the conclude fix) falsely failed orgs.
+  if ("import_id" in parsed.data && secret && !stats.credits_exhausted) {
     const importId = parsed.data.import_id;
     const { count: importRemaining } = await db
       .from("leads").select("id", { count: "exact", head: true })
@@ -132,5 +154,6 @@ export async function POST(req: NextRequest) {
     unverified: stats.unverified,
     remaining: remaining ?? 0,
     ...(stats.warning ? { warning: stats.warning } : {}),
+    ...(stats.credits_exhausted ? { credits_exhausted: true } : {}),
   });
 }

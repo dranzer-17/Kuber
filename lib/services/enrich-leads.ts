@@ -12,6 +12,16 @@ export interface EnrichLeadsResult {
   missing_apollo_ids: string[];
   enriched_org_ids: string[];
   warning?: string;
+  /** True when Apollo rejected the batch for insufficient lead credits (402 or 422). */
+  credits_exhausted?: boolean;
+}
+
+function isApolloCreditsError(err: unknown): boolean {
+  const status = (err as { status?: number }).status;
+  const message = (err as Error).message ?? "";
+  // Apollo returns 402 on some plans and 422 "insufficient credits" on others
+  // (live-confirmed 2026-07-30 against people/bulk_match).
+  return status === 402 || (status === 422 && /insufficient credits/i.test(message));
 }
 
 export interface EnrichTarget {
@@ -88,7 +98,17 @@ export async function enrichLeads(
   const touchedOrgIds = new Set<string>(
     targets.map((t) => t.organization_id).filter(Boolean) as string[],
   );
+  // Orgs whose leads we actually finished resolving (email written or archived).
+  // On an Apollo failure mid-batch we only conclude these — never the ones we
+  // never got a bulk_match answer for (that was falsely marking hundreds of
+  // orgs "No website found" when the real cause was insufficient credits).
+  const resolvedOrgIds = new Set<string>();
   let warning: string | undefined;
+  let creditsExhausted = false;
+  // Lead ids we successfully finished this run (matched or archived). On
+  // failure we unlock the rest so the next enrich pass can reclaim them
+  // instead of waiting out the 10-minute claim lock for nothing.
+  const resolvedLeadIds = new Set<string>();
 
   try {
     for (let i = 0; i < targets.length; i += chunkSize) {
@@ -115,6 +135,8 @@ export async function enrichLeads(
           // re-charged) on every future run.
           await archiveUnenrichableLead(db, lead, match.linkedin_url);
           archived++;
+          resolvedLeadIds.add(lead.id);
+          if (lead.organization_id) resolvedOrgIds.add(lead.organization_id);
           continue;
         }
 
@@ -209,7 +231,9 @@ export async function enrichLeads(
         if (orgId) {
           enrichedOrgIds.add(orgId);
           touchedOrgIds.add(orgId);
+          resolvedOrgIds.add(orgId);
         }
+        resolvedLeadIds.add(lead.id);
 
         // Only overwrite fields the match actually returned. A partial Apollo re-match
         // must NOT erase previously-good values with null (§3.1).
@@ -247,6 +271,8 @@ export async function enrichLeads(
         if (!seenApolloIds.has(target.apollo_id)) {
           await archiveUnenrichableLead(db, target);
           archived++;
+          resolvedLeadIds.add(target.id);
+          if (target.organization_id) resolvedOrgIds.add(target.organization_id);
         }
       }
 
@@ -256,20 +282,33 @@ export async function enrichLeads(
       if (i + chunkSize < targets.length) await sleep(500);
     }
   } catch (err) {
-    const status = (err as { status?: number }).status;
-    warning = status === 402
+    creditsExhausted = isApolloCreditsError(err);
+    warning = creditsExhausted
       ? `Credits exhausted after ${matched} matched`
       : (err as Error).message;
+
+    // Release the claim lock on leads we never finished so a retry (after
+    // topping up credits, or the next watchdog nudge) can reclaim them
+    // immediately instead of waiting out the 10-minute lock for nothing.
+    const unresolvedIds = targets.map((t) => t.id).filter((id) => !resolvedLeadIds.has(id));
+    if (unresolvedIds.length > 0) {
+      await db.from("leads").update({ enrich_locked_at: null }).in("id", unresolvedIds).is("email", null);
+    }
   }
 
-  // ── Conclude the pipeline for every touched org (planning.md Phase 3.2) ────
-  // "New" now means "enrichment in flight", so a bulk-match run must leave no
-  // org dangling: revive previously-failed orgs that just gained a domain
-  // (they'll be scraped), and mark still-domainless orgs failed so their
-  // leads move to Input Required instead of sitting in New forever. Orgs
-  // deleted above (their only lead just got archived) are simply no-ops here.
-  if (touchedOrgIds.size > 0) {
-    const ids = [...touchedOrgIds];
+  // ── Conclude the pipeline for orgs we actually finished ───────────────────
+  // "New" now means "enrichment in flight", so a completed bulk-match run must
+  // leave no org dangling: revive previously-failed orgs that just gained a
+  // domain (they'll be scraped), and mark still-domainless orgs failed so their
+  // leads move to Input Required instead of sitting in New forever.
+  //
+  // CRITICAL: if Apollo failed mid-batch (credits / 5xx / auth), do NOT mark the
+  // unprocessed orgs "No website found" — that was the demo-breaking bug where
+  // a 422 insufficient-credits response flipped hundreds of leads to Input
+  // Required with zero emails written. Only conclude orgs we resolved.
+  const orgsToConclude = warning ? resolvedOrgIds : touchedOrgIds;
+  if (orgsToConclude.size > 0) {
+    const ids = [...orgsToConclude];
     const now = new Date().toISOString();
 
     await db.from("organizations")
@@ -316,5 +355,6 @@ export async function enrichLeads(
     missing_apollo_ids: missingApolloIds,
     enriched_org_ids: [...enrichedOrgIds],
     ...(warning ? { warning } : {}),
+    ...(creditsExhausted ? { credits_exhausted: true } : {}),
   };
 }
