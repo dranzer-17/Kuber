@@ -103,7 +103,16 @@ function plainToHtml(plain: string): string {
 
 // Hard guardrails appended in code so they apply regardless of what the
 // editable settings prompt says.
-function buildDraftGuardrails(stepNumber: number): string {
+//
+// `llmOwnsGreeting`: when the caller passed a regenerate/custom instruction,
+// the model must be free to change the salutation (e.g. "Dear Sir" instead of
+// "Dear {first_name}"). Default first-generate keeps greeting in code so every
+// cold email opens consistently.
+function buildDraftGuardrails(stepNumber: number, llmOwnsGreeting = false): string {
+  const greetingRule = llmOwnsGreeting
+    ? `9. GREETING: include the greeting/salutation as the first line of "body" (e.g. "Dear Sir," or "Dear {name},"). Follow any Additional instruction about the greeting exactly. Do NOT include a signature/sign-off — that is still added in code.`
+    : `9. Do NOT include a greeting ("Dear …") or signature/sign-off — those are added in code.`;
+
   if (stepNumber > 1) {
     return `
 
@@ -114,7 +123,10 @@ NON-NEGOTIABLE RULES (override anything above if in conflict):
 4. NO FABRICATION: never state a price, discount, percentage, certification, technical spec, or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. If none is given, stay qualitative — do not invent a number to sound persuasive.
 4b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into this follow-up nudge whenever it's relevant to the lead (e.g. a live promotion, seasonal offer, or specific message they want featured), not just permission to mention it if you feel like it.
 5. FORMATTING: wrap at most one or two concrete facts (a product name, figure, or certification actually present in the data) in **double asterisks** so they render bold, matching the rest of the email. Do not bold whole sentences or generic phrases.
-6. NO EM DASHES: never use an em dash (—) anywhere in your text. Split into two sentences, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.`;
+6. NO EM DASHES: never use an em dash (—) anywhere in your text. Split into two sentences, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.
+${llmOwnsGreeting
+  ? "7. GREETING: include the greeting as the first line of \"body\" and follow any Additional instruction about it exactly. Do NOT include a signature — that is added in code."
+  : "7. Do NOT include a greeting (\"Dear …\") or signature/sign-off — those are added in code."}`;
   }
   return `
 
@@ -128,7 +140,7 @@ NON-NEGOTIABLE RULES (override anything above if in conflict):
 6b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into the personalised intro whenever it's relevant to the lead.
 7. FORMATTING: wrap at most one or two concrete facts actually present in the data in **double asterisks**. Do not bold whole sentences, generic phrases, or anything not grounded in the supplied data.
 8. NO EM DASHES: never use an em dash (—) anywhere in your text. One idea per sentence; split with a period, or use a comma or parentheses instead.
-9. Do NOT include a greeting ("Dear …") or signature/sign-off — those are added in code.`;
+${greetingRule}`;
 }
 
 function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProductOfferings>>): string {
@@ -163,7 +175,11 @@ function buildUserPrompt(
   ];
   if (companyContext) lines.push(`Company context: ${companyContext}`);
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
-  if (customInstruction) lines.push(`Additional instruction: ${customInstruction}`);
+  if (customInstruction) {
+    lines.push(
+      `Additional instruction (MUST follow exactly — including any greeting/salutation, tone, length, or wording changes; this overrides the default "Dear {first_name}" style): ${customInstruction}`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -370,11 +386,18 @@ export async function generateOneDraft(
       getProductOfferings(db),
       getCompanyContext(db),
     ]);
+    // Regenerate-with-instruction must be able to rewrite the greeting too —
+    // otherwise "use Dear Sir instead of Dear {name}" is silently overwritten
+    // by the hardcoded salutation below.
+    const llmOwnsGreeting = Boolean(customInstruction?.trim());
     const systemPrompt =
       baseSystemPrompt
       + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
       + buildProductReferenceBlock(products)
-      + buildDraftGuardrails(stepNumber);
+      + buildDraftGuardrails(stepNumber, llmOwnsGreeting)
+      + (llmOwnsGreeting
+        ? `\n\nOVERRIDE: Because an Additional instruction was provided, "body" MUST include the greeting as its first line and that instruction wins over any default salutation rules above (including "do not include a greeting"). Signature is still added in code.`
+        : "");
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
@@ -392,14 +415,18 @@ export async function generateOneDraft(
 
     // Strip any greeting/sign-off/placeholder the LLM emitted despite instructions,
     // and — defense in depth — any attachment/brochure mention on follow-ups or when
-    // no attachment is present.
+    // no attachment is present. When llmOwnsGreeting, keep the opening "Dear …"
+    // so a regenerate instruction like "Dear Sir" actually sticks.
     let aiBody = validated.data.body
       .trim()
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
       .replace(/\[Your Contact Information\]/gi, "")
-      .replace(/\[Your Company\]/gi, "")
-      .replace(/^dear[^,\n]*,?\s*/i, "")
+      .replace(/\[Your Company\]/gi, "");
+    if (!llmOwnsGreeting) {
+      aiBody = aiBody.replace(/^dear[^,\n]*,?\s*/i, "");
+    }
+    aiBody = aiBody
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
       // Em dashes are a well-known AI-writing tell; the guardrails forbid them,
       // but strip any that slip through as a safety net rather than trust compliance.
@@ -415,7 +442,9 @@ export async function generateOneDraft(
     }
 
     const greetingName = lead.first_name?.trim();
-    const greeting = greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,";
+    const greeting = llmOwnsGreeting
+      ? null
+      : (greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,");
 
     // Instantly cannot send real attachments, so deliver the brochure as a
     // link — tokenised in the AI body BEFORE assembly so the anchor can never
