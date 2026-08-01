@@ -89,7 +89,7 @@ export async function regenerateOneDraft(
       id, lead_id,
       attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
       leads(
-        id, first_name, last_name, email, title, headline, seniority, country,
+        id, first_name, last_name, email, title, headline, seniority, country, assigned_to,
         organizations(name, domain, company_description, sells_to, keywords)
       )
     `)

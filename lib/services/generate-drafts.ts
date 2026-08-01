@@ -62,6 +62,7 @@ type LeadRow = {
   headline: string | null;
   seniority: string | null;
   country: string | null;
+  assigned_to: string | null;
   organizations: OrgData | OrgData[] | null;
 };
 
@@ -248,8 +249,16 @@ export async function generateOneDraft(
     .eq("id", campaignId)
     .maybeSingle();
 
-  // Signature: campaign override → campaign owner's personal signature → company default.
-  const signatureBlock = await resolveCampaignSignature(db, campaign ?? {});
+  // Personal voice (signature + system prompt) belongs to whoever actually owns
+  // this LEAD, not whoever created the campaign — a campaign is a shared
+  // container (planning.md Phase 4 / spec §5), so a manager-created campaign
+  // holding three employees' leads must not sign every one of them with the
+  // manager's own signature. Falls back to the campaign creator only for a
+  // still-unassigned pool lead, which has no more specific owner yet.
+  const promptOwnerId = lead.assigned_to ?? campaign?.created_by ?? null;
+
+  // Signature: campaign override → lead owner's personal signature → company default.
+  const signatureBlock = await resolveCampaignSignature(db, { ...campaign, created_by: promptOwnerId });
 
   // Per-lead attachment overrides campaign default. Instantly's API cannot send
   // real file attachments, so an "attachment" is delivered as a hosted download
@@ -382,7 +391,7 @@ export async function generateOneDraft(
 
   try {
     const [baseSystemPrompt, products, companyContext] = await Promise.all([
-      resolveDraftSystemPrompt(db, campaign?.created_by),
+      resolveDraftSystemPrompt(db, promptOwnerId),
       getProductOfferings(db),
       getCompanyContext(db),
     ]);
@@ -551,7 +560,7 @@ export async function fetchDraftTargets(
         id, lead_id,
         attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
         leads!inner(
-          id, first_name, last_name, email, title, headline, seniority, country,
+          id, first_name, last_name, email, title, headline, seniority, country, assigned_to,
           organizations(name, domain, company_description, sells_to, keywords)
         )
       `)
@@ -582,7 +591,7 @@ export async function fetchDraftTargets(
       id, lead_id,
       attachment_path, attachment_name, attachment_mime, attachment_size, attachment_url,
       leads!inner(
-        id, first_name, last_name, email, title, headline, seniority, country,
+        id, first_name, last_name, email, title, headline, seniority, country, assigned_to,
         organizations(name, domain, company_description, sells_to, keywords)
       )
     `)
