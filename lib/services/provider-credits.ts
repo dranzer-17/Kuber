@@ -154,16 +154,13 @@ async function fetchGroqCredits(secret: string): Promise<CreditCheck> {
   }
 }
 
-// Pull a numeric remaining/used/total triple out of Apollo's credit_usage
+// Pull a numeric remaining/used/total triple out of a nested Apollo credit
 // object without assuming one exact shape. Apollo's docs (Get Current User
 // Profile, ?include_credit_usage=true) describe several credit categories
 // (lead, direct_dial, export, ai, power_up) each nested under either a plain
 // {remaining|used|total} shape or a per-scope {team|user}: {limit|consumed}
-// shape depending on plan -- and the docs page doesn't publish the exact
-// field names without a live "Try It" call. Bulk_match (email-reveal) draws
-// from the "lead" credit category, so that's the one we look for; anything
-// we can't confidently parse falls back to "valid, balance unreadable"
-// rather than guessing wrong.
+// shape depending on plan. Only reachable as a fallback now — see
+// extractApolloRemaining for the shape this account actually returns.
 function extractRemaining(node: unknown): number | null {
   if (!node || typeof node !== "object") return null;
   const n = node as Record<string, unknown>;
@@ -174,6 +171,39 @@ function extractRemaining(node: unknown): number | null {
   for (const scope of ["team", "user"]) {
     const scoped = extractRemaining(n[scope]);
     if (scoped != null) return scoped;
+  }
+  return null;
+}
+
+// api_profile returns a FLAT object, not the nested {credit_usage: {lead: …}}
+// shape guessed above — live response confirmed 2026-08-01:
+//
+//   num_credits_remaining:      0     <- the spendable pool
+//   effective_num_lead_credits: 4000  <- plan entitlement, NOT a balance
+//   num_lead_credits_used:      0
+//
+// That distinction is the whole point of this function. On that live account
+// the entitlement pair reads "4000 credits, none used" while every
+// people/bulk_match call was answering 422 "insufficient credits", because the
+// unified pool behind it was empty. num_credits_remaining is the only field
+// that tracks what Apollo will actually let you spend, so it wins outright —
+// subtracting the entitlement pair would report a healthy 4000 and re-create
+// the exact silent stall this check exists to catch.
+function extractApolloRemaining(data: Record<string, unknown>): number | null {
+  const root = (data.data as Record<string, unknown> | undefined) ?? data;
+
+  if (typeof root.num_credits_remaining === "number") return root.num_credits_remaining;
+
+  // Plans that report through the nested credit_usage object instead.
+  const creditUsage = (root.credit_usage ?? data.credit_usage) as Record<string, unknown> | undefined;
+  const nested = extractRemaining(creditUsage?.lead_credits ?? creditUsage?.lead);
+  if (nested != null) return nested;
+
+  // Entitlement minus usage — last resort, only when no pool field exists at
+  // all. Overstates the balance whenever the two are tracked separately (see
+  // above), so it must stay below both branches, never above them.
+  if (typeof root.effective_num_lead_credits === "number" && typeof root.num_lead_credits_used === "number") {
+    return root.effective_num_lead_credits - root.num_lead_credits_used;
   }
   return null;
 }
@@ -190,10 +220,7 @@ async function fetchApolloCredits(secret: string): Promise<CreditCheck> {
     if (!res.ok) return { ok: true, remaining: null, message: `Apollo key check failed (HTTP ${res.status}) — proceeding` };
 
     const data = await res.json().catch(() => ({})) as Record<string, unknown>;
-    const nested = data.data as Record<string, unknown> | undefined;
-    const creditUsage = (data.credit_usage ?? nested?.credit_usage) as Record<string, unknown> | undefined;
-    const leadCredits = creditUsage?.lead_credits ?? creditUsage?.lead;
-    const remaining = extractRemaining(leadCredits);
+    const remaining = extractApolloRemaining(data);
 
     if (remaining == null) {
       return { ok: true, remaining: null, message: "Apollo key is valid (couldn't read a credit balance from this response shape — check Settings > Keys > Re-check after Apollo's first real use to confirm parsing)" };
@@ -241,9 +268,21 @@ const FETCHERS: Record<ProviderId, (secret: string) => Promise<CreditCheck>> = {
  *  only (not every stored key) — this is a coarse pre-flight gate, and
  *  getActiveKey() is already called fresh (uncached) on every real request
  *  inside complete()/scrapePage(), so rotation freshness never depends on
- *  this 5-minute cache. */
-async function checkCredits(db: Db, provider: ProviderId, settingsKey: string): Promise<CreditCheck> {
-  const cached = await getCached(db, settingsKey);
+ *  this 5-minute cache.
+ *
+ *  `fresh` skips the cache read (but still refreshes it) for the case where a
+ *  human just topped up and is retrying by hand — being told "out of credits"
+ *  for another five minutes would read as the fix not having worked. Automated
+ *  callers (watchdogs, self-chains) should leave it off; they retry anyway. */
+export interface CreditCheckOptions { fresh?: boolean }
+
+async function checkCredits(
+  db: Db,
+  provider: ProviderId,
+  settingsKey: string,
+  opts?: CreditCheckOptions,
+): Promise<CreditCheck> {
+  const cached = opts?.fresh ? null : await getCached(db, settingsKey);
   if (cached) return cached;
 
   const resolved = await getActiveKey(db, provider);
@@ -259,7 +298,7 @@ async function checkCredits(db: Db, provider: ProviderId, settingsKey: string): 
 }
 
 export const checkFirecrawlCredits = (db: Db) => checkCredits(db, "firecrawl", "credit_check_firecrawl");
-export const checkApolloCredits = (db: Db) => checkCredits(db, "apollo", "credit_check_apollo");
+export const checkApolloCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "apollo", "credit_check_apollo", opts);
 export const checkInstantlyCredits = (db: Db) => checkCredits(db, "instantly", "credit_check_instantly");
 export const checkOpenRouterCredits = (db: Db) => checkCredits(db, "openrouter", "credit_check_openrouter");
 export const checkOpenAICredits = (db: Db) => checkCredits(db, "openai", "credit_check_openai");

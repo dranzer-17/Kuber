@@ -7,6 +7,7 @@ import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
 import { logLeadEvent } from "@/lib/services/lead-events";
 import { getServiceSecret } from "@/lib/services/service-keys";
+import { onlyRevealedLeads } from "@/lib/server/lead-visibility";
 import { dbForUser } from "@/lib/supabase/scoped";
 
 async function upsertOrg(
@@ -88,15 +89,17 @@ export async function GET(req: NextRequest) {
   const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, q: search, page, limit } = parsed.data;
   const db = dbForUser(user);
 
-  let q = db
-    .from("leads")
-    .select(
-      `*, organizations(id, name, domain, domain_source, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error),
-       campaign_leads(crm_status, interest_status, created_at, campaigns(id, name)),
-       imports(id, label, color)`,
-      { count: "exact" }
-    )
-    .eq("is_deleted", false);
+  let q = onlyRevealedLeads(
+    db
+      .from("leads")
+      .select(
+        `*, organizations(id, name, domain, domain_source, unsubscribed, has_scraped, enrichment_stage, company_description, sells_to, last_error),
+         campaign_leads(crm_status, interest_status, created_at, campaigns(id, name)),
+         imports(id, label, color)`,
+        { count: "exact" }
+      )
+      .eq("is_deleted", false)
+  );
 
   if (user.role === "employee") {
     // Employees see ONLY their own assigned leads (spec §5). Unibox threads and

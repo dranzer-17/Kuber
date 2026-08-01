@@ -15,6 +15,31 @@ import { checkApolloCredits } from "@/lib/services/provider-credits";
 
 export const maxDuration = 300;
 
+/** What searchPeople() asks Apollo for per page (its own per_page default). */
+const APOLLO_LEADS_PER_PAGE = 100;
+
+/**
+ * Paging is cap-driven, not count-driven: keep walking a keyword's result pages
+ * until its lead cap is met. A fixed page count used to be a user-facing
+ * dropdown, which was a trap — a page returns 100 raw people, but has_email +
+ * already-imported + already-archived filtering can leave only a handful, so
+ * "1 page" silently delivered a fraction of the cap the manager actually asked
+ * for, and got worse on every re-import of the same niche. Apollo's SEARCH
+ * endpoint costs no lead credits (only people/bulk_match does), so digging
+ * deeper is free — the caps below are what bound real spend.
+ *
+ * The three stop conditions that keep "keep paging" from meaning "page forever":
+ *  1. Apollo's own total_entries (known after page 1) — never page past the end.
+ *  2. MAX_PAGES_PER_KEYWORD — a wall-clock seatbelt. Each page is an Apollo
+ *     round trip plus two dedup queries plus an insert; on a 95%-duplicate
+ *     niche an uncapped hunt would blow the 300s function limit and get killed
+ *     mid-import, leaving a half-written batch.
+ *  3. MAX_BARREN_PAGES — consecutive pages yielding zero new leads mean the
+ *     vein is mined out; stop rather than grind to the ceiling.
+ */
+const MAX_PAGES_PER_KEYWORD = 10;
+const MAX_BARREN_PAGES = 3;
+
 export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireManager>>;
   try { user = await requireManager(req); } catch (r) { return r as Response; }
@@ -32,7 +57,7 @@ export async function POST(req: NextRequest) {
   const parsed = ApolloSearchSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
 
-  const { keywords, locations, max_pages, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy, max_leads_per_keyword } = parsed.data;
+  const { keywords, locations, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy, max_leads_per_keyword } = parsed.data;
   // Mutable: clamped down (never up) to Apollo's real remaining balance below,
   // once we have a DB client to check it with.
   let maxTotalLeads = parsed.data.max_total_leads;
@@ -130,18 +155,26 @@ export async function POST(req: NextRequest) {
   const resolvedKeywords = [...new Map(keywords.map((label) => [resolveApolloKeyword(label), label])).entries()]
     .map(([query, label]) => ({ query, label }));
 
-  // Every lead inserted below eventually costs a paid Apollo bulk_match call
-  // — these two counters are the actual credit-spend ceilings for this
-  // import (lib/validators/leads.ts ApolloSearchSchema), independent of how
-  // many pages/keywords were selected.
+  // Every lead inserted below eventually costs a paid Apollo bulk_match call —
+  // max_total_leads and max_leads_per_keyword are the ONLY credit-spend
+  // ceilings for this import (lib/validators/leads.ts ApolloSearchSchema), and
+  // now also the thing that decides when to stop paging.
   let overallCapHit = false;
 
   for (const { query, label } of resolvedKeywords) {
     if (overallCapHit) break;
     let keywordInserted = 0;
+    // Consecutive pages that produced no new leads (all duplicates / no email).
+    let barrenPages = 0;
+    // Tightened to Apollo's real result count once page 1 tells us what it is.
+    let pageCeiling = MAX_PAGES_PER_KEYWORD;
 
-    for (let page = 1; page <= max_pages; page++) {
+    for (let page = 1; page <= pageCeiling; page++) {
       if (overallCapHit || keywordInserted >= max_leads_per_keyword) break;
+      if (barrenPages >= MAX_BARREN_PAGES) {
+        warnings.push(`[${label}] stopped after ${MAX_BARREN_PAGES} pages with no new leads — got ${keywordInserted} of ${max_leads_per_keyword}`);
+        break;
+      }
       let result;
       try {
         result = await searchPeople({
@@ -163,12 +196,16 @@ export async function POST(req: NextRequest) {
           warnings.push(`[${label}] no results — try removing location filter or changing keyword`);
           break;
         }
+        // Stop condition 1: Apollo cannot give us more than it has. Without
+        // this, a keyword with 250 results and a 100-lead cap would keep
+        // requesting empty pages up to the seatbelt.
+        pageCeiling = Math.min(MAX_PAGES_PER_KEYWORD, Math.ceil(result.total_entries / APOLLO_LEADS_PER_PAGE));
       }
 
       if (!result.people || result.people.length === 0) break;
 
       const people = result.people.filter((p) => p.has_email);
-      if (people.length === 0) continue;
+      if (people.length === 0) { barrenPages++; continue; }
 
       // Batch dedup
       const apolloIds = people.map((p) => p.id);
@@ -201,7 +238,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (newPeople.length === 0) continue;
+      if (newPeople.length === 0) { barrenPages++; continue; }
 
       // Trim to whatever's left of the per-keyword and overall caps so we
       // never insert (and later pay Apollo to reveal) more than requested,
@@ -272,17 +309,22 @@ export async function POST(req: NextRequest) {
         }];
       });
 
-      if (leadsToInsert.length === 0) continue;
+      if (leadsToInsert.length === 0) { barrenPages++; continue; }
 
       const { data: insertedLeads, error: insertErr } = await db
         .from("leads")
         .upsert(leadsToInsert, { onConflict: "apollo_id", ignoreDuplicates: true })
         .select("id, apollo_id, organization_id");
 
-      if (insertErr) { warnings.push(`Batch lead insert failed: ${insertErr.message}`); continue; }
+      if (insertErr) { warnings.push(`Batch lead insert failed: ${insertErr.message}`); barrenPages++; continue; }
 
-      inserted += insertedLeads?.length ?? 0;
-      keywordInserted += insertedLeads?.length ?? 0;
+      const insertedThisPage = insertedLeads?.length ?? 0;
+      inserted += insertedThisPage;
+      keywordInserted += insertedThisPage;
+      // A page can still land zero rows here — the upsert ignores conflicts, so
+      // anyone inserted by a concurrent import between the dedup query above
+      // and this write drops out silently.
+      if (insertedThisPage === 0) barrenPages++; else barrenPages = 0;
       if (inserted >= maxTotalLeads) overallCapHit = true;
 
       for (const newLead of insertedLeads ?? []) {

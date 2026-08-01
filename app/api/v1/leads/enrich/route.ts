@@ -1,13 +1,40 @@
 import { NextRequest, after } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireManager } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { EnrichSchema } from "@/lib/validators/leads";
 import { enrichLeads, type EnrichTarget } from "@/lib/services/enrich-leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { getServiceSecret } from "@/lib/services/service-keys";
+import { checkApolloCredits } from "@/lib/services/provider-credits";
 import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 300;
+
+/** Record why an email-reveal pass produced nothing, attributed to the company
+ *  whose leads it was. `/api/v1/service-health` reads these rows through a
+ *  COMPANY-SCOPED client, and the 15-minute watchdog calls this route as the
+ *  service-role bearer — whose db client is unscoped, so an insert through it
+ *  is not stamped. Passing company_id explicitly is what keeps the "Apollo is
+ *  out of credits" banner lit for the client: without it every watchdog-logged
+ *  failure landed with company_id null, invisible to the only UI that reports
+ *  them, and the banner went dark ~6h (the health route's lookback) after the
+ *  import while the outage itself ran for days. */
+async function logEnrichFailure(
+  db: SupabaseClient,
+  companyId: string | null,
+  event: "CREDITS_EXHAUSTED" | "EMAIL_REVEAL_FAILED",
+  message: string,
+  payload: Record<string, unknown>,
+) {
+  await db.from("enrichment_logs").insert({
+    source: "apollo",
+    event,
+    error: message.slice(0, 500),
+    payload,
+    ...(companyId ? { company_id: companyId } : {}),
+  });
+}
 
 // Each matched lead does several sequential DB writes (org lookup/upsert, lead
 // update, campaign_leads update) on top of the bulk_match call itself, so a
@@ -36,7 +63,7 @@ export async function POST(req: NextRequest) {
 
   let q = db
     .from("leads")
-    .select("id, apollo_id, first_name, last_name, title, country, city, state, organization_id, organizations(name)")
+    .select("id, apollo_id, first_name, last_name, title, country, city, state, organization_id, company_id, organizations(name)")
     .eq("lead_source", "apollo")
     .eq("has_email", true)
     .is("email", null);
@@ -56,6 +83,37 @@ export async function POST(req: NextRequest) {
   const { data: rows, error } = await q;
   if (error) return fail(500, "INTERNAL", error.message);
   if (!rows?.length) return ok({ requested: 0, matched: 0, archived: 0, missing_apollo_ids: [], credits_consumed: 0, verified: 0, unverified: 0, remaining: 0 });
+
+  // Every lead in a batch comes from one import, so one company — but fall back
+  // to the caller's own for the service-role path, where rows are the only hint.
+  const companyId = (rows.find((r) => r.company_id)?.company_id as string | undefined) ?? user.companyId ?? null;
+
+  // Pre-flight the credit balance BEFORE claiming anything. Apollo bills per
+  // bulk_match ask and answers 422 "insufficient credits" once the account's
+  // pool is empty, so an unchecked pass claims 150 leads, fires a doomed call,
+  // and releases them again — which is exactly what the 15-minute watchdog did
+  // every 15 minutes for two days while the client's leads sat in New. Catching
+  // it here costs one cached GET and leaves a company-attributed log row behind
+  // so the banner keeps saying why.
+  //
+  // A logged-in manager gets an uncached reading: the likeliest reason someone
+  // is hitting Enrich by hand is that they just topped up, and a stale
+  // five-minute "out of credits" answer would look like the top-up failed.
+  const credits = await checkApolloCredits(db, { fresh: user.companyId !== null });
+  if (!credits.ok) {
+    await logEnrichFailure(db, companyId, "CREDITS_EXHAUSTED", credits.message, {
+      warning: credits.message,
+      remaining_credits: credits.remaining,
+      pending_leads: rows.length,
+      skipped_before_claim: true,
+      import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
+    });
+    return ok({
+      requested: 0, matched: 0, archived: 0, missing_apollo_ids: [],
+      credits_consumed: 0, verified: 0, unverified: 0, remaining: rows.length,
+      warning: credits.message, credits_exhausted: true,
+    });
+  }
 
   // Atomically claim this candidate set before spending any Apollo credits on
   // it — without this, the natural self-chain and a watchdog nudge (or two
@@ -92,11 +150,12 @@ export async function POST(req: NextRequest) {
   // `error` is what /api/v1/service-health reads for the dashboard banner;
   // `payload` keeps the structured stats for debugging.
   if (stats.warning) {
-    await db.from("enrichment_logs").insert({
-      source: "apollo",
-      event: stats.credits_exhausted ? "CREDITS_EXHAUSTED" : "EMAIL_REVEAL_FAILED",
-      error: stats.warning.slice(0, 500),
-      payload: {
+    await logEnrichFailure(
+      db,
+      companyId,
+      stats.credits_exhausted ? "CREDITS_EXHAUSTED" : "EMAIL_REVEAL_FAILED",
+      stats.warning,
+      {
         warning: stats.warning,
         requested: targets.length,
         matched: stats.matched,
@@ -104,7 +163,7 @@ export async function POST(req: NextRequest) {
         credits_consumed: stats.credits_consumed,
         import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
       },
-    });
+    );
   }
 
   // Trigger org scraping AFTER enrichment — domains are now populated on orgs.

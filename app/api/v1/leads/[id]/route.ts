@@ -102,15 +102,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Single-lead reassignment is a manager-only action (review §3.2) — the
   // only prior path was bulk-assign or a campaign-assign side effect.
+  // manualTargetOffline mirrors bulkAssignByStrategy's own flag (assignment.ts)
+  // so this path warns too instead of silently parking a lead on someone away.
+  let manualTargetOffline = false;
   if (assigned_to !== undefined) {
     if (user.role !== "manager") return fail(403, "FORBIDDEN", "Only managers can reassign leads");
     if (assigned_to) {
       const { data: assignee } = await db
         .from("profiles")
-        .select("id, is_active")
+        .select("id, is_active, availability_status")
         .eq("id", assigned_to)
         .maybeSingle();
       if (!assignee || !assignee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
+      manualTargetOffline = assignee.availability_status === "offline";
     }
   }
 
@@ -162,5 +166,5 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
   }
 
-  return ok(data);
+  return ok({ ...data, manual_target_offline: manualTargetOffline });
 }

@@ -439,9 +439,9 @@ export async function patchLead(token: string, id: string, body: {
   city?: string; state?: string; country?: string; email_status?: string;
   // Manager-only single-lead reassignment; null returns the lead to the pool.
   assigned_to?: string | null;
-}): Promise<Lead> {
-  const data = await apiFetch<DbLead>(`/api/v1/leads/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
-  return mapDbLead(data);
+}): Promise<Lead & { manual_target_offline?: boolean }> {
+  const data = await apiFetch<DbLead & { manual_target_offline?: boolean }>(`/api/v1/leads/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
+  return { ...mapDbLead(data), manual_target_offline: data.manual_target_offline };
 }
 
 export async function deleteLead(token: string, id: string): Promise<{ deleted: string }> {
@@ -499,7 +499,7 @@ export async function assignCampaign(
   id: string,
   assignedTo: string | null,
   reassignLeads: boolean,
-): Promise<{ campaign_id: string; assigned_to: string | null; previous_assignee: string | null; changed: boolean; leads_reassigned: number }> {
+): Promise<{ campaign_id: string; assigned_to: string | null; previous_assignee: string | null; changed: boolean; leads_reassigned: number; manual_target_offline: boolean }> {
   return apiFetch(`/api/v1/campaigns/${id}/assign`, {
     method: "POST",
     body: JSON.stringify({ assigned_to: assignedTo, reassign_leads: reassignLeads }),
@@ -573,7 +573,7 @@ export async function importExcelDirect(
 export type PreviewLead = { firstName: string; lastName: string; email: string; company: string; jobTitle: string; domain?: string };
 
 export async function apolloPreview(token: string, body: {
-  keywords: string[]; locations: string[]; max_pages: number;
+  keywords: string[]; locations: string[];
   titles?: string[]; seniorities?: string[]; batch_name: string; color?: string;
 }): Promise<{ preview: true; leads: PreviewLead[] }> {
   return apiFetch("/api/v1/leads/apollo-search", {
@@ -583,7 +583,7 @@ export async function apolloPreview(token: string, body: {
 }
 
 export async function apolloSearch(token: string, body: {
-  keywords: string[]; locations: string[]; max_pages: number;
+  keywords: string[]; locations: string[];
   titles?: string[]; seniorities?: string[]; batch_name: string; color?: string;
   assigned_to?: string; assignment_strategy?: "round_robin" | "territory";
 }): Promise<{ inserted: number; skipped: number; orgs_created: number; assignment_skipped?: number; duplicate_owners?: DuplicateOwner[] }> {

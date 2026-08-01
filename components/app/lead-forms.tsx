@@ -543,9 +543,9 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [positions,     setPositions    ] = useState<string[]>([]);
   const [seniorities,   setSeniorities  ] = useState<string[]>([]);
   const [locations,     setLocations    ] = useState<string[]>([]);
-  const [maxPages,      setMaxPages     ] = useState(1);
-  // Actual credit-spend ceilings — every lead landed here eventually costs a
-  // paid Apollo reveal call, so these bound real spend, not just search pages.
+  // The ONLY two knobs. Search depth is no longer a choice — the server pages
+  // until these are met (apollo-search/route.ts). Every lead landed here
+  // eventually costs a paid Apollo reveal call, so these bound real spend.
   const [maxTotalLeads, setMaxTotalLeads] = useState(200);
   const [maxPerKeyword, setMaxPerKeyword] = useState<25 | 50>(50);
   const [strictCap,     setStrictCap    ] = useState(false);
@@ -603,12 +603,11 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const effectiveLocations = locations.map((l) => LOCATION_MAP[l] ?? l);
   // Several keyword labels resolve to the same underlying Apollo query (e.g.
   // all 4 "Masterbatch…" labels search for "masterbatch") — the server dedupes
-  // on this resolved value and runs ONE Apollo search per distinct group, each
-  // fetching up to 100 leads per page. So the real yield is pages × leads/page
-  // × groups, not just pages × leads/page — shown below so a big multi-keyword
-  // selection doesn't surprise anyone at import time.
+  // on this resolved value and runs ONE Apollo search per distinct group. Each
+  // group is paged until its own cap is met, so the ceiling is groups ×
+  // per-keyword cap (bounded by the overall cap) — shown below so a big
+  // multi-keyword selection doesn't surprise anyone at import time.
   const keywordGroupCount = new Set(keywords.map(resolveApolloKeyword)).size;
-  const APOLLO_LEADS_PER_PAGE = 100;
 
   async function handleImport(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -630,7 +629,6 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         body: JSON.stringify({
           keywords,
           locations: effectiveLocations,
-          max_pages: maxPages,
           max_total_leads: maxTotalLeads,
           max_leads_per_keyword: maxPerKeyword,
           strict_cap: strictCap,
@@ -721,20 +719,6 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
         {step === 1 && (
           <div className="space-y-4 max-w-xs">
-            <div className="space-y-1.5">
-              <Label>Pages to fetch (up to {APOLLO_LEADS_PER_PAGE} leads/page, per keyword)</Label>
-              <Select value={String(maxPages)} onValueChange={(v) => setMaxPages(Number(v))}>
-                <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {[1,2,3,5,10].map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      {n} page{n > 1 ? "s" : ""} (~{n * APOLLO_LEADS_PER_PAGE} leads per keyword)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
               <div className="space-y-0.5">
                 <Label className="text-xs">Strict cap</Label>
@@ -746,7 +730,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
             <div className="space-y-1.5">
               <div className="flex items-center gap-1">
                 <Label>Overall leads for this import</Label>
-                <InfoTip side="right" text="Every lead here costs a paid Apollo credit to reveal an email for — this is a hard cap on how many the import will spend, no matter how many pages/keywords are selected." />
+                <InfoTip side="right" text="Every lead here costs a paid Apollo credit to reveal an email for — this is a hard cap on how many the import will spend, no matter how many keywords are selected." />
               </div>
               <Select value={String(maxTotalLeads)} onValueChange={(v) => setMaxTotalLeads(Number(v))}>
                 <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
@@ -780,7 +764,8 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
             <p className="text-[11px] text-muted-foreground">
               You selected <strong>{keywordGroupCount}</strong> keyword group{keywordGroupCount === 1 ? "" : "s"}. This
               import will stop at <strong>{Math.min(maxTotalLeads, maxPerKeyword * keywordGroupCount).toLocaleString()} leads</strong>{" "}
-              total — whichever cap (overall or per-keyword) is reached first — regardless of how many pages are available.
+              total — whichever cap (overall or per-keyword) is reached first. Apollo is searched as deeply as needed to
+              reach that number, skipping anyone already in your list.
             </p>
           </div>
         )}

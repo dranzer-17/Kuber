@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { mapDbLead, type DbLead } from "@/lib/mappers";
+import { onlyRevealedLeads } from "@/lib/server/lead-visibility";
 
 const LEAD_SELECT = `*, organizations(id, name, domain, unsubscribed, has_scraped,
   enrichment_stage, company_description, sells_to, last_error),
@@ -11,7 +12,7 @@ export async function getLeads(
   opts: { limit?: number; page?: number; organizationId?: string } = {},
 ) {
   const { limit = 200, page = 1, organizationId } = opts;
-  let q = db.from("leads").select(LEAD_SELECT, { count: "exact" }).eq("is_deleted", false);
+  let q = onlyRevealedLeads(db.from("leads").select(LEAD_SELECT, { count: "exact" }).eq("is_deleted", false));
   if (organizationId) q = q.eq("organization_id", organizationId);
   q = q.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
   const { data, error, count } = await q;

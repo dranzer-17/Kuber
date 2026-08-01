@@ -39,13 +39,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (campaignErr) return fail(500, "INTERNAL", campaignErr.message);
   if (!campaign || campaign.is_deleted) return fail(404, "NOT_FOUND", "Campaign not found");
 
+  // manualTargetOffline mirrors bulkAssignByStrategy's own flag (assignment.ts)
+  // so this path warns too instead of silently parking the campaign/leads on
+  // someone away.
+  let manualTargetOffline = false;
   if (assigned_to) {
     const { data: assignee } = await db
       .from("profiles")
-      .select("id, is_active")
+      .select("id, is_active, availability_status")
       .eq("id", assigned_to)
       .maybeSingle();
     if (!assignee || !assignee.is_active) return fail(400, "INVALID_ASSIGNEE", "Employee not found or inactive");
+    manualTargetOffline = assignee.availability_status === "offline";
   }
 
   const previous = (campaign.assigned_to as string | null) ?? null;
@@ -116,5 +121,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     previous_assignee: previous,
     changed: !unchanged,
     leads_reassigned: leadsReassigned,
+    manual_target_offline: manualTargetOffline,
   });
 }

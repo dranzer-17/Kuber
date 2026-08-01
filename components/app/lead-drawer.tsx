@@ -741,6 +741,9 @@ export function LeadDrawer({ lead, onClose, onLeadUpdated, onOrgClick }: {
       setFreshLead(updated);
       onLeadUpdated?.(updated);
       toast.success(nextAssignee ? "Lead reassigned" : "Lead returned to the pool");
+      if (updated.manual_target_offline) {
+        toast.warning("Heads up: that employee is currently marked offline (away).");
+      }
     } catch (e) {
       toast.error((e as Error).message || "Failed to reassign lead");
     } finally {

@@ -62,7 +62,10 @@ const ImportAssignmentStrategy = z.enum(["round_robin", "territory"]).optional()
 export const ApolloSearchSchema = z.object({
   keywords: z.array(z.string().min(1)).min(1),
   locations: z.array(z.string()).default([]),
-  max_pages: z.number().int().min(1).max(20).default(5),
+  // No max_pages: search depth is derived from the caps below, not chosen.
+  // Apollo's search endpoint spends no lead credits, so a page budget could
+  // only ever stop an import short of the cap the manager asked for — see
+  // apollo-search/route.ts.
   titles: z.array(z.string()).nullable().optional(),
   seniorities: z.array(z.string()).nullable().optional(),
   batch_name: z.string().min(1),

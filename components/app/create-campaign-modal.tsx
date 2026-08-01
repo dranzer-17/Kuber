@@ -293,7 +293,10 @@ export function CreateCampaignModal({
       // move every lead to that one employee.
       const owner = role === "manager" && assignTo ? assignTo : null;
       if (owner) {
-        await assignCampaign(token, dbCampaign.id, owner, true);
+        const assignResult = await assignCampaign(token, dbCampaign.id, owner, true);
+        if (assignResult.manual_target_offline) {
+          toast.warning("Heads up: that employee is currently marked offline (away).");
+        }
       }
 
       // fire-and-forget — drafts generate in background, don't block the redirect
