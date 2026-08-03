@@ -69,6 +69,29 @@ export interface EnrichTarget {
 // retries instead of letting a stuck item loop forever.
 export const MAX_ENRICH_ATTEMPTS = 3;
 
+/**
+ * Take a lead out of the Apollo-eligible pool the instant Apollo answers.
+ *
+ * A lead is "ask Apollo about this person" precisely when
+ * `has_email = true AND email IS NULL`. `has_email` is the SEARCH stage's
+ * claim that Apollo holds an address; once bulk_match has actually answered,
+ * that claim is spent and must be replaced by the answer itself — otherwise
+ * the row still reads as a pending question we have already paid for.
+ *
+ * This is one field, one statement, and it cannot half-succeed. It runs BEFORE
+ * the archive/delete, which is a two-table dance that can. That ordering is the
+ * whole point: in July 2026 the archive insert failed on the watchdog's
+ * unscoped client, so the delete that depended on it never ran, the row stayed
+ * eligible, and Apollo was paid again every fifteen minutes to re-learn the
+ * same "no email" answer. With the flag settled first, a failed archive costs
+ * us a bookkeeping row — never another credit.
+ */
+async function settleAsAnswered(db: SupabaseClient, target: EnrichTarget): Promise<void> {
+  await db.from("leads")
+    .update({ has_email: false, enrich_locked_at: null, updated_at: new Date().toISOString() })
+    .eq("id", target.id);
+}
+
 async function archiveUnenrichableLead(
   db: SupabaseClient,
   target: EnrichTarget,
@@ -174,9 +197,9 @@ export async function enrichLeads(
         seenApolloIds.add(match.id);
 
         if (match.email == null) {
-          // Apollo acknowledged the person but has no email on file — final
-          // answer, archive now rather than leave it to be re-asked (and
-          // re-charged) on every future run.
+          // Apollo acknowledged the person but has no email on file. That answer
+          // is final, and we have already paid for it.
+          await settleAsAnswered(db, lead);
           await archiveUnenrichableLead(db, lead, match.linkedin_url);
           archived++;
           resolvedLeadIds.add(lead.id);
@@ -325,9 +348,11 @@ export async function enrichLeads(
       }
 
       // Targets Apollo didn't return a record for at all — same final "no
-      // email, ever" outcome as an explicit null-email match, so archive them.
+      // email, ever" outcome as an explicit null-email match, and just as paid
+      // for, so they are settled and archived on the same terms.
       for (const target of chunkTargets) {
         if (!seenApolloIds.has(target.apollo_id)) {
+          await settleAsAnswered(db, target);
           await archiveUnenrichableLead(db, target);
           archived++;
           resolvedLeadIds.add(target.id);
@@ -389,24 +414,20 @@ export async function enrichLeads(
       }
 
       for (const target of toArchive) {
-        // Archiving can now fail loudly (see archiveUnenrichableLead). We are
-        // already inside the failure path, so swallow it here rather than
-        // escaping the whole function — but the attempt count MUST still be
-        // written. Without it the lead sits one below the cap forever, hits the
-        // cap again on every pass, fails to archive again, and is re-asked
-        // (and re-billed) every 15 minutes — the precise shape of the 96
-        // credits/day burn of July 2026. Writing it, plus the
-        // `enrich_attempts < MAX` filter on the candidate query, makes three
-        // asks the hard lifetime ceiling for any single lead.
+        // Out of attempts: settle it first, exactly like a "no email" answer.
+        // Whatever happens to the archive after this, the lead is no longer an
+        // Apollo question and can never be billed for again.
+        await settleAsAnswered(db, target);
+        await db.from("leads")
+          .update({ enrich_attempts: MAX_ENRICH_ATTEMPTS })
+          .eq("id", target.id);
         try {
           await archiveUnenrichableLead(db, target, null, "apollo_retry_exhausted");
           archived++;
           resolvedLeadIds.add(target.id);
           if (target.organization_id) resolvedOrgIds.add(target.organization_id);
         } catch {
-          await db.from("leads")
-            .update({ enrich_attempts: MAX_ENRICH_ATTEMPTS, enrich_locked_at: null })
-            .eq("id", target.id);
+          // Bookkeeping row lost, nothing else. The lead is already settled.
         }
       }
       if (toArchive.length > 0) {
