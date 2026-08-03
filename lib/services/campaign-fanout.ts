@@ -76,7 +76,14 @@ function pickTimezone(
 export async function sendCampaign(
   campaignId: string,
   _actorId: string,
-  opts?: { campaignLeadIds?: string[] },
+  opts?: {
+    campaignLeadIds?: string[];
+    /** Employee callers only: restricts the whole send to leads THEY own,
+     *  even when the campaign is a shared container holding co-workers'
+     *  leads too. A manager passes null/undefined here and sees the whole
+     *  campaign, matching every other manager-scoped view in the app. */
+    restrictToLeadOwnerId?: string | null;
+  },
 ): Promise<{ buckets: number; sent: number }> {
   // Bootstrap client: used only to look up which company owns this campaign.
   // Everything after that runs on `db`, scoped to that company, so the
@@ -158,11 +165,15 @@ export async function sendCampaign(
   }
 
   // 4) Eligible leads (certified, not yet pushed to Instantly)
+  // leads:lead_id!inner is required (not just a convenience) whenever
+  // restrictToLeadOwnerId is set below — an outer join can't be filtered on
+  // a joined column, so an employee-scoped send would silently see every
+  // lead in the campaign instead of just their own.
   let eligibleQuery = db
     .from("campaign_leads")
     .select(`
       id, lead_id,
-      leads:lead_id ( email, first_name, last_name, country, time_zone )
+      leads:lead_id!inner ( email, first_name, last_name, country, time_zone, assigned_to )
     `)
     .eq("campaign_id", campaignId)
     .eq("crm_status", "approved")
@@ -171,10 +182,17 @@ export async function sendCampaign(
   if (opts?.campaignLeadIds?.length) {
     eligibleQuery = eligibleQuery.in("id", opts.campaignLeadIds);
   }
+  if (opts?.restrictToLeadOwnerId) {
+    eligibleQuery = eligibleQuery.eq("leads.assigned_to", opts.restrictToLeadOwnerId);
+  }
 
   const { data: cls, error: clsErr } = await eligibleQuery;
   if (clsErr) throw new Error(clsErr.message);
 
+  // A co-worker's lead (or anyone else's) landing in a requested id list is
+  // now caught by the same "not eligible" error an employee would already
+  // get for a not-yet-certified lead — restrictToLeadOwnerId simply removes
+  // it from `cls` above, so the existing count mismatch check covers it too.
   if (opts?.campaignLeadIds?.length && (cls?.length ?? 0) !== opts.campaignLeadIds.length) {
     throw new Error("Some selected leads are not eligible to send");
   }

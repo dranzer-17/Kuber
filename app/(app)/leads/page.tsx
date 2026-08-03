@@ -855,16 +855,14 @@ export default function LeadsPage() {
               <UserPlus className="size-3.5" /> Assign{checkedIds.size > 0 ? ` (${checkedIds.size})` : ""}
             </Button>
           )}
-          {role === "manager" && (
-            <Button
-              size="sm" className="gap-1.5"
-              disabled={!canCreateCampaign}
-              title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
-              onClick={() => { setShowCreateCampaign(true); }}
-            >
-              <Megaphone className="size-3.5" /> Create campaign{eligibleCheckedCount > 0 ? ` (${eligibleCheckedCount})` : ""}
-            </Button>
-          )}
+          <Button
+            size="sm" className="gap-1.5"
+            disabled={!canCreateCampaign}
+            title={!canCreateCampaign ? "Only enriched leads with a domain can be added to campaigns" : undefined}
+            onClick={() => { setShowCreateCampaign(true); }}
+          >
+            <Megaphone className="size-3.5" /> Create campaign{eligibleCheckedCount > 0 ? ` (${eligibleCheckedCount})` : ""}
+          </Button>
           {someChecked && (
             <Button
               type="button"

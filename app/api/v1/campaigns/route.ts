@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAuth, requireManager } from "@/lib/auth/api-auth";
+import { requireAuth } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { CreateCampaignSchema } from "@/lib/validators/campaigns";
 import { buildDefaultCampaignSteps } from "@/lib/constants";
@@ -72,11 +72,13 @@ export async function GET(req: NextRequest) {
   return ok({ campaigns: data });
 }
 
-// Campaign creation is a manager/super-admin action — employees are
-// execution-only and cannot create campaigns (spec §1).
+// Any authenticated user may create a campaign. An employee only ever sees
+// their own leads on the Leads page (GET /leads scoping), so a campaign they
+// build is naturally scoped to leads they already own — there is no separate
+// permission needed here, and no way for them to pull in a co-worker's lead.
 export async function POST(req: NextRequest) {
-  let user: Awaited<ReturnType<typeof requireManager>>;
-  try { user = await requireManager(req); } catch (r) { return r as Response; }
+  let user: Awaited<ReturnType<typeof requireAuth>>;
+  try { user = await requireAuth(req); } catch (r) { return r as Response; }
 
   const body = await req.json().catch(() => null);
   const parsed = CreateCampaignSchema.safeParse(body);

@@ -19,6 +19,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const result = await sendCampaign(id, user.id, {
       campaignLeadIds: parsed.data.campaign_lead_ids,
+      // A shared campaign can hold leads from several employees (spec §5);
+      // an employee triggering Send must only ever push their own, never a
+      // co-worker's, even though assertCampaignAccess above already let
+      // them into this campaign. Managers see the whole campaign, as before.
+      restrictToLeadOwnerId: user.role === "employee" ? user.id : null,
     });
     return ok(result);
   } catch (err) {
