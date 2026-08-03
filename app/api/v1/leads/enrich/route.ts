@@ -43,7 +43,14 @@ async function logEnrichFailure(
 // before it ever reaches the code that triggers org scraping below. 150 stays
 // comfortably inside the time budget; the self-trigger at the end picks up
 // whatever's left for the same import.
-const ENRICH_BATCH_SIZE = 150;
+// Sized to finish well inside 60s, not the 300 declared above: that ceiling is
+// only real on a paid Vercel plan, and this project deploys to Hobby. At ~10
+// leads per Apollo call plus roughly four database round trips each, 150 leads
+// ran 60-100s and was being killed near the end of nearly every pass — which is
+// exactly how an import ends up half-revealed and needing a resume. 50 leads
+// lands around 20-35s with room to spare. The self-chain picks up the rest, so
+// a smaller batch costs nothing but a few more invocations.
+const ENRICH_BATCH_SIZE = 50;
 
 export async function POST(req: NextRequest) {
   let user: Awaited<ReturnType<typeof requireManager>>;

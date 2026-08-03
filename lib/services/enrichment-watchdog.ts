@@ -15,9 +15,20 @@ export function triggerScrapeWatchdog(baseUrl: string) {
 }
 
 /** Resume email-reveal (`/api/v1/leads/enrich`) for any Apollo import whose
- *  self-chain died mid-run (dev server restart, tunnel drop, etc.) — the same
- *  kind of silent stall that org-scraping's watchdog above already guards
- *  against, but for the enrich stage, which has no other safety net. */
+ *  self-chain died mid-run (server restart, redeploy, function timeout) — the
+ *  same kind of silent stall that org-scraping's watchdog above already guards
+ *  against, but for the enrich stage, which has no other safety net.
+ *
+ *  DELIBERATELY NOT part of runEnrichmentWatchdog. This is the only background
+ *  job in the app that can spend money, and it used to ride along with the
+ *  15-minute watchdog: 96 chances a day for a defect to become a charge, which
+ *  is precisely how one unresolvable lead cost ~420 credits in July 2026. It
+ *  now runs on its own once-a-day schedule (cron job `resume-apollo-reveal`),
+ *  so the blast radius of anything going wrong here is 1 pass instead of 96.
+ *
+ *  Waiting up to a day costs nothing real: the import's own self-chain already
+ *  handles the normal case within seconds, and this is only the safety net for
+ *  when that chain dies. Leads that arrive a day later are still leads. */
 export async function triggerEnrichWatchdog(baseUrl: string, db: Db) {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceKey) return;
@@ -92,9 +103,13 @@ export async function triggerRegenerationWatchdog(baseUrl: string, db: Db) {
   }
 }
 
-/** Runs the nudges together — this is the whole job of the frequent watchdog. */
+/** Runs the nudges together — this is the whole job of the frequent watchdog.
+ *
+ *  Everything here is FREE: scraping is Firecrawl, draft regeneration is the
+ *  LLM providers. No Apollo call can originate from this function, which is why
+ *  it is safe to run every 15 minutes. The one paid job, triggerEnrichWatchdog,
+ *  is deliberately excluded and runs on its own daily schedule. */
 export async function runEnrichmentWatchdog(baseUrl: string, db: Db) {
   triggerScrapeWatchdog(baseUrl);
-  await triggerEnrichWatchdog(baseUrl, db);
   await triggerRegenerationWatchdog(baseUrl, db);
 }
