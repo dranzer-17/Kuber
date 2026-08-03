@@ -254,11 +254,23 @@ export async function POST(req: NextRequest) {
         newPeople = newPeople.slice(0, room);
       }
 
-      // Batch org lookup
+      // Batch org lookup.
+      // PostgREST's or= list is comma-separated, so an unquoted company name
+      // containing a comma or parenthesis — "Reliance Industries, Ltd" — splits
+      // the filter into garbage. The query then errors, `data` comes back null,
+      // orgMap is empty, and EVERY org on the page is treated as new: that is
+      // how the database ended up with more organisations than it has real
+      // companies. Double-quote each value and escape what PostgREST reserves.
       const uniqueOrgNames = [...new Set(newPeople.map((p) => p.organization?.name ?? "Unknown"))];
-      const orFilter = uniqueOrgNames.map((n) => `name.ilike.${n}`).join(",");
-      const { data: existingOrgs } = await db
+      const orFilter = uniqueOrgNames
+        .map((n) => `name.ilike."${n.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`)
+        .join(",");
+      const { data: existingOrgs, error: orgLookupError } = await db
         .from("organizations").select("id, name").or(orFilter);
+      if (orgLookupError) {
+        // Fail loud rather than silently duplicating every org on the page.
+        warnings.push(`Org lookup failed for one page: ${orgLookupError.message}`);
+      }
       const orgMap = new Map<string, string>();
       for (const org of existingOrgs ?? []) orgMap.set(org.name.toLowerCase(), org.id);
       orgsReused += orgMap.size;

@@ -14,6 +14,9 @@ export interface EnrichLeadsResult {
   warning?: string;
   /** True when Apollo rejected the batch for insufficient lead credits (402 or 422). */
   credits_exhausted?: boolean;
+  /** True when Apollo rate-limited the batch (429). Not the lead's fault and
+   *  NOT retried in-process — see fetchWithRetry's Apollo policy. */
+  rate_limited?: boolean;
 }
 
 function isApolloCreditsError(err: unknown): boolean {
@@ -22,6 +25,13 @@ function isApolloCreditsError(err: unknown): boolean {
   // Apollo returns 402 on some plans and 422 "insufficient credits" on others
   // (live-confirmed 2026-07-30 against people/bulk_match).
   return status === 402 || (status === 422 && /insufficient credits/i.test(message));
+}
+
+/** Apollo is refusing because we asked too fast. The request was still billed,
+ *  so it must never be retried in-process; back off and let the next pass
+ *  reclaim these leads instead. */
+function isApolloRateLimited(err: unknown): boolean {
+  return (err as { status?: number }).status === 429;
 }
 
 export interface EnrichTarget {
@@ -35,6 +45,12 @@ export interface EnrichTarget {
   state: string | null;
   organization_id: string | null;
   org_name: string | null;
+  /** The lead's own tenant. Carried explicitly because the watchdog calls this
+   *  with the service-role identity, which gets the UNSCOPED admin client — no
+   *  auto-filter on reads, no auto-stamp on writes. Without it, org inserts land
+   *  with company_id null (invisible to every scoped read) and updates keyed on
+   *  apollo_id hit every tenant's copy of that person. */
+  company_id: string | null;
 }
 
 // Apollo charges a credit for a bulk_match call EVEN when it comes back
@@ -51,7 +67,7 @@ export interface EnrichTarget {
 // attempts, before being archived for good -- mirrors
 // organizations.enrichment_attempts on the scraping side, which already caps
 // retries instead of letting a stuck item loop forever.
-const MAX_ENRICH_ATTEMPTS = 3;
+export const MAX_ENRICH_ATTEMPTS = 3;
 
 async function archiveUnenrichableLead(
   db: SupabaseClient,
@@ -59,7 +75,15 @@ async function archiveUnenrichableLead(
   linkedinUrl?: string | null,
   reason: string = "no_email_available",
 ): Promise<void> {
-  await db.from("unenrichable_leads").upsert({
+  // The unique index is (company_id, apollo_id). A scoped client rewrites
+  // onConflict to match, but the watchdog runs as service-role on the UNSCOPED
+  // client where nothing is rewritten — so name the real conflict target and
+  // carry company_id ourselves. With the old "apollo_id" target that upsert
+  // errored on the watchdog path, and because the error was never checked the
+  // lead was deleted anyway: gone from `leads`, absent from the do-not-ask
+  // list, and free to be re-imported and re-charged later.
+  const { error } = await db.from("unenrichable_leads").upsert({
+    ...(target.company_id ? { company_id: target.company_id } : {}),
     apollo_id: target.apollo_id,
     first_name: target.first_name,
     last_name: target.last_name,
@@ -70,7 +94,11 @@ async function archiveUnenrichableLead(
     state: target.state,
     linkedin_url: linkedinUrl ?? null,
     reason,
-  }, { onConflict: "apollo_id", ignoreDuplicates: true });
+  }, { onConflict: "company_id,apollo_id", ignoreDuplicates: true });
+
+  // Never delete a lead we failed to archive — that is the one path that loses
+  // a person entirely AND re-exposes them to a future paid re-import.
+  if (error) throw Object.assign(new Error(`unenrichable_leads upsert failed: ${error.message}`), { archiveFailed: true });
 
   await db.from("leads").delete().eq("id", target.id);
 
@@ -114,10 +142,16 @@ export async function enrichLeads(
   const resolvedOrgIds = new Set<string>();
   let warning: string | undefined;
   let creditsExhausted = false;
+  let rateLimited = false;
   // Lead ids we successfully finished this run (matched or archived). On
   // failure we unlock the rest so the next enrich pass can reclaim them
   // instead of waiting out the 10-minute claim lock for nothing.
   const resolvedLeadIds = new Set<string>();
+  // Lead ids we actually sent to Apollo. The chunk loop aborts on the first
+  // failure, so everything after the failing chunk was never asked about —
+  // penalising those with an enrich_attempt (and eventually archiving them
+  // as "retry exhausted") threw away leads Apollo had never even seen.
+  const attemptedLeadIds = new Set<string>();
 
   try {
     for (let i = 0; i < targets.length; i += chunkSize) {
@@ -128,6 +162,7 @@ export async function enrichLeads(
         organization_name: t.org_name ?? undefined,
       }));
 
+      for (const t of chunkTargets) attemptedLeadIds.add(t.id);
       const result = await bulkMatch(chunkDetails);
       totalCredits += result.credits_consumed ?? 0;
 
@@ -155,12 +190,18 @@ export async function enrichLeads(
         // Org upsert-merge (§4.2 rule)
         let orgId = lead.organization_id;
 
+        // Every org read below is pinned to the lead's own tenant. On the scoped
+        // client the proxy already does this; on the service-role path it does
+        // not, and `apollo_org_id` is only unique per company — so an unpinned
+        // .maybeSingle() ERRORS as soon as two tenants hold the same Apollo org,
+        // silently falls through, and creates a duplicate org.
         if (match.organization_id && match.organization) {
-          const { data: byApolloOrg } = await db
+          const byApolloOrgQuery = db
             .from("organizations")
             .select("id")
-            .eq("apollo_org_id", match.organization_id)
-            .maybeSingle();
+            .eq("apollo_org_id", match.organization_id);
+          if (lead.company_id) byApolloOrgQuery.eq("company_id", lead.company_id);
+          const { data: byApolloOrg } = await byApolloOrgQuery.maybeSingle();
 
           if (byApolloOrg) {
             orgId = byApolloOrg.id;
@@ -177,12 +218,13 @@ export async function enrichLeads(
               updated_at: new Date().toISOString(),
             }).eq("id", byApolloOrg.id);
           } else {
-            const { data: byName } = await db
+            const byNameQuery = db
               .from("organizations")
               .select("id")
               .ilike("name", match.organization.name ?? "")
-              .is("apollo_org_id", null)
-              .maybeSingle();
+              .is("apollo_org_id", null);
+            if (lead.company_id) byNameQuery.eq("company_id", lead.company_id);
+            const { data: byName } = await byNameQuery.maybeSingle();
 
             if (byName) {
               orgId = byName.id;
@@ -200,6 +242,10 @@ export async function enrichLeads(
               }).eq("id", byName.id);
             } else {
               const { data: newOrg } = await db.from("organizations").insert({
+                // Stamped explicitly: the service-role path is unscoped, and an
+                // org written with company_id null is invisible to every scoped
+                // read for the rest of its life.
+                ...(lead.company_id ? { company_id: lead.company_id } : {}),
                 apollo_org_id: match.organization_id,
                 name: match.organization.name ?? "Unknown",
                 domain: match.organization.primary_domain ? normalizeDomain(match.organization.primary_domain) : null,
@@ -263,7 +309,11 @@ export async function enrichLeads(
         if (match.seniority != null) leadUpdate.seniority = match.seniority;
         if (match.departments != null) leadUpdate.departments = match.departments;
         if (match.is_likely_to_engage != null) leadUpdate.is_likely_to_engage = match.is_likely_to_engage;
-        await db.from("leads").update(leadUpdate).eq("apollo_id", match.id);
+        // Keyed on the lead's own id, not apollo_id. `apollo_id` is unique only
+        // per company, so an unscoped update keyed on it wrote this email into
+        // every tenant holding the same person — a cross-tenant write on the
+        // watchdog path, and one that silently masked duplicate spend.
+        await db.from("leads").update(leadUpdate).eq("id", lead.id);
 
         // Only reset the CRM status of leads still in a pre-send stage — never clobber
         // a lead that's already sent/replied/won in another campaign (§3.1).
@@ -292,45 +342,72 @@ export async function enrichLeads(
     }
   } catch (err) {
     creditsExhausted = isApolloCreditsError(err);
+    rateLimited = isApolloRateLimited(err);
     warning = creditsExhausted
       ? `Credits exhausted after ${matched} matched`
-      : (err as Error).message;
+      : rateLimited
+        ? `Apollo rate-limited the batch after ${matched} matched — released for the next pass`
+        : (err as Error).message;
 
     const unresolved = targets.filter((t) => !resolvedLeadIds.has(t.id));
+    // The loop aborts on the first bad chunk, so everything after it was never
+    // sent. Those leads must not be penalised for a failure they had no part
+    // in — previously they collected an attempt each and were eventually
+    // archived as "retry exhausted" without Apollo ever having seen them.
+    const untouched = unresolved.filter((t) => !attemptedLeadIds.has(t.id));
+    const attempted = unresolved.filter((t) => attemptedLeadIds.has(t.id));
 
-    if (unresolved.length > 0 && creditsExhausted) {
-      // Not the lead's fault -- a billing gap, not a bad request. Release the
-      // claim lock so a retry (after topping up credits, or the next
-      // watchdog nudge) can reclaim them immediately instead of waiting out
-      // the 10-minute lock for nothing. Doesn't count against enrich_attempts.
+    // Released with no penalty: a billing gap, a rate limit, or a chunk we
+    // never got to. None of these say anything about the lead itself.
+    const releaseUnpenalised = creditsExhausted || rateLimited
+      ? unresolved
+      : untouched;
+    if (releaseUnpenalised.length > 0) {
       await db.from("leads").update({ enrich_locked_at: null })
-        .in("id", unresolved.map((t) => t.id)).is("email", null);
-    } else if (unresolved.length > 0) {
+        .in("id", releaseUnpenalised.map((t) => t.id)).is("email", null);
+    }
+
+    if (!creditsExhausted && !rateLimited && attempted.length > 0) {
       // A genuine per-request failure (Apollo timeout/5xx/network, not
-      // credits). Bump each lead's lifetime attempt count; past
-      // MAX_ENRICH_ATTEMPTS, archive it for good instead of leaving it to be
-      // reclaimed (and Apollo re-charged for) by every future self-chain or
-      // 15-minute watchdog pass forever.
+      // credits) on a batch Apollo actually received. Bump each lead's lifetime
+      // attempt count; past MAX_ENRICH_ATTEMPTS, archive it for good instead of
+      // leaving it to be reclaimed (and Apollo re-charged for) by every future
+      // self-chain or 15-minute watchdog pass forever.
       const { data: current } = await db.from("leads")
         .select("id, enrich_attempts")
-        .in("id", unresolved.map((t) => t.id));
+        .in("id", attempted.map((t) => t.id));
       const attemptsById = new Map(
         (current ?? []).map((r) => [r.id as string, (r.enrich_attempts as number) ?? 0]),
       );
 
       const toArchive: EnrichTarget[] = [];
       const toBump: Array<{ target: EnrichTarget; nextAttempts: number }> = [];
-      for (const target of unresolved) {
+      for (const target of attempted) {
         const nextAttempts = (attemptsById.get(target.id) ?? 0) + 1;
         if (nextAttempts >= MAX_ENRICH_ATTEMPTS) toArchive.push(target);
         else toBump.push({ target, nextAttempts });
       }
 
       for (const target of toArchive) {
-        await archiveUnenrichableLead(db, target, null, "apollo_retry_exhausted");
-        archived++;
-        resolvedLeadIds.add(target.id);
-        if (target.organization_id) resolvedOrgIds.add(target.organization_id);
+        // Archiving can now fail loudly (see archiveUnenrichableLead). We are
+        // already inside the failure path, so swallow it here rather than
+        // escaping the whole function — but the attempt count MUST still be
+        // written. Without it the lead sits one below the cap forever, hits the
+        // cap again on every pass, fails to archive again, and is re-asked
+        // (and re-billed) every 15 minutes — the precise shape of the 96
+        // credits/day burn of July 2026. Writing it, plus the
+        // `enrich_attempts < MAX` filter on the candidate query, makes three
+        // asks the hard lifetime ceiling for any single lead.
+        try {
+          await archiveUnenrichableLead(db, target, null, "apollo_retry_exhausted");
+          archived++;
+          resolvedLeadIds.add(target.id);
+          if (target.organization_id) resolvedOrgIds.add(target.organization_id);
+        } catch {
+          await db.from("leads")
+            .update({ enrich_attempts: MAX_ENRICH_ATTEMPTS, enrich_locked_at: null })
+            .eq("id", target.id);
+        }
       }
       if (toArchive.length > 0) {
         await db.from("enrichment_logs").insert({
@@ -412,5 +489,6 @@ export async function enrichLeads(
     enriched_org_ids: [...enrichedOrgIds],
     ...(warning ? { warning } : {}),
     ...(creditsExhausted ? { credits_exhausted: true } : {}),
+    ...(rateLimited ? { rate_limited: true } : {}),
   };
 }

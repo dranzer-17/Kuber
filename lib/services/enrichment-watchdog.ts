@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { MAX_ENRICH_ATTEMPTS } from "@/lib/services/enrich-leads";
 
 type Db = SupabaseClient;
 
@@ -26,6 +27,16 @@ export async function triggerEnrichWatchdog(baseUrl: string, db: Db) {
     .select("import_id")
     .eq("lead_source", "apollo")
     .eq("has_email", true)
+    // Deleted leads can never be claimed (claim_unenriched_leads refuses them),
+    // so an import full of them stays "pending" forever and permanently holds
+    // one of the five slots below — starving imports that could actually run.
+    .eq("is_deleted", false)
+    // Same circuit breaker as the enrich route: a lead that has already been
+    // asked about three times must not keep waking this job up. Without it, one
+    // permanently-unresolvable lead re-triggers a paid Apollo call every 15
+    // minutes forever — 96 credits a day, which is exactly what happened
+    // between 15 and 26 July 2026.
+    .lt("enrich_attempts", MAX_ENRICH_ATTEMPTS)
     .is("email", null)
     .not("import_id", "is", null);
 

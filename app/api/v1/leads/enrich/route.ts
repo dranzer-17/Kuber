@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireManager } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { EnrichSchema } from "@/lib/validators/leads";
-import { enrichLeads, type EnrichTarget } from "@/lib/services/enrich-leads";
+import { enrichLeads, MAX_ENRICH_ATTEMPTS, type EnrichTarget } from "@/lib/services/enrich-leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { getServiceSecret } from "@/lib/services/service-keys";
 import { checkApolloCredits } from "@/lib/services/provider-credits";
@@ -66,6 +66,18 @@ export async function POST(req: NextRequest) {
     .select("id, apollo_id, first_name, last_name, title, country, city, state, organization_id, company_id, organizations(name)")
     .eq("lead_source", "apollo")
     .eq("has_email", true)
+    // A deleted lead is not a reveal candidate. claim_unenriched_leads already
+    // refuses them, so this changes no spend — but without it a deleted import
+    // stays "pending" forever, occupying one of the watchdog's five slots and
+    // burning a pass every 15 minutes to claim nothing.
+    .eq("is_deleted", false)
+    // THE CIRCUIT BREAKER. Three asks is the hard lifetime ceiling for any one
+    // person, enforced at the point of selection rather than trusted to the
+    // cleanup path. In July 2026 a single lead that could neither be revealed
+    // nor archived was re-asked every 15 minutes for eleven days — 96 credits a
+    // day, ~420 in total, for one contact. Whatever goes wrong downstream, a
+    // lead at the cap is simply never selected again.
+    .lt("enrich_attempts", MAX_ENRICH_ATTEMPTS)
     .is("email", null);
 
   if ("campaign_id" in parsed.data) {
@@ -115,6 +127,25 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Never ask for more people than Apollo can actually pay for. `credits.ok`
+  // above only asserts "more than APOLLO_MIN_CREDITS left" — with 6 credits
+  // remaining it would still claim 150 leads and fire all of them, and the
+  // overspill comes back as a mid-batch 422 that strands the rest. Trimming the
+  // candidate set here is the reveal-side equivalent of the cap the search
+  // route already applies (and the one the 30 July analysis credited to this
+  // route, which never actually had it).
+  const affordable = credits.remaining == null
+    ? rows
+    : rows.slice(0, Math.max(0, credits.remaining));
+  if (affordable.length === 0) {
+    return ok({
+      requested: 0, matched: 0, archived: 0, missing_apollo_ids: [],
+      credits_consumed: 0, verified: 0, unverified: 0, remaining: rows.length,
+      warning: `Apollo has ${credits.remaining} credits left — nothing claimed`,
+      credits_exhausted: true,
+    });
+  }
+
   // Atomically claim this candidate set before spending any Apollo credits on
   // it — without this, the natural self-chain and a watchdog nudge (or two
   // watchdog nudges) firing close together can both select the same pending
@@ -122,12 +153,12 @@ export async function POST(req: NextRequest) {
   // LOCKED (inside the RPC) means only one caller ever actually gets a given
   // lead back; the other silently gets a smaller set instead of a duplicate.
   const { data: claimed, error: claimError } = await db.rpc("claim_unenriched_leads", {
-    p_ids: rows.map((r) => r.id),
+    p_ids: affordable.map((r) => r.id),
   });
   if (claimError) return fail(500, "INTERNAL", claimError.message);
 
   const claimedIds = new Set((claimed as Array<{ id: string }> ?? []).map((r) => r.id));
-  const targets: EnrichTarget[] = rows
+  const targets: EnrichTarget[] = affordable
     .filter((t) => claimedIds.has(t.id))
     .map((t) => {
       const org = Array.isArray(t.organizations) ? t.organizations[0] : t.organizations;
@@ -135,6 +166,9 @@ export async function POST(req: NextRequest) {
         id: t.id, apollo_id: t.apollo_id, first_name: t.first_name, last_name: t.last_name,
         title: t.title, country: t.country, city: t.city, state: t.state,
         organization_id: t.organization_id, org_name: org?.name ?? null,
+        // Carried so enrichLeads can pin its org/lead writes to the right tenant
+        // even on the service-role path, where the db client is unscoped.
+        company_id: (t.company_id as string | null) ?? companyId,
       };
     });
 
@@ -161,9 +195,31 @@ export async function POST(req: NextRequest) {
         matched: stats.matched,
         archived: stats.archived,
         credits_consumed: stats.credits_consumed,
+        rate_limited: stats.rate_limited ?? false,
         import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
       },
     );
+  }
+
+  // Record what this pass actually cost, on EVERY pass — not just failures.
+  // Apollo returns credits_consumed on each bulk_match and we were throwing it
+  // away on the happy path, so the app had no record of its own spend at all.
+  // Reconciling the July 2026 overspend against Apollo's billing export took a
+  // week for exactly this reason; with this row it is a single query.
+  if (stats.credits_consumed > 0 || targets.length > 0) {
+    await db.from("enrichment_logs").insert({
+      source: "apollo",
+      event: "APOLLO_SPEND",
+      payload: {
+        requested: targets.length,
+        credits_consumed: stats.credits_consumed,
+        matched: stats.matched,
+        archived: stats.archived,
+        balance_before: credits.remaining,
+        import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
+      },
+      ...(companyId ? { company_id: companyId } : {}),
+    });
   }
 
   // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
@@ -181,12 +237,16 @@ export async function POST(req: NextRequest) {
   // self-continuation so a large import can never outrun the 300s function cap.
   // Do NOT chain when Apollo is out of credits — that just re-claims batches,
   // burns nothing useful, and (before the conclude fix) falsely failed orgs.
-  if ("import_id" in parsed.data && secret && !stats.credits_exhausted) {
+  // Do NOT chain on a rate limit either: Apollo bills the rejected request, so
+  // an immediate retry is the exact loop that turned 1,403 people into 3,222
+  // credits on 2026-07-14. The 15-minute watchdog resumes it for free instead.
+  if ("import_id" in parsed.data && secret && !stats.credits_exhausted && !stats.rate_limited) {
     const importId = parsed.data.import_id;
     const { count: importRemaining } = await db
       .from("leads").select("id", { count: "exact", head: true })
       .eq("import_id", importId)
-      .eq("lead_source", "apollo").eq("has_email", true).is("email", null);
+      .eq("lead_source", "apollo").eq("has_email", true)
+      .eq("is_deleted", false).is("email", null);
     if ((importRemaining ?? 0) > 0) {
       const authHeader = req.headers.get("authorization") ?? "";
       after(() =>
@@ -201,7 +261,8 @@ export async function POST(req: NextRequest) {
 
   const { count: remaining } = await db
     .from("leads").select("id", { count: "exact", head: true })
-    .eq("lead_source", "apollo").eq("has_email", true).is("email", null);
+    .eq("lead_source", "apollo").eq("has_email", true)
+    .eq("is_deleted", false).is("email", null);
 
   return ok({
     requested: targets.length,
@@ -214,5 +275,6 @@ export async function POST(req: NextRequest) {
     remaining: remaining ?? 0,
     ...(stats.warning ? { warning: stats.warning } : {}),
     ...(stats.credits_exhausted ? { credits_exhausted: true } : {}),
+    ...(stats.rate_limited ? { rate_limited: true } : {}),
   });
 }
