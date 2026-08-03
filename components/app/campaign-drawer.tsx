@@ -866,6 +866,14 @@ export function CampaignDetail({
     void loadHistory();
   }, [selected?.email_drafts?.id]);
 
+  // Regenerating a few times in one sitting is normal, and a date-only label
+  // then renders a row of identical "Aug 3" chips that look like they came from
+  // somewhere else entirely. Show the clock time instead whenever every version
+  // lands on the same calendar day; keep the date once history spans days.
+  const versionsSpanOneDay =
+    versions.length > 0 &&
+    new Set(versions.map((v) => new Date(v.created_at).toDateString())).size === 1;
+
   useEffect(() => {
     async function loadCampaignSteps() {
       try {
@@ -2563,7 +2571,7 @@ export function CampaignDetail({
                                   : "border-border bg-secondary/30 text-muted-foreground hover:border-muted-foreground",
                               )}
                             >
-                              v{v.version} · {format(new Date(v.created_at), "MMM d")}
+                              v{v.version} · {format(new Date(v.created_at), versionsSpanOneDay ? "HH:mm" : "MMM d, HH:mm")}
                             </Button>
                           ))}
                         </div>
