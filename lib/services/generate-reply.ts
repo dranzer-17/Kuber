@@ -7,16 +7,13 @@ import { listThreadEmails, type InstantlyEmail } from "@/lib/services/instantly"
 
 const ReplySchema = z.object({ subject: z.string(), body: z.string() });
 
-// Appended in code so these hold regardless of the editable settings prompt.
-const REPLY_GUARDRAILS = `
-
-NON-NEGOTIABLE REPLY RULES (override anything above if in conflict):
-1. Read the prospect's latest message carefully and respond to its actual content point by point — answer their questions, acknowledge specifics they mentioned (quantities, products, timelines, meeting requests). Never send a generic acknowledgement.
-2. Always move the conversation forward with ONE concrete next step (e.g. propose two specific time slots for a call, ask for their required grade/quantity, offer to send samples).
-3. Match the prospect's tone and keep it concise — 3 to 6 sentences unless the prospect asked detailed technical questions.
-4. NEVER claim a file, brochure, price list, or document is attached. You cannot attach files. If sharing a document is warranted, say you will share it or offer to send it, without claiming it is attached.
-5. Use the product reference library to answer product questions accurately; do not invent specifications, prices, or discounts unless they appear in the campaign context.
-6. No exclamation marks, no em dashes, British English, no placeholders, no sign-off or signature (appended automatically).`;
+// How a reply is written lives in the editable `reply_drafter_prompt` setting,
+// which now carries these rules plus its own precedence section putting the
+// Additional instruction above them. Code used to append a NON-NEGOTIABLE
+// block here that mostly duplicated that prompt and directly contradicted it:
+// the prompt's "most important rule" asks for a one or two sentence answer to a
+// short transactional reply, while the code demanded "3 to 6 sentences" and
+// claimed to override anything above it. Same defect as the cold-email path.
 
 interface GenerateReplyArgs {
   replyDraftId: string;
@@ -91,8 +88,7 @@ export async function generateReplyDraft(
     const system = drafter
       + (companyContext ? `\n\nCompany context: ${companyContext}` : "")
       + productBlock
-      + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
-      + REPLY_GUARDRAILS;
+      + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "");
 
     const user = [
       `Campaign: "${campaignName}"`,

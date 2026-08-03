@@ -68,9 +68,15 @@ export interface ExtractionOutput {
 
 export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Return ONLY valid JSON, no markdown fences: { "description": string (2-3 sentences: what they manufacture and who they sell to), "primary_products": string[] }`;
 
+// Appended only to a drafting prompt that does not already declare this JSON
+// contract itself (see resolveDraftSystemPrompt) — e.g. a user's personal
+// prompt written as free prose. The greeting rule must match what code does:
+// code appends the signature and only fills in a greeting when one is missing,
+// so the model is asked to open with the greeting itself.
 export const DRAFT_JSON_SUFFIX =
   '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string, "product_match": string}.\n' +
   'product_match must be the exact name of the matched product from the PRODUCT REFERENCE LIBRARY, or "none" if no product fits.\n' +
-  '"body" is the full email body for a first email (opening through closing, following the structure and approved copy in the system prompt), or the full 2-4 sentence follow-up nudge. Do not include a greeting or signature — those are added in code.\n' +
+  '"body" is the complete email for a first email, or the full 2-4 sentence nudge for a follow-up. Begin it with the greeting line ("Dear {first name}," or "Dear Sir/Ma\'am,"), and follow any Additional instruction that asks for a different salutation. Do NOT write a sign-off or signature block; the signature is appended in code.\n' +
+  'If an Additional instruction is given, it overrides the default structure and length asked for above.\n' +
   '"subject" is the filled subject line for a first email; for a follow-up you may return an empty string (the subject is cleared in code anyway).';
 

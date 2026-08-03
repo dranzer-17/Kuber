@@ -690,7 +690,7 @@ export function SettingsView() {
                           onChange={setMyDraftPrompt}
                           minHeight={320}
                           placeholder="Leave empty to use the company default, or write your own subject patterns, openings, offerings and tone here..."
-                          helper="Product library, campaign context and safety rules are appended automatically."
+                          helper="Company details, the product library and campaign context are appended automatically. Structure, length and tone come from this prompt, so anything you want changed you change here."
                         />
                         {!myDraftPrompt.trim() && myDefaults.draft_prompt && (
                           <details className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">

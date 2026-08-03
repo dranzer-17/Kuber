@@ -102,46 +102,23 @@ function plainToHtml(plain: string): string {
   );
 }
 
-// Hard guardrails appended in code so they apply regardless of what the
-// editable settings prompt says.
+// How an email gets written now lives entirely in the editable system prompt
+// (Settings → the company `system_prompt`, or a user's personal draft_prompt).
+// Code used to append a block of "NON-NEGOTIABLE RULES" here that restated the
+// mandatory structure and claimed priority over everything above it. That made
+// a regenerate instruction like "keep it to 30 words" unwinnable: the model
+// obeyed the code-level rule and re-emitted the full offerings / key strengths
+// / accolades boilerplate on every lead. The rules moved into the system prompt,
+// which now carries its own precedence section putting the Additional
+// instruction above the default structure.
 //
-// `llmOwnsGreeting`: when the caller passed a regenerate/custom instruction,
-// the model must be free to change the salutation (e.g. "Dear Sir" instead of
-// "Dear {first_name}"). Default first-generate keeps greeting in code so every
-// cold email opens consistently.
-function buildDraftGuardrails(stepNumber: number, llmOwnsGreeting = false): string {
-  const greetingRule = llmOwnsGreeting
-    ? `9. GREETING: include the greeting/salutation as the first line of "body" (e.g. "Dear Sir," or "Dear {name},"). Follow any Additional instruction about the greeting exactly. Do NOT include a signature/sign-off — that is still added in code.`
-    : `9. Do NOT include a greeting ("Dear …") or signature/sign-off — those are added in code.`;
+// What code still contributes is DATA, not style: who the sender is
+// (ABOUT KUBER POLYPLAST), the product library, the campaign context, and the
+// lead's own details. Everything below is that data plus mechanical assembly.
 
-  if (stepNumber > 1) {
-    return `
-
-NON-NEGOTIABLE RULES (override anything above if in conflict):
-1. This is a FOLLOW-UP to a cold email the prospect never replied to. Your "body" field is the ENTIRE follow-up message (2 to 4 short sentences) — a brief, low-pressure nudge referencing the earlier note. Do NOT re-introduce Kuber Polyplast, do NOT repeat the offerings/strengths/accolades, do NOT use bullet points, do NOT write a new sales pitch.
-2. ATTACHMENTS: never claim a file, brochure, or attachment is included unless the lead data explicitly says one is attached.
-3. Keep it personal and specific to the lead's business if a fact is available, but brevity matters more than detail here.
-4. NO FABRICATION: never state a price, discount, percentage, certification, technical spec, or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, or the campaign context given below. If none is given, stay qualitative — do not invent a number to sound persuasive.
-4b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into this follow-up nudge whenever it's relevant to the lead (e.g. a live promotion, seasonal offer, or specific message they want featured), not just permission to mention it if you feel like it.
-5. FORMATTING: wrap at most one or two concrete facts (a product name, figure, or certification actually present in the data) in **double asterisks** so they render bold, matching the rest of the email. Do not bold whole sentences or generic phrases.
-6. NO EM DASHES: never use an em dash (—) anywhere in your text. Split into two sentences, or use a comma or parentheses instead. Em dashes are one of the clearest tells of AI-generated writing.
-${llmOwnsGreeting
-  ? "7. GREETING: include the greeting as the first line of \"body\" and follow any Additional instruction about it exactly. Do NOT include a signature — that is added in code."
-  : "7. Do NOT include a greeting (\"Dear …\") or signature/sign-off — those are added in code."}`;
-  }
-  return `
-
-NON-NEGOTIABLE RULES (override anything above if in conflict):
-1. Your "body" field is the FULL first-email body: opening line, personalised intro, company introduction, offerings, key strengths, accolades, and closing — following the structure and approved copy options in the system prompt. Do NOT invent figures, certifications, or claims outside those approved lists / the product library / lead data.
-2. ATTACHMENTS: The lead data below states whether this email includes a brochure/file. If yes, use a closing that mentions "brochure" once. If no, do NOT mention any attachment or brochure.
-3. PERSONALISATION: The personalised intro must reference at least one concrete, specific fact from the lead's company description, keywords, or end markets. Do not use vague filler. If the company clearly makes or packages physical products, name them. If it is a software/services company with no obvious plastics use, keep it honest: acknowledge what they do, then bridge via packaging, merchandise, or hardware suppliers rather than inventing a direct need.
-4. PRODUCT MATCH: Weave the matched product's relevance into the intro naturally when the lead's industry plausibly uses it. Set product_match accordingly.
-5. SUBJECT: Pick one approved subject pattern from the system prompt and fill the bracketed part with the lead's real company name, industry, or country. Do not invent a different pattern.
-6. NO FABRICATION: never state a price, discount, percentage, certification, technical spec (e.g. TiO2 content, MFI, density), or delivery/lead-time claim unless it is explicitly present in the lead data, the PRODUCT REFERENCE LIBRARY, the approved copy in the system prompt, or the campaign context given below. Qualitative claims ("consistent opacity", "food-grade options") are fine; invented numbers are not.
-6b. CAMPAIGN CONTEXT: if a "Campaign context" line is given below, it is a directive from the sender, not optional trivia — you MUST work it into the personalised intro whenever it's relevant to the lead.
-7. FORMATTING: wrap at most one or two concrete facts actually present in the data in **double asterisks**. Do not bold whole sentences, generic phrases, or anything not grounded in the supplied data.
-8. NO EM DASHES: never use an em dash (—) anywhere in your text. One idea per sentence; split with a period, or use a comma or parentheses instead.
-${greetingRule}`;
+function buildCompanyBlock(companyContext: string): string {
+  if (!companyContext.trim()) return "";
+  return "\n\nABOUT KUBER POLYPLAST — the sender. Every claim you make about Kuber must be grounded here or in the product library:\n\n" + companyContext.trim();
 }
 
 function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProductOfferings>>): string {
@@ -150,10 +127,13 @@ function buildProductReferenceBlock(products: Awaited<ReturnType<typeof getProdu
   return "\n\nPRODUCT REFERENCE LIBRARY — pick the ONE best fit for this lead and set product_match to its exact name:\n\n" + entries.join("\n\n");
 }
 
+// The lead's own details. Kuber's details are in the system prompt (they are the
+// same for every lead); this is only what changes per prospect. The system
+// prompt's precedence section is what makes "Additional instruction" win, so it
+// is passed plainly here rather than wrapped in another layer of shouting.
 function buildUserPrompt(
   lead: LeadRow,
   campaignName: string,
-  companyContext: string,
   customInstruction?: string,
   aiPromptContext?: string,
   stepNumber = 1,
@@ -162,7 +142,7 @@ function buildUserPrompt(
   const org = unwrapOrg(lead.organizations);
   const lines = [
     `Campaign: "${campaignName}"`,
-    `Email step: ${stepNumber} of 3${stepNumber > 1 ? ` — this is a follow-up to a previous cold email the prospect did not reply to` : ""}`,
+    `Email step: ${stepNumber} of 3${stepNumber > 1 ? " (a follow-up to a previous cold email the prospect did not reply to)" : ""}`,
     `Name: ${[lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unknown"}`,
     `Title: ${lead.title ?? lead.headline ?? "Unknown"}`,
     `Seniority: ${lead.seniority ?? "Unknown"}`,
@@ -172,14 +152,11 @@ function buildUserPrompt(
     `What they do: ${org?.company_description ?? "Not available"}`,
     `Their end markets / customers: ${org?.sells_to ?? "Not available"}`,
     `Keywords: ${(org?.keywords ?? []).join(", ") || "Not available"}`,
-    `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email — mention "brochure" once in the closing` : "No attachment — do NOT mention any attachment or brochure anywhere in the body"}`,
+    `Attachment: ${attachmentName ? `a brochure file "${attachmentName}" is included with this email, so mention "brochure" once in the closing` : "No attachment, so do NOT mention any attachment or brochure anywhere in the body"}`,
   ];
-  if (companyContext) lines.push(`Company context: ${companyContext}`);
   if (aiPromptContext?.trim()) lines.push(`Campaign context: ${aiPromptContext.trim()}`);
-  if (customInstruction) {
-    lines.push(
-      `Additional instruction (MUST follow exactly — including any greeting/salutation, tone, length, or wording changes; this overrides the default "Dear {first_name}" style): ${customInstruction}`,
-    );
+  if (customInstruction?.trim()) {
+    lines.push(`Additional instruction: ${customInstruction.trim()}`);
   }
   return lines.join("\n");
 }
@@ -395,22 +372,17 @@ export async function generateOneDraft(
       getProductOfferings(db),
       getCompanyContext(db),
     ]);
-    // Regenerate-with-instruction must be able to rewrite the greeting too —
-    // otherwise "use Dear Sir instead of Dear {name}" is silently overwritten
-    // by the hardcoded salutation below.
-    const llmOwnsGreeting = Boolean(customInstruction?.trim());
+    // Style, structure and precedence all live in the system prompt now; code
+    // only supplies the data it is written against (sender, products) and the
+    // per-campaign context.
     const systemPrompt =
       baseSystemPrompt
-      + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
-      + buildProductReferenceBlock(products)
-      + buildDraftGuardrails(stepNumber, llmOwnsGreeting)
-      + (llmOwnsGreeting
-        ? `\n\nOVERRIDE: Because an Additional instruction was provided, "body" MUST include the greeting as its first line and that instruction wins over any default salutation rules above (including "do not include a greeting"). Signature is still added in code.`
-        : "");
+      + buildCompanyBlock(companyContext)
+      + buildProductReferenceBlock(products);
 
     const { json } = await complete<DraftLLMOutput>({
       system: systemPrompt,
-      user: buildUserPrompt(lead, campaignName, companyContext, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
+      user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
     });
 
     const validated = DraftSchema.safeParse(json);
@@ -422,23 +394,19 @@ export async function generateOneDraft(
       throw new Error(`Draft shape mismatch — ${issues}`);
     }
 
-    // Strip any greeting/sign-off/placeholder the LLM emitted despite instructions,
-    // and — defense in depth — any attachment/brochure mention on follow-ups or when
-    // no attachment is present. When llmOwnsGreeting, keep the opening "Dear …"
-    // so a regenerate instruction like "Dear Sir" actually sticks.
+    // Safety nets only — these clean up output, they never impose structure or
+    // length, so a custom instruction can still shape the email freely. The
+    // unfilled-placeholder and duplicate-sign-off strips exist because the
+    // signature is appended below; the em-dash strip is because em dashes are a
+    // well-known AI-writing tell and compliance with the prompt rule is not
+    // guaranteed.
     let aiBody = validated.data.body
       .trim()
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
       .replace(/\[Your Contact Information\]/gi, "")
-      .replace(/\[Your Company\]/gi, "");
-    if (!llmOwnsGreeting) {
-      aiBody = aiBody.replace(/^dear[^,\n]*,?\s*/i, "");
-    }
-    aiBody = aiBody
+      .replace(/\[Your Company\]/gi, "")
       .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
-      // Em dashes are a well-known AI-writing tell; the guardrails forbid them,
-      // but strip any that slip through as a safety net rather than trust compliance.
       .replace(/\s*[—–]\s*/g, ", ")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -450,10 +418,14 @@ export async function generateOneDraft(
       ).replace(/\n{3,}/g, "\n\n").trim();
     }
 
-    const greetingName = lead.first_name?.trim();
-    const greeting = llmOwnsGreeting
-      ? null
-      : (greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,");
+    // The prompt asks for the greeting as the body's first line, so a custom
+    // instruction ("address them as Dear Sir") can actually change it. Code no
+    // longer prepends one unconditionally; it only fills in when the model
+    // skipped the greeting, so an email can never open mid-sentence.
+    if (!/^\s*(dear|hi|hello|greetings|good (morning|afternoon|evening))\b/i.test(aiBody)) {
+      const greetingName = lead.first_name?.trim();
+      aiBody = `${greetingName ? `Dear ${greetingName},` : "Dear Sir/Ma'am,"}\n\n${aiBody}`;
+    }
 
     // Instantly cannot send real attachments, so deliver the brochure as a
     // link — tokenised in the AI body BEFORE assembly so the anchor can never
@@ -462,7 +434,7 @@ export async function generateOneDraft(
     const linkBrochure = stepNumber === 1 && !!effectiveAttachmentName && !!effectiveAttachmentUrl && /brochure/i.test(aiBody);
     if (linkBrochure) aiBody = aiBody.replace(/brochure/i, BROCHURE_TOKEN);
 
-    let finalBody = plainToHtml([greeting, aiBody, signatureBlock].filter(Boolean).join("\n\n"));
+    let finalBody = plainToHtml([aiBody, signatureBlock].filter(Boolean).join("\n\n"));
     if (linkBrochure) {
       finalBody = finalBody.replace(
         BROCHURE_TOKEN,
