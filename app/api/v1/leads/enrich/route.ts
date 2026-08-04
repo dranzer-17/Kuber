@@ -208,26 +208,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Record what this pass actually cost, on EVERY pass — not just failures.
-  // Apollo returns credits_consumed on each bulk_match and we were throwing it
-  // away on the happy path, so the app had no record of its own spend at all.
-  // Reconciling the July 2026 overspend against Apollo's billing export took a
-  // week for exactly this reason; with this row it is a single query.
-  if (stats.credits_consumed > 0 || targets.length > 0) {
-    await db.from("enrichment_logs").insert({
-      source: "apollo",
-      event: "APOLLO_SPEND",
-      payload: {
-        requested: targets.length,
-        credits_consumed: stats.credits_consumed,
-        matched: stats.matched,
-        archived: stats.archived,
-        balance_before: credits.remaining,
-        import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
-      },
-      ...(companyId ? { company_id: companyId } : {}),
-    });
-  }
+  // NOTE: the spend ledger row lives below, as a single CREDITS_CONSUMED event.
+  // An earlier version of this route wrote its own APOLLO_SPEND row here as
+  // well. Settings > Keys > Usage sums `payload.credits_consumed` across every
+  // apollo-source log row without filtering on the event name, so two rows per
+  // pass reported double the real spend — the one number this whole exercise
+  // exists to get right. One row, one event.
 
   // Ledger row for every batch that actually spent credits — separate from the
   // warning branch above, which only fires on failure. Without this a clean
@@ -244,9 +230,17 @@ export async function POST(req: NextRequest) {
         verified: stats.verified,
         unverified: stats.unverified,
         credits_consumed: stats.credits_consumed,
+        // The balance Apollo reported just before this batch. Makes the ledger
+        // self-checking: consecutive rows should differ by their own
+        // credits_consumed, and any drift is spend that did not come from here.
+        balance_before: credits.remaining,
         campaign_id: "campaign_id" in parsed.data ? parsed.data.campaign_id : null,
         import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
       },
+      // Attributed to the company whose leads these were — the service-role
+      // path is unscoped, so without this the row lands company_id null and is
+      // invisible to the scoped read behind the Usage tab.
+      ...(companyId ? { company_id: companyId } : {}),
     });
   }
 
