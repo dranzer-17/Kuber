@@ -300,6 +300,51 @@ export async function listInstantlyAccounts(): Promise<InstantlyAccount[]> {
   return data.items ?? [];
 }
 
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+export interface InstantlyCampaignAnalyticsOverview {
+  emails_sent_count?: number;
+  open_count?: number;
+  open_count_unique?: number;
+  reply_count?: number;
+  reply_count_unique?: number;
+  bounced_count?: number;
+  leads_count?: number;
+  new_leads_contacted_count?: number;
+  total_opportunities?: number;
+}
+
+/** Aggregate stats across every campaign in the workspace — the summary cards
+ *  for Settings > Keys > Usage > Instantly. */
+export async function getCampaignAnalyticsOverview(): Promise<InstantlyCampaignAnalyticsOverview> {
+  const res = await fetch(`${BASE}/campaigns/analytics/overview`, { headers: await h() });
+  return iJson<InstantlyCampaignAnalyticsOverview>(res);
+}
+
+export interface InstantlyDailyAnalytics {
+  date: string;
+  sent?: number;
+  opened?: number;
+  unique_opened?: number;
+  replies?: number;
+  unique_replies?: number;
+  clicks?: number;
+  unique_clicks?: number;
+}
+
+/** Day-by-day send/open/reply counts across every campaign — feeds the usage
+ *  timeline chart. Instantly's field names vary slightly by account tier, so
+ *  callers should treat missing numeric fields as 0 rather than erroring. */
+export async function getCampaignAnalyticsDaily(opts: {
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+}): Promise<InstantlyDailyAnalytics[]> {
+  const qs = new URLSearchParams({ start_date: opts.startDate, end_date: opts.endDate });
+  const res = await fetch(`${BASE}/campaigns/analytics/daily?${qs.toString()}`, { headers: await h() });
+  const data = await iJson<InstantlyDailyAnalytics[] | { data?: InstantlyDailyAnalytics[] }>(res);
+  return Array.isArray(data) ? data : (data.data ?? []);
+}
+
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
 
 export async function createInstantlyWebhook(opts: {

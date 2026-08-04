@@ -296,6 +296,137 @@ export async function checkProviderKey(token: string, id: string): Promise<{ id:
   return apiFetch(`/api/v1/settings/keys/${id}/check`, { method: "POST" }, token);
 }
 
+// ─── Settings > Keys > Usage ───────────────────────────────────────────────
+// Three dedicated views (Apollo / Instantly / AI) rather than one generic
+// list — Apollo and Instantly each have their own live analytics worth a full
+// page, and AI reduces to LLM key validity + generation volume.
+
+export type KeyCheck = { ok: boolean; remaining: number | null; message: string };
+
+export type ApolloEndpointUsage = {
+  resource: string;
+  action: string;
+  day: { limit: number; consumed: number; left_over: number };
+  hour: { limit: number; consumed: number; left_over: number };
+  minute: { limit: number; consumed: number; left_over: number };
+};
+
+export type ApolloCreditWindow = { limit: number; consumed: number; left_over: number };
+
+export type ApolloCreditUsageStats = {
+  lead_credit: ApolloCreditWindow;
+  direct_dial_credit: ApolloCreditWindow;
+  export_credit: ApolloCreditWindow;
+  conversation_credit: ApolloCreditWindow;
+  ai_credit: ApolloCreditWindow;
+  power_up_credit: ApolloCreditWindow;
+  inbound_website_visitor_credit: ApolloCreditWindow;
+  dialer: ApolloCreditWindow;
+  web_search_record_credit: ApolloCreditWindow;
+  contact_website_visitor_credit: ApolloCreditWindow;
+};
+
+export type ApolloCreditCycle = { start_date: string; end_date: string };
+
+export type ApolloUsageHistoryEntry = {
+  id: string;
+  created_at: string;
+  event: string;
+  label: string;
+  credits_consumed: number;
+  matched: number | null;
+  archived: number | null;
+  verified: number | null;
+  unverified: number | null;
+  requested: number | null;
+  import_id: string | null;
+  campaign_id: string | null;
+  message: string | null;
+};
+
+export type ApolloUsageData = {
+  key: KeyCheck;
+  allowanceMonthly: number | null;
+  consumed: { today: number; week: number; month: number; allTime: number };
+  remainingThisMonth: number | null;
+  daily: { date: string; credits: number }[];
+  rateLimits: ApolloEndpointUsage[] | null;
+  rateLimitsError: string | null;
+  creditUsage: ApolloCreditUsageStats | null;
+  creditCycle: ApolloCreditCycle | null;
+  creditUsageError: string | null;
+  history: ApolloUsageHistoryEntry[];
+  ledgerWindowDays: number;
+};
+
+export async function fetchApolloUsage(token: string, refresh = false): Promise<ApolloUsageData> {
+  const qs = refresh ? "?refresh=1" : "";
+  return apiFetch(`/api/v1/settings/keys/usage/apollo${qs}`, {}, token);
+}
+
+export async function setApolloCreditAllowance(token: string, allowanceMonthly: number | null): Promise<void> {
+  await apiFetch(
+    "/api/v1/settings/keys/usage/apollo",
+    { method: "PATCH", body: JSON.stringify({ allowanceMonthly }) },
+    token,
+  );
+}
+
+export type InstantlyUsageAccount = {
+  email: string;
+  status: number;
+  daily_limit: number | null;
+  first_name: string | null;
+  last_name: string | null;
+};
+
+export type InstantlyUsageData = {
+  key: KeyCheck;
+  accounts: {
+    data: InstantlyUsageAccount[] | null;
+    error: string | null;
+    totalDailyCapacity: number;
+    activeCount: number;
+    totalCount: number;
+  };
+  overview: {
+    data: {
+      emails_sent_count?: number;
+      open_count_unique?: number;
+      reply_count_unique?: number;
+      bounced_count?: number;
+      leads_count?: number;
+    } | null;
+    error: string | null;
+  };
+  daily: {
+    data: { date: string; sent?: number; unique_opened?: number; unique_replies?: number }[] | null;
+    error: string | null;
+  };
+};
+
+export async function fetchInstantlyUsage(token: string, refresh = false): Promise<InstantlyUsageData> {
+  const qs = refresh ? "?refresh=1" : "";
+  return apiFetch(`/api/v1/settings/keys/usage/instantly${qs}`, {}, token);
+}
+
+export type AiUsageData = {
+  providers: { id: string; label: string; ok: boolean; remaining: number | null; message: string }[];
+  tierRoles: { primary: string | null; fallback: string | null };
+  volume: {
+    windowDays: number;
+    totalDrafts: number;
+    totalReplies: number;
+    totalGenerations: number;
+    daily: { date: string; drafts: number; replies: number }[];
+  };
+};
+
+export async function fetchAiUsage(token: string, refresh = false): Promise<AiUsageData> {
+  const qs = refresh ? "?refresh=1" : "";
+  return apiFetch(`/api/v1/settings/keys/usage/ai${qs}`, {}, token);
+}
+
 export async function setProviderModel(token: string, provider: string, model: string | null): Promise<void> {
   await apiFetch("/api/v1/settings/keys/model", { method: "PUT", body: JSON.stringify({ provider, model }) }, token);
 }

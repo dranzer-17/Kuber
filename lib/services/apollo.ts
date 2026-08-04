@@ -148,6 +148,98 @@ export async function bulkMatch(
   return res.json();
 }
 
+// Per-endpoint rate limit snapshot as Apollo returns it — one entry per
+// ["resource", "action"] pair, e.g. ["people", "bulk_match"]. Keyed by a
+// JSON-stringified array in the raw response (see parseApiUsageStats).
+export interface ApolloEndpointUsage {
+  resource: string;
+  action: string;
+  day: { limit: number; consumed: number; left_over: number };
+  hour: { limit: number; consumed: number; left_over: number };
+  minute: { limit: number; consumed: number; left_over: number };
+}
+
+type RawUsageWindow = { limit: number; consumed: number; left_over: number };
+type RawUsageStats = Record<string, { day: RawUsageWindow; hour: RawUsageWindow; minute: RawUsageWindow }>;
+
+function parseApiUsageStats(raw: RawUsageStats): ApolloEndpointUsage[] {
+  const out: ApolloEndpointUsage[] = [];
+  for (const [key, windows] of Object.entries(raw)) {
+    let resource = key;
+    let action = "";
+    try {
+      const parsed = JSON.parse(key) as [string, string];
+      resource = parsed[0]?.replace(/^api\/v1\//, "") ?? key;
+      action = parsed[1] ?? "";
+    } catch { /* leave resource as the raw key */ }
+    out.push({ resource, action, ...windows });
+  }
+  return out;
+}
+
+/** Apollo's rate-limit/usage endpoint — a per-endpoint call-rate snapshot,
+ *  separate from the account's actual credit balance (see getCreditUsageStats
+ *  for that). Requires a Master API key; a scoped key 403s, which is
+ *  surfaced as a normal error for the UI to show rather than throw on. */
+export async function getApiUsageStats(): Promise<ApolloEndpointUsage[]> {
+  const res = await fetch(`${BASE}/usage_stats/api_usage_stats`, {
+    method: "POST",
+    headers: await headers(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw Object.assign(new Error(`Apollo usage_stats ${res.status}: ${text.slice(0, 300)}`), { status: res.status });
+  }
+  const raw = await res.json() as RawUsageStats;
+  return parseApiUsageStats(raw);
+}
+
+// The real team credit balance for the current billing cycle — same numbers
+// shown on Apollo's own Settings > Usage page. `lead_credit` is the shared
+// pool Apollo calls "Team credit usage" (spent on exports + email/phone
+// reveals); the rest are separate per-feature allowances.
+export interface ApolloCreditWindow {
+  limit: number;
+  consumed: number;
+  left_over: number;
+}
+
+export interface ApolloCreditUsageStats {
+  lead_credit: ApolloCreditWindow;
+  direct_dial_credit: ApolloCreditWindow;
+  export_credit: ApolloCreditWindow;
+  conversation_credit: ApolloCreditWindow;
+  ai_credit: ApolloCreditWindow;
+  power_up_credit: ApolloCreditWindow;
+  inbound_website_visitor_credit: ApolloCreditWindow;
+  dialer: ApolloCreditWindow;
+  web_search_record_credit: ApolloCreditWindow;
+  contact_website_visitor_credit: ApolloCreditWindow;
+}
+
+export interface ApolloCreditCycle {
+  start_date: string;
+  end_date: string;
+}
+
+export interface ApolloCreditUsageResponse {
+  credit_usage_stats: ApolloCreditUsageStats;
+  current_credit_cycle: ApolloCreditCycle;
+}
+
+/** Requires a Master API key, same as getApiUsageStats. */
+export async function getCreditUsageStats(): Promise<ApolloCreditUsageResponse> {
+  const res = await fetch(`${BASE}/usage_stats/credit_usage_stats`, {
+    method: "POST",
+    headers: await headers(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw Object.assign(new Error(`Apollo credit_usage_stats ${res.status}: ${text.slice(0, 300)}`), { status: res.status });
+  }
+  return res.json();
+}
+
 /** Chunk an array and run bulk_match with 500ms sleep between chunks */
 export async function bulkMatchChunked(
   details: Array<{ id: string; first_name?: string | null; organization_name?: string | null }>,

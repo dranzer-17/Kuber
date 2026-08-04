@@ -7,7 +7,7 @@ import {
   User, Bot, LogOut, Plus,
   ChevronRight, PenLine, Bold, Italic, Underline,
   List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type, Palette, Check, Sun, Moon,
-  Building2, Package, FileText, X,
+  Building2, Package, FileText, X, KeyRound, Gauge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,11 @@ const KeysView = dynamic(
   { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
 );
 
+const KeysUsageView = dynamic(
+  () => import("@/components/app/keys-usage-view").then((m) => m.KeysUsageView),
+  { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
+);
+
 const EmailSendingView = dynamic(
   () => import("@/components/app/email-sending-view").then((m) => m.EmailSendingView),
   { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
@@ -45,6 +50,7 @@ const UsageView = dynamic(
 type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team" | "email" | "keys" | "usage";
 type AiSection = "my-writing" | "my-signature" | "template" | "default" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
+type KeysSection = "credentials" | "usage";
 type ProductOffering = { name: string; description: string };
 
 // Knowledge Sources is open to everyone — employees work with the company
@@ -79,6 +85,11 @@ const COMPANY_AI_NAV_ITEMS: { id: AiSection; label: string; icon: React.Componen
   { id: "default",  label: "Default draft",  icon: FileText },
   { id: "replies",  label: "Reply AI",       icon: Bot },
   { id: "footer",   label: "Email Footer",   icon: Type },
+];
+
+const KEYS_NAV_ITEMS: { id: KeysSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: "credentials", label: "Credentials", icon: KeyRound },
+  { id: "usage",       label: "Usage",       icon: Gauge },
 ];
 
 const KNOWLEDGE_NAV_ITEMS: { id: KnowledgeSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -292,6 +303,7 @@ export function SettingsView() {
   const [section, setSection] = useState<Section>("profile");
   const [aiSection, setAiSection] = useState<AiSection>("my-writing");
   const [knowledgeSection, setKnowledgeSection] = useState<KnowledgeSection>("company");
+  const [keysSection, setKeysSection] = useState<KeysSection>("credentials");
 
   // Company-wide settings (managers edit; everyone inherits)
   const [senderName,     setSenderName    ] = useState("");
@@ -331,12 +343,14 @@ export function SettingsView() {
 
   const activeAiNavItem        = aiNavItems.find((i) => i.id === aiSection);
   const activeKnowledgeNavItem = KNOWLEDGE_NAV_ITEMS.find((i) => i.id === knowledgeSection);
+  const activeKeysNavItem      = KEYS_NAV_ITEMS.find((i) => i.id === keysSection);
 
   // The breadcrumb shows the ancestor trail; the deepest active item becomes the page title.
   const sectionLabel = navItems.find((n) => n.id === section)?.label ?? "Settings";
   const pageTitle =
     (section === "ai" && activeAiNavItem?.label) ||
     (section === "knowledge" && activeKnowledgeNavItem?.label) ||
+    (section === "keys" && activeKeysNavItem?.label) ||
     sectionLabel;
 
   useEffect(() => {
@@ -608,6 +622,20 @@ export function SettingsView() {
               <Button key={id} type="button" variant="ghost" onClick={() => setKnowledgeSection(id)}
                 className={cn("h-auto w-full justify-start gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium",
                   knowledgeSection === id ? "bg-primary text-primary-foreground font-semibold hover:bg-primary hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
+                <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
+              </Button>
+            ))}
+          </aside>
+        )}
+
+        {/* Keys secondary sidebar — Credentials (manage secrets) vs Usage (balances / validity) */}
+        {section === "keys" && isManager && (
+          <aside className="w-56 shrink-0 border-r border-border p-4 flex flex-col gap-1 overflow-y-auto">
+            <p className="eyebrow px-2 mb-1">Keys</p>
+            {KEYS_NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+              <Button key={id} type="button" variant="ghost" onClick={() => setKeysSection(id)}
+                className={cn("h-auto w-full justify-start gap-2.5 px-3 py-2.5 rounded-md text-sm font-medium",
+                  keysSection === id ? "bg-primary text-primary-foreground font-semibold hover:bg-primary hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50")}>
                 <Icon className="size-4 shrink-0" /><span className="truncate">{label}</span>
               </Button>
             ))}
@@ -1182,7 +1210,7 @@ export function SettingsView() {
                 </div>
               )}
 
-              {section === "keys" && isManager && (
+              {section === "keys" && isManager && keysSection === "credentials" && (
                 <div className="-m-8">
                   <KeysView />
                 </div>
@@ -1191,6 +1219,12 @@ export function SettingsView() {
               {section === "usage" && isManager && (
                 <div className="-m-8">
                   <UsageView />
+                </div>
+              )}
+
+              {section === "keys" && isManager && keysSection === "usage" && (
+                <div className="-m-8">
+                  <KeysUsageView />
                 </div>
               )}
 

@@ -212,7 +212,7 @@ export function KeysView() {
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8 enter">
       <div className="space-y-1">
-        <p className="eyebrow px-1">Settings · Keys</p>
+        <p className="eyebrow px-1">Settings · Keys · Credentials</p>
         <h2 className="font-display text-lg font-semibold px-1">API keys</h2>
         <p className="text-xs text-muted-foreground px-1">
           Credentials for the external services this app calls. Anything left unset

@@ -229,6 +229,27 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Ledger row for every batch that actually spent credits — separate from the
+  // warning branch above, which only fires on failure. Without this a clean
+  // run (the common case) left no trace of what it cost, which is exactly the
+  // number Settings > Keys > Usage > Apollo needs to show "credits used, when."
+  if (stats.credits_consumed > 0) {
+    await db.from("enrichment_logs").insert({
+      source: "apollo",
+      event: "CREDITS_CONSUMED",
+      payload: {
+        requested: targets.length,
+        matched: stats.matched,
+        archived: stats.archived,
+        verified: stats.verified,
+        unverified: stats.unverified,
+        credits_consumed: stats.credits_consumed,
+        campaign_id: "campaign_id" in parsed.data ? parsed.data.campaign_id : null,
+        import_id: "import_id" in parsed.data ? parsed.data.import_id : null,
+      },
+    });
+  }
+
   // Trigger org scraping AFTER enrichment — domains are now populated on orgs.
   if (stats.enriched_org_ids.length > 0 && secret && (await getServiceSecret("firecrawl"))) {
     after(() =>

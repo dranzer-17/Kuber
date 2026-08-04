@@ -270,10 +270,13 @@ const FETCHERS: Record<ProviderId, (secret: string) => Promise<CreditCheck>> = {
  *  inside complete()/scrapePage(), so rotation freshness never depends on
  *  this 5-minute cache.
  *
- *  `fresh` skips the cache read (but still refreshes it) for the case where a
- *  human just topped up and is retrying by hand — being told "out of credits"
- *  for another five minutes would read as the fix not having worked. Automated
- *  callers (watchdogs, self-chains) should leave it off; they retry anyway. */
+ *  `fresh` skips the cache read (but still refreshes it) — used both for the
+ *  case where a human just topped up and is retrying by hand (being told
+ *  "out of credits" for another five minutes would read as the fix not
+ *  having worked) and for the Settings > Keys > Usage refresh button, so the
+ *  admin sees a live balance rather than a stale pre-flight snapshot.
+ *  Automated callers (watchdogs, self-chains) should leave it off; they
+ *  retry anyway. */
 export interface CreditCheckOptions { fresh?: boolean }
 
 async function checkCredits(
@@ -297,15 +300,15 @@ async function checkCredits(
   return fresh;
 }
 
-export const checkFirecrawlCredits = (db: Db) => checkCredits(db, "firecrawl", "credit_check_firecrawl");
+export const checkFirecrawlCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "firecrawl", "credit_check_firecrawl", opts);
 export const checkApolloCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "apollo", "credit_check_apollo", opts);
-export const checkInstantlyCredits = (db: Db) => checkCredits(db, "instantly", "credit_check_instantly");
-export const checkOpenRouterCredits = (db: Db) => checkCredits(db, "openrouter", "credit_check_openrouter");
-export const checkOpenAICredits = (db: Db) => checkCredits(db, "openai", "credit_check_openai");
-export const checkAnthropicCredits = (db: Db) => checkCredits(db, "anthropic", "credit_check_anthropic");
-export const checkGeminiCredits = (db: Db) => checkCredits(db, "gemini", "credit_check_gemini");
-export const checkMistralCredits = (db: Db) => checkCredits(db, "mistral", "credit_check_mistral");
-export const checkGroqCredits = (db: Db) => checkCredits(db, "groq", "credit_check_groq");
+export const checkInstantlyCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "instantly", "credit_check_instantly", opts);
+export const checkOpenRouterCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "openrouter", "credit_check_openrouter", opts);
+export const checkOpenAICredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "openai", "credit_check_openai", opts);
+export const checkAnthropicCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "anthropic", "credit_check_anthropic", opts);
+export const checkGeminiCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "gemini", "credit_check_gemini", opts);
+export const checkMistralCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "mistral", "credit_check_mistral", opts);
+export const checkGroqCredits = (db: Db, opts?: CreditCheckOptions) => checkCredits(db, "groq", "credit_check_groq", opts);
 
 /** Used by the "Re-check" button on a specific stored key — bypasses the
  *  currently-active-key resolution and the 5-minute cache entirely, since
