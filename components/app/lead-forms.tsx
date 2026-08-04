@@ -18,16 +18,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { LOCATION_MAP, APOLLO_TITLES, APOLLO_SENIORITIES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor, resolveApolloKeyword } from "@/lib/constants";
+import { LOCATION_MAP, APOLLO_TITLES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS, getBatchColor, resolveApolloKeyword } from "@/lib/constants";
 import { LocationsPicker } from "@/components/ui/locations-picker";
 import { InfoTip } from "@/components/ui/info-tip";
 import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, fetchUsage, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
-import { TagInput } from "@/components/app/tag-input";
 import { Stepper } from "@/components/ui/stepper";
-
-export { TagInput };
 
 async function getToken(): Promise<string> {
   const { data } = await supabase.auth.getSession();
@@ -540,8 +537,6 @@ const LocationsDropdown = LocationsPicker;
 
 export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   const [keywords,      setKeywords     ] = useState<string[]>([]);
-  const [positions,     setPositions    ] = useState<string[]>([]);
-  const [seniorities,   setSeniorities  ] = useState<string[]>([]);
   const [locations,     setLocations    ] = useState<string[]>([]);
   // The ONLY two knobs. Search depth is no longer a choice — the server pages
   // until these are met (apollo-search/route.ts). Every lead landed here
@@ -575,10 +570,6 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
   const APOLLO_STEPS = ["Criteria", "Settings", "Batch", "Assign"];
   const [step, setStep] = useState(0);
-
-  function toggleSen(s: string) {
-    setSeniorities((p) => (p.includes(s) ? p.filter((x) => x !== s) : [...p, s]));
-  }
 
   const STRICT_TIERS = [25, 50, 100] as const;
   function toggleStrictCap(on: boolean) {
@@ -632,8 +623,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
           max_total_leads: maxTotalLeads,
           max_leads_per_keyword: maxPerKeyword,
           strict_cap: strictCap,
-          titles: positions.length > 0 ? positions : [...APOLLO_TITLES],
-          seniorities: seniorities.length > 0 ? seniorities : undefined,
+          titles: [...APOLLO_TITLES],
           batch_name: batchName,
           color,
           ...buildImportAssignment(assignMode, assignTo),
@@ -651,7 +641,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         setError(
           warnings.length > 0
             ? `No leads were imported: ${warnings[0]}`
-            : "No leads matched this search. Try different keywords, titles, or locations."
+            : "No leads matched this search. Try different keywords or locations."
         );
         setImporting(false);
         return;
@@ -683,33 +673,6 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         {step === 0 && (
           <div className="space-y-4">
             <IndustryKeywordsDropdown selected={keywords} onChange={setKeywords} />
-            <TagInput
-              label="Positions / Job Titles"
-              pills={positions}
-              suggestions={APOLLO_TITLES}
-              onChange={setPositions}
-              placeholder="e.g. VP, Plant Manager…"
-              tip="Leave empty to use 40+ built-in titles. Add specific titles to narrow results to those roles only."
-            />
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label>Seniority</Label>
-                <InfoTip side="right" text="Filters out junior contacts. Target decision-makers like VP, Director, or C-Suite. Leave unselected to include all levels." />
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {APOLLO_SENIORITIES.map((s) => (
-                  <button
-                    key={s} type="button" onClick={() => toggleSen(s)}
-                    className={cn(
-                      badgeVariants({ variant: seniorities.includes(s) ? "selected" : "unselected" }),
-                      "py-1",
-                    )}
-                  >
-                    {s.replace("_", " ")}
-                  </button>
-                ))}
-              </div>
-            </div>
             <LocationsDropdown
               selected={locations}
               onChangeSelected={setLocations}

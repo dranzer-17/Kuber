@@ -42,12 +42,7 @@ const EmailSendingView = dynamic(
   { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
 );
 
-const UsageView = dynamic(
-  () => import("@/components/app/usage-view").then((m) => m.UsageView),
-  { ssr: false, loading: () => <div className="p-8 animate-pulse"><div className="h-40 rounded-xl bg-secondary" /></div> },
-);
-
-type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team" | "email" | "keys" | "usage";
+type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team" | "email" | "keys";
 type AiSection = "my-writing" | "my-signature" | "template" | "default" | "replies" | "footer";
 type KnowledgeSection = "company" | "products" | "documents";
 type KeysSection = "credentials" | "usage";
@@ -296,7 +291,7 @@ export function SettingsView() {
   // runs unconditionally on every render.
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const navItems = isManager
-    ? [...MANAGER_NAV_ITEMS, { id: "email" as const, label: "Email & Sending" }, { id: "keys" as const, label: "Keys" }, { id: "usage" as const, label: "Usage" }]
+    ? [...MANAGER_NAV_ITEMS, { id: "email" as const, label: "Email & Sending" }, { id: "keys" as const, label: "Keys" }]
     : NAV_ITEMS;
   const aiNavItems = isManager ? [...PERSONAL_AI_NAV_ITEMS, ...COMPANY_AI_NAV_ITEMS] : PERSONAL_AI_NAV_ITEMS;
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -1213,12 +1208,6 @@ export function SettingsView() {
               {section === "keys" && isManager && keysSection === "credentials" && (
                 <div className="-m-8">
                   <KeysView />
-                </div>
-              )}
-
-              {section === "usage" && isManager && (
-                <div className="-m-8">
-                  <UsageView />
                 </div>
               )}
 
