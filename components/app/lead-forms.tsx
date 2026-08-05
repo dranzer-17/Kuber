@@ -681,13 +681,13 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
         )}
 
         {step === 1 && (
-          <div className="space-y-4 max-w-xs">
-            <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
-              <div className="space-y-0.5">
-                <Label className="text-xs">Strict cap</Label>
-                <p className="text-[11px] text-muted-foreground">Limit this import to a small, safe size (25/50/100)</p>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Strict cap</Label>
+              <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5">
+                <p className="text-xs text-muted-foreground">Limit this import to a small, safe size (25/50/100)</p>
+                <Switch tone="success" checked={strictCap} onCheckedChange={toggleStrictCap} />
               </div>
-              <Switch tone="success" checked={strictCap} onCheckedChange={toggleStrictCap} />
             </div>
 
             <div className="space-y-1.5">
