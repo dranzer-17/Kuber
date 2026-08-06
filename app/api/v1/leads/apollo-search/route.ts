@@ -161,8 +161,24 @@ export async function POST(req: NextRequest) {
   // now also the thing that decides when to stop paging.
   let overallCapHit = false;
 
-  for (const { query, label } of resolvedKeywords) {
+  for (const [keywordIndex, { query, label }] of resolvedKeywords.entries()) {
     if (overallCapHit) break;
+
+    // FAIR SHARE. Keywords used to run first-come-first-served against a single
+    // shared cap, so the first one simply ate the import: asking for 50 leads
+    // across 9 industry segments returned 50 from segment one and nothing at all
+    // from the eight the manager had deliberately ticked.
+    //
+    // Each keyword now gets an even slice of whatever budget is LEFT, recomputed
+    // per keyword — which is what rolls unspent slots forward automatically. If
+    // one segment is thin and yields 2 of its 6, the remaining keywords each get
+    // a slightly larger share and the import still finishes at the cap.
+    // max_leads_per_keyword stays on top as the per-keyword safety ceiling.
+    const keywordsLeft = resolvedKeywords.length - keywordIndex;
+    const budgetLeft = maxTotalLeads - inserted;
+    if (budgetLeft <= 0) break;
+    const keywordBudget = Math.min(Math.ceil(budgetLeft / keywordsLeft), max_leads_per_keyword);
+
     let keywordInserted = 0;
     // Consecutive pages that produced no new leads (all duplicates / no email).
     let barrenPages = 0;
@@ -170,9 +186,9 @@ export async function POST(req: NextRequest) {
     let pageCeiling = MAX_PAGES_PER_KEYWORD;
 
     for (let page = 1; page <= pageCeiling; page++) {
-      if (overallCapHit || keywordInserted >= max_leads_per_keyword) break;
+      if (overallCapHit || keywordInserted >= keywordBudget) break;
       if (barrenPages >= MAX_BARREN_PAGES) {
-        warnings.push(`[${label}] stopped after ${MAX_BARREN_PAGES} pages with no new leads — got ${keywordInserted} of ${max_leads_per_keyword}`);
+        warnings.push(`[${label}] stopped after ${MAX_BARREN_PAGES} pages with no new leads — got ${keywordInserted} of ${keywordBudget}`);
         break;
       }
       let result;
@@ -243,7 +259,7 @@ export async function POST(req: NextRequest) {
       // Trim to whatever's left of the per-keyword and overall caps so we
       // never insert (and later pay Apollo to reveal) more than requested,
       // even mid-page.
-      const roomForKeyword = max_leads_per_keyword - keywordInserted;
+      const roomForKeyword = keywordBudget - keywordInserted;
       const roomOverall = maxTotalLeads - inserted;
       const room = Math.min(roomForKeyword, roomOverall);
       if (room <= 0) break;
