@@ -262,7 +262,16 @@ export async function POST(req: NextRequest) {
   // Do NOT chain on a rate limit either: Apollo bills the rejected request, so
   // an immediate retry is the exact loop that turned 1,403 people into 3,222
   // credits on 2026-07-14. The 15-minute watchdog resumes it for free instead.
-  if ("import_id" in parsed.data && secret && !stats.credits_exhausted && !stats.rate_limited) {
+  // ...and do NOT chain after ANY failure, not just credits or a rate limit.
+  // Apollo bills a request the moment it receives one, including ones it never
+  // answers, so a timeout or a 5xx is still a paid attempt. Chaining straight
+  // into the next batch turns a broken Apollo into a paid retry loop running at
+  // full speed: with a 1,400-lead import that is ~29 passes back to back, each
+  // one paying for a chunk before it fails. `warning` is set by enrichLeads on
+  // every failure path, so this covers timeouts, 5xx and anything unforeseen.
+  // A stopped import is resumed by the once-a-day job, which is free and slow
+  // enough that a bad day shows up in the usage log before it can repeat.
+  if ("import_id" in parsed.data && secret && !stats.warning) {
     const importId = parsed.data.import_id;
     const { count: importRemaining } = await db
       .from("leads").select("id", { count: "exact", head: true })
