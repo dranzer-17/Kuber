@@ -5,6 +5,7 @@ import { ok, fail } from "@/lib/api-response";
 import { ExcelImportSchema } from "@/lib/validators/leads";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { normalizeDomain } from "@/lib/utils/domain";
+import { ensureSplitNames } from "@/lib/utils/person-name";
 import { dbForUser } from "@/lib/supabase/scoped";
 
 export const maxDuration = 300;
@@ -86,10 +87,16 @@ async function processRows(
     const email = rawEmail.toLowerCase();
     if (seenEmails.has(email)) { skippedDuplicateInFile++; continue; }
     seenEmails.add(email);
+    // Single "Name" columns are often mapped to first_name only — split when
+    // last_name is blank so "Lionel Pernaud" does not land entirely in first_name.
+    const { firstName, lastName } = ensureSplitNames(
+      firstNameCol ? String(row[firstNameCol] ?? "").trim() : "",
+      lastNameCol ? String(row[lastNameCol] ?? "").trim() : "",
+    );
     validRows.push({
       email,
-      first_name: firstNameCol ? String(row[firstNameCol] ?? "").trim() || undefined : undefined,
-      last_name: lastNameCol ? String(row[lastNameCol] ?? "").trim() || undefined : undefined,
+      first_name: firstName || undefined,
+      last_name: lastName || undefined,
       org_name: orgNameCol ? String(row[orgNameCol] ?? "").trim() || "Unknown" : "Unknown",
       org_domain: orgDomainCol ? String(row[orgDomainCol] ?? "").trim() || undefined : undefined,
       title: titleCol ? String(row[titleCol] ?? "").trim() || undefined : undefined,

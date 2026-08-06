@@ -22,6 +22,7 @@ import { LOCATION_MAP, APOLLO_TITLES, INDUSTRY_KEYWORD_CATEGORIES, BATCH_COLORS,
 import { LocationsPicker } from "@/components/ui/locations-picker";
 import { InfoTip } from "@/components/ui/info-tip";
 import { importExcelDirect, createLead, patchLead, patchOrg, fetchUsers, fetchUsage, type Profile, type PreviewLead, type DuplicateOwner } from "@/lib/api-client";
+import { ensureSplitNames } from "@/lib/utils/person-name";
 import { supabase } from "@/lib/supabase";
 import { BatchConfirmModal } from "@/components/app/batch-confirm-modal";
 import { Stepper } from "@/components/ui/stepper";
@@ -801,8 +802,8 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
 const PLATFORM_FIELDS = [
   { key: "email",               label: "Email",           required: true,  note: "Blocks progress if unmapped" },
-  { key: "first_name",          label: "First Name",      required: true,  note: "" },
-  { key: "last_name",           label: "Last Name",       required: false, note: "" },
+  // Mapped to first_name in the API payload; backend splits full names into first + last.
+  { key: "first_name",          label: "Name",            required: true,  note: "Full name OK — split into first & last on import" },
   { key: "organization_name",   label: "Company Name",    required: false, note: "" },
   { key: "organization_domain", label: "Company Domain",  required: true,  note: "Required for Firecrawl enrichment" },
   { key: "title",               label: "Job Title",       required: false, note: "" },
@@ -841,12 +842,12 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   function tryAutoMap(cols: string[]): Record<string, string> {
     const auto: Record<string, string> = {};
     const n = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+    const normalized = cols.map((c) => ({ raw: c, nc: n(c) }));
+
     for (const pf of PLATFORM_FIELDS) {
       const match = cols.find((c) => {
         const nc = n(c);
         if (pf.key === "email"               && (nc.includes("email") || nc.includes("mail"))) return true;
-        if (pf.key === "first_name"          && (nc.includes("firstname") || nc.includes("contactperson") || nc.includes("contact") || nc === "name")) return true;
-        if (pf.key === "last_name"           && nc.includes("lastname")) return true;
         if (pf.key === "organization_name"   && (nc.includes("company") || nc.includes("org"))) return true;
         if (pf.key === "organization_domain" && (nc.includes("website") || nc.includes("domain") || nc.includes("url") || nc.includes("web"))) return true;
         if (pf.key === "title"               && (nc.includes("title") || nc.includes("designation") || nc.includes("position") || nc.includes("role"))) return true;
@@ -854,7 +855,34 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
       });
       if (match) auto[pf.key] = match;
     }
+
+    // Single Name field: prefer a full-name column; otherwise use First Name
+    // (and keep Last Name in the API mapping quietly when both exist).
+    const fullNameCol = normalized.find(({ nc }) =>
+      nc === "name" || nc === "fullname" || nc.includes("contactperson") || nc === "contactname"
+    )?.raw;
+    const firstCol = normalized.find(({ nc }) => nc.includes("firstname") || nc === "first")?.raw;
+    const lastCol  = normalized.find(({ nc }) => nc.includes("lastname")  || nc === "last")?.raw;
+    if (fullNameCol) {
+      auto.first_name = fullNameCol;
+    } else if (firstCol) {
+      auto.first_name = firstCol;
+      if (lastCol) auto.last_name = lastCol;
+    }
+
     return auto;
+  }
+
+  /** UI maps only Name → first_name; strip any leftover last_name if the user remaps Name. */
+  function setNameMapping(column: string | null) {
+    setMapping((m) => {
+      const next = { ...m };
+      if (!column) delete next.first_name;
+      else next.first_name = column;
+      // Remapping Name means we're treating that column as the full name source.
+      delete next.last_name;
+      return next;
+    });
   }
 
   function handleFile(file: File) {
@@ -908,14 +936,20 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     setResult(null); setFileError(""); setAssignTo(""); setAssignMode("manual");
   }
 
-  const previewLeads: PreviewLead[] = rows.map((row) => ({
-    firstName: mapping.first_name           ? String(row[mapping.first_name]           ?? "") : "",
-    lastName:  mapping.last_name            ? String(row[mapping.last_name]            ?? "") : "",
-    email:     mapping.email                ? String(row[mapping.email]                ?? "") : "",
-    company:   mapping.organization_name    ? String(row[mapping.organization_name]    ?? "") : "",
-    domain:    mapping.organization_domain  ? String(row[mapping.organization_domain]  ?? "") : "",
-    jobTitle:  mapping.title                ? String(row[mapping.title]                ?? "") : "",
-  }));
+  const previewLeads: PreviewLead[] = rows.map((row) => {
+    const { firstName, lastName } = ensureSplitNames(
+      mapping.first_name ? String(row[mapping.first_name] ?? "") : "",
+      mapping.last_name  ? String(row[mapping.last_name]  ?? "") : "",
+    );
+    return {
+      firstName,
+      lastName,
+      email:     mapping.email                ? String(row[mapping.email]                ?? "") : "",
+      company:   mapping.organization_name    ? String(row[mapping.organization_name]    ?? "") : "",
+      domain:    mapping.organization_domain  ? String(row[mapping.organization_domain]  ?? "") : "",
+      jobTitle:  mapping.title                ? String(row[mapping.title]                ?? "") : "",
+    };
+  });
 
   if (stage === "result") {
     return (
@@ -941,9 +975,9 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
     );
   }
 
-  const emailMapped     = !!mapping.email;
-  const firstNameMapped = !!mapping.first_name;
-  const domainMapped    = !!mapping.organization_domain;
+  const emailMapped  = !!mapping.email;
+  const nameMapped   = !!mapping.first_name;
+  const domainMapped = !!mapping.organization_domain;
   const currentStepIndex =
     stage === "upload" ? 0
     : stage === "map"  ? 1
@@ -953,7 +987,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
   function handleFormSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     if (stage === "map") {
-      if (!emailMapped || !firstNameMapped || !domainMapped) return;
+      if (!emailMapped || !nameMapped || !domainMapped) return;
       setStage("batch");
       return;
     }
@@ -1011,13 +1045,28 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
                 <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                   {PLATFORM_FIELDS.map((pf) => {
                     const mapped = mapping[pf.key];
+                    const isName = pf.key === "first_name";
                     return (
                       <div key={pf.key} className="grid grid-cols-2 items-center gap-3 rounded-lg border border-border bg-card/60 px-3 py-2.5">
                         <div>
                           <span className="text-sm">{pf.label}{pf.required && <span className="text-destructive ml-1 text-xs">*</span>}</span>
                           {pf.note && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{pf.note}</p>}
                         </div>
-                        <Select value={mapped || "__none"} onValueChange={(v) => setMapping((m) => { const next = { ...m }; if (v === "__none") delete next[pf.key]; else next[pf.key] = v; return next; })}>
+                        <Select
+                          value={mapped || "__none"}
+                          onValueChange={(v) => {
+                            if (isName) {
+                              setNameMapping(v === "__none" ? null : v);
+                              return;
+                            }
+                            setMapping((m) => {
+                              const next = { ...m };
+                              if (v === "__none") delete next[pf.key];
+                              else next[pf.key] = v;
+                              return next;
+                            });
+                          }}
+                        >
                           <SelectTrigger className="h-8 text-xs bg-card">
                             <SelectValue placeholder="Not mapped" />
                           </SelectTrigger>
@@ -1034,8 +1083,8 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
 
               <div className="space-y-1.5">
                 {!emailMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Email column must be mapped before importing</div>}
-                {emailMapped && !firstNameMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />First Name must be mapped before importing</div>}
-                {emailMapped && firstNameMapped && !domainMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Company Domain must be mapped before importing</div>}
+                {emailMapped && !nameMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Name column must be mapped before importing</div>}
+                {emailMapped && nameMapped && !domainMapped && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />Company Domain must be mapped before importing</div>}
                 {fileError && <div className="flex items-center gap-2 text-xs text-destructive rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2"><AlertCircle className="size-3.5 shrink-0" />{fileError}</div>}
               </div>
 
@@ -1043,7 +1092,7 @@ export function ExcelForm({ onImport }: { onImport: (n: number) => void }) {
                 <p className="text-xs text-muted-foreground">{rows.length} rows detected</p>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" size="sm" className="bg-card" onClick={reset}>Back</Button>
-                  <Button type="submit" disabled={!emailMapped || !firstNameMapped || !domainMapped}>
+                  <Button type="submit" disabled={!emailMapped || !nameMapped || !domainMapped}>
                     Continue
                   </Button>
                 </div>

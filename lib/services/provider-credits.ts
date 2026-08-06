@@ -46,12 +46,26 @@ async function fetchFirecrawlCredits(secret: string): Promise<CreditCheck> {
       headers: { Authorization: `Bearer ${secret}` },
     });
     if (!res.ok) return { ok: true, remaining: null, message: `Credit check failed (HTTP ${res.status}) — proceeding rather than blocking on an unrelated API hiccup` };
-    const json = await res.json() as { success?: boolean; data?: { remainingCredits?: number } };
+    const json = await res.json() as {
+      success?: boolean;
+      data?: {
+        remainingCredits?: number;
+        planCredits?: number;
+        billingPeriodStart?: string | null;
+        billingPeriodEnd?: string | null;
+      };
+    };
     const remaining = json.data?.remainingCredits ?? null;
+    const limit = json.data?.planCredits ?? null;
+    const billingPeriodStart = json.data?.billingPeriodStart ?? null;
+    const billingPeriodEnd = json.data?.billingPeriodEnd ?? null;
     if (remaining == null) return { ok: true, remaining: null, message: "Could not read Firecrawl balance — proceeding" };
     return {
       ok: remaining >= FIRECRAWL_MIN_CREDITS,
       remaining,
+      limit,
+      billingPeriodStart,
+      billingPeriodEnd,
       message: remaining >= FIRECRAWL_MIN_CREDITS ? "OK" : `Firecrawl is out of credits (${remaining} left)`,
     };
   } catch {
@@ -208,6 +222,15 @@ function extractApolloRemaining(data: Record<string, unknown>): number | null {
   return null;
 }
 
+function extractApolloLimit(data: Record<string, unknown>): number | null {
+  const root = (data.data as Record<string, unknown> | undefined) ?? data;
+  if (typeof root.effective_num_lead_credits === "number") return root.effective_num_lead_credits;
+  const creditUsage = (root.credit_usage ?? data.credit_usage) as Record<string, unknown> | undefined;
+  const lead = (creditUsage?.lead_credits ?? creditUsage?.lead) as Record<string, unknown> | undefined;
+  if (typeof lead?.limit === "number") return lead.limit;
+  return null;
+}
+
 async function fetchApolloCredits(secret: string): Promise<CreditCheck> {
   try {
     const res = await fetch(
@@ -215,23 +238,25 @@ async function fetchApolloCredits(secret: string): Promise<CreditCheck> {
       { headers: { "x-api-key": secret, accept: "application/json" } },
     );
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, remaining: null, message: "Apollo rejected the API key (401/403) — invalid key" };
+      return { ok: false, remaining: null, limit: null, message: "Apollo rejected the API key (401/403) — invalid key" };
     }
-    if (!res.ok) return { ok: true, remaining: null, message: `Apollo key check failed (HTTP ${res.status}) — proceeding` };
+    if (!res.ok) return { ok: true, remaining: null, limit: null, message: `Apollo key check failed (HTTP ${res.status}) — proceeding` };
 
     const data = await res.json().catch(() => ({})) as Record<string, unknown>;
     const remaining = extractApolloRemaining(data);
+    const limit = extractApolloLimit(data);
 
     if (remaining == null) {
-      return { ok: true, remaining: null, message: "Apollo key is valid (couldn't read a credit balance from this response shape — check Settings > Keys > Re-check after Apollo's first real use to confirm parsing)" };
+      return { ok: true, remaining: null, limit, message: "Apollo key is valid (couldn't read a credit balance from this response shape — check Settings > Keys > Re-check after Apollo's first real use to confirm parsing)" };
     }
     return {
       ok: remaining >= APOLLO_MIN_CREDITS,
       remaining,
+      limit,
       message: remaining >= APOLLO_MIN_CREDITS ? "OK" : `Apollo is low on lead credits (${remaining} left)`,
     };
   } catch {
-    return { ok: true, remaining: null, message: "Apollo key check errored — proceeding" };
+    return { ok: true, remaining: null, limit: null, message: "Apollo key check errored — proceeding" };
   }
 }
 

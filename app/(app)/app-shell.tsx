@@ -13,7 +13,7 @@ import { useApp } from "@/lib/app-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { APP_LOGO_INITIAL, APP_NAME } from "@/lib/branding";
 import { isCampaignEligible, type Lead } from "@/lib/leads";
-import { deleteLead, fetchLogo, fetchUniboxUnread } from "@/lib/api-client";
+import { deleteLead, fetchLogo, fetchUniboxUnread, fetchApolloCredits } from "@/lib/api-client";
 import { RouteSkeleton } from "@/components/app/page-skeletons";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +60,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uniboxUnread, setUniboxUnread] = useState<number | null>(null);
+  const [apolloCredits, setApolloCredits] = useState<{ remaining: number | null; limit: number | null } | null>(null);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   // Starts false on both server and client's first render to avoid a
@@ -96,6 +97,19 @@ function AppShell({ children }: { children: React.ReactNode }) {
     };
     load();
     const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const load = () => {
+      fetchApolloCredits(session.access_token)
+        .then(setApolloCredits)
+        .catch(() => setApolloCredits(null));
+    };
+    load();
+    // Cached server-side for 5 minutes — refresh a bit more often than that.
+    const id = setInterval(load, 3 * 60_000);
     return () => clearInterval(id);
   }, [session]);
 
@@ -221,6 +235,29 @@ function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className={cn("border-t border-border", sidebarCollapsed ? "p-2 flex flex-col items-center gap-2" : "p-3 space-y-2")}>
+            {apolloCredits?.remaining != null && (
+              <div
+                title={
+                  apolloCredits.limit != null
+                    ? `Apollo key credits: ${apolloCredits.remaining.toLocaleString()} / ${apolloCredits.limit.toLocaleString()} left`
+                    : `Apollo key credits: ${apolloCredits.remaining.toLocaleString()} left`
+                }
+                className={cn(
+                  "text-muted-foreground",
+                  sidebarCollapsed
+                    ? "font-mono text-[9px] tabular-nums text-center leading-tight"
+                    : "flex items-baseline justify-between gap-2 px-1 text-[11px]",
+                )}
+              >
+                {!sidebarCollapsed && <span className="font-medium shrink-0">Key credits</span>}
+                <span className="font-mono tabular-nums">
+                  {apolloCredits.limit != null
+                    ? `${apolloCredits.remaining.toLocaleString()}/${apolloCredits.limit.toLocaleString()}`
+                    : apolloCredits.remaining.toLocaleString()}
+                </span>
+              </div>
+            )}
+
             {/* External Google Form — a plain `<a target="_blank">`, not next/link,
                 since this leaves the app entirely rather than routing within it. */}
             <a

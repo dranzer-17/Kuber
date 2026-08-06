@@ -141,7 +141,7 @@ type OrgRow = {
 
 const COLUMN_DEFS = [
   { key: "email",        label: "Email",        defaultVisible: true  },
-  { key: "job_title",   label: "Job Title",    defaultVisible: true  },
+  { key: "job_title",   label: "Job Title",    defaultVisible: false },
   { key: "status",      label: "Status",       defaultVisible: true  },
   { key: "assigned",    label: "Assigned",     defaultVisible: true  },
   { key: "source",      label: "Source",       defaultVisible: false },
@@ -160,6 +160,21 @@ type ColVisibility = Record<ColKey, boolean>;
 const DEFAULT_VISIBILITY: ColVisibility = Object.fromEntries(
   COLUMN_DEFS.map((c) => [c.key, c.defaultVisible])
 ) as ColVisibility;
+
+const ORG_COLUMN_DEFS = [
+  { key: "enrichment",  label: "Enrichment",  defaultVisible: true  },
+  { key: "domain",      label: "Domain",      defaultVisible: true  },
+  { key: "description", label: "Description", defaultVisible: true  },
+  { key: "sells_to",    label: "Sells To",    defaultVisible: true  },
+  { key: "leads",       label: "Leads",       defaultVisible: true  },
+] as const;
+
+type OrgColKey = typeof ORG_COLUMN_DEFS[number]["key"];
+type OrgColVisibility = Record<OrgColKey, boolean>;
+
+const DEFAULT_ORG_VISIBILITY: OrgColVisibility = Object.fromEntries(
+  ORG_COLUMN_DEFS.map((c) => [c.key, c.defaultVisible])
+) as OrgColVisibility;
 
 // ── Status dot ────────────────────────────────────────────────────────────────
 
@@ -200,9 +215,16 @@ function EnrichDot({ stage }: { stage: EnrichmentStage | null }) {
 
 // ── Columns dropdown ──────────────────────────────────────────────────────────
 
-function ColumnsDropdown({ visible, onChange }: {
-  visible: ColVisibility;
-  onChange: (v: ColVisibility) => void;
+function ColumnsDropdown<K extends string>({
+  defs,
+  visible,
+  onChange,
+  defaultVisible,
+}: {
+  defs: readonly { key: K; label: string }[];
+  visible: Record<K, boolean>;
+  onChange: (v: Record<K, boolean>) => void;
+  defaultVisible: Record<K, boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -215,7 +237,7 @@ function ColumnsDropdown({ visible, onChange }: {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  function toggle(key: ColKey) {
+  function toggle(key: K) {
     onChange({ ...visible, [key]: !visible[key] });
   }
 
@@ -231,7 +253,7 @@ function ColumnsDropdown({ visible, onChange }: {
             <p className="eyebrow">Toggle columns</p>
           </div>
           <div className="py-1">
-            {COLUMN_DEFS.map((col) => (
+            {defs.map((col) => (
               <Button
                 key={col.key}
                 type="button"
@@ -249,7 +271,7 @@ function ColumnsDropdown({ visible, onChange }: {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => onChange(DEFAULT_VISIBILITY)}
+              onClick={() => onChange(defaultVisible)}
               className="h-auto p-0 text-[11px] font-normal text-muted-foreground hover:bg-transparent hover:text-foreground"
             >
               Reset to default
@@ -259,6 +281,23 @@ function ColumnsDropdown({ visible, onChange }: {
       )}
     </div>
   );
+}
+
+function sortOrgs(rows: OrgRow[], sort: LeadsSort): OrgRow[] {
+  const copy = [...rows];
+  const newestLead = (org: OrgRow) =>
+    Math.max(0, ...org.leads.map((l) => new Date(l.createdAt).getTime()));
+  switch (sort) {
+    case "az":
+      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    case "za":
+      return copy.sort((a, b) => b.name.localeCompare(a.name));
+    case "oldest":
+      return copy.sort((a, b) => newestLead(a) - newestLead(b));
+    case "newest":
+    default:
+      return copy.sort((a, b) => newestLead(b) - newestLead(a));
+  }
 }
 
 // ── Filters modal helpers ─────────────────────────────────────────────────────
@@ -610,6 +649,7 @@ export default function LeadsPage() {
     (searchParams.get("entity") as LeadsEntityMode) || "individual"
   );
   const [visibleCols,     setVisibleCols    ] = useState<ColVisibility>(DEFAULT_VISIBILITY);
+  const [orgVisibleCols,  setOrgVisibleCols ] = useState<OrgColVisibility>(DEFAULT_ORG_VISIBILITY);
   const [searchQuery,     setSearchQuery    ] = useState(searchParams.get("q") ?? "");
   const [searchResults,   setSearchResults  ] = useState<Lead[] | null>(null);
   const [searchLoading,   setSearchLoading  ] = useState(false);
@@ -801,6 +841,8 @@ export default function LeadsPage() {
   }, [session, leads.length]);
 
   useEffect(() => {
+    // Org tab filters client-side; don't burn lead-search requests while there.
+    if (leadsEntityMode !== "individual") return;
     const trimmed = searchQuery.trim();
     if (!trimmed && !serverFilters) { setSearchResults(null); setSearchLoading(false); return; }
     if (!session) return;
@@ -812,7 +854,7 @@ export default function LeadsPage() {
         .finally(() => setSearchLoading(false));
     }, 300);
     return () => clearTimeout(handle);
-  }, [searchQuery, session, searchLeads, serverFilters]);
+  }, [searchQuery, session, searchLeads, serverFilters, leadsEntityMode]);
 
   const matchesFilters = (l: Lead) => {
     if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
@@ -844,6 +886,36 @@ export default function LeadsPage() {
   // assignee filter, or both. Prefer it whenever it exists: it is the complete
   // match from the database, where `leads` is only the newest page.
   const displayLeads = sortLeads((searchResults ?? leads).filter(matchesFilters), leadsSort);
+
+  // Org view is built from loaded leads, then searched/sorted as organizations.
+  // Lead filters stay Individual-only — they don't apply here.
+  const orgRows = (() => {
+    const orgMap = new Map<string, OrgRow>();
+    for (const lead of leads) {
+      if (!lead.orgId) continue;
+      if (!orgMap.has(lead.orgId)) {
+        orgMap.set(lead.orgId, {
+          id: lead.orgId,
+          name: lead.company,
+          domain: lead.domain,
+          enrichmentStage: lead.enrichmentStage,
+          companyDescription: lead.companyDescription,
+          sellsTo: lead.sellsTo,
+          leads: [],
+        });
+      }
+      orgMap.get(lead.orgId)!.leads.push(lead);
+    }
+    const orgQ = q.toLowerCase();
+    const filtered = Array.from(orgMap.values()).filter((org) => {
+      if (!orgQ) return true;
+      return (
+        org.name.toLowerCase().includes(orgQ) ||
+        org.domain.toLowerCase().includes(orgQ)
+      );
+    });
+    return sortOrgs(filtered, leadsSort);
+  })();
 
   const totalPages = Math.max(1, Math.ceil(displayLeads.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -967,16 +1039,16 @@ export default function LeadsPage() {
       </div>
 
       {/* ── Search + Columns toolbar ── */}
-      {leadsEntityMode === "individual" && (leadsViewMode === "list" || leadsViewMode === "kanban") && (
+      {(leadsEntityMode === "orgs" || (leadsEntityMode === "individual" && (leadsViewMode === "list" || leadsViewMode === "kanban"))) && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-border shrink-0">
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="Search leads or organization…"
+            placeholder={leadsEntityMode === "orgs" ? "Search organizations…" : "Search leads or organization…"}
             size="sm"
             wrapperClassName="flex-1 max-w-xs"
           />
-          {someChecked && role === "manager" && (
+          {leadsEntityMode === "individual" && someChecked && role === "manager" && (
             <Button
               size="sm" variant="destructive" className="gap-1.5 text-white!"
               onClick={() => { if (checkedIds.size > 0) setShowBulkDelete(true); }}
@@ -996,23 +1068,43 @@ export default function LeadsPage() {
                 <SelectItem value="za">Z – A</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              type="button"
-              variant={isFiltersEmpty(filters) ? "outline" : "default"}
-              size="sm"
-              className={cn("relative gap-1.5", isFiltersEmpty(filters) && "bg-card")}
-              onClick={() => setShowFilters(true)}
-            >
-              <SlidersHorizontal className="size-3.5" />
-              Filters
-              {!isFiltersEmpty(filters) && (
-                <span className="ml-0.5 size-4 rounded-full bg-primary-foreground/20 font-mono text-[9px] font-bold tabular-nums flex items-center justify-center">
-                  {activeFilterCount(filters)}
-                </span>
-              )}
-            </Button>
-            {leadsViewMode === "list" && <ColumnsDropdown visible={visibleCols} onChange={setVisibleCols} />}
-            <span className="font-mono text-xs text-muted-foreground tabular-nums">{displayLeads.length} leads</span>
+            {leadsEntityMode === "individual" && (
+              <Button
+                type="button"
+                variant={isFiltersEmpty(filters) ? "outline" : "default"}
+                size="sm"
+                className={cn("relative gap-1.5", isFiltersEmpty(filters) && "bg-card")}
+                onClick={() => setShowFilters(true)}
+              >
+                <SlidersHorizontal className="size-3.5" />
+                Filters
+                {!isFiltersEmpty(filters) && (
+                  <span className="ml-0.5 size-4 rounded-full bg-primary-foreground/20 font-mono text-[9px] font-bold tabular-nums flex items-center justify-center">
+                    {activeFilterCount(filters)}
+                  </span>
+                )}
+              </Button>
+            )}
+            {leadsEntityMode === "orgs" ? (
+              <ColumnsDropdown
+                defs={ORG_COLUMN_DEFS}
+                visible={orgVisibleCols}
+                onChange={setOrgVisibleCols}
+                defaultVisible={DEFAULT_ORG_VISIBILITY}
+              />
+            ) : (
+              leadsViewMode === "list" && (
+                <ColumnsDropdown
+                  defs={COLUMN_DEFS}
+                  visible={visibleCols}
+                  onChange={setVisibleCols}
+                  defaultVisible={DEFAULT_VISIBILITY}
+                />
+              )
+            )}
+            <span className="font-mono text-xs text-muted-foreground tabular-nums">
+              {leadsEntityMode === "orgs" ? `${orgRows.length} orgs` : `${displayLeads.length} leads`}
+            </span>
           </div>
         </div>
       )}
@@ -1042,44 +1134,42 @@ export default function LeadsPage() {
               ))}
             </div>
           </div>
-        ) : leadsEntityMode === "orgs" ? (() => {
-          const orgMap = new Map<string, OrgRow>();
-          for (const lead of leads) {
-            if (!lead.orgId) continue;
-            if (!orgMap.has(lead.orgId)) {
-              orgMap.set(lead.orgId, {
-                id: lead.orgId,
-                name: lead.company,
-                domain: lead.domain,
-                enrichmentStage: lead.enrichmentStage,
-                companyDescription: lead.companyDescription,
-                sellsTo: lead.sellsTo,
-                leads: [],
-              });
-            }
-            orgMap.get(lead.orgId)!.leads.push(lead);
-          }
-          const orgRows = Array.from(orgMap.values());
-
-          return (
+        ) : leadsEntityMode === "orgs" ? (
             <div>
               <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden w-full">
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border hover:bg-transparent">
                       <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Organization</TableHead>
-                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-8" title="Enrichment" />
-                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Domain</TableHead>
-                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Description</TableHead>
-                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Sells To</TableHead>
-                      <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Leads</TableHead>
+                      {orgVisibleCols.enrichment && (
+                        <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground w-8" title="Enrichment" />
+                      )}
+                      {orgVisibleCols.domain && (
+                        <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Domain</TableHead>
+                      )}
+                      {orgVisibleCols.description && (
+                        <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Description</TableHead>
+                      )}
+                      {orgVisibleCols.sells_to && (
+                        <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Sells To</TableHead>
+                      )}
+                      {orgVisibleCols.leads && (
+                        <TableHead className="font-mono text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Leads</TableHead>
+                      )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {orgRows.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="p-0">
-                          <EmptyState boxed={false} message="No organizations found. Add leads with a domain to populate this view." />
+                        <TableCell colSpan={1 + Object.values(orgVisibleCols).filter(Boolean).length} className="p-0">
+                          <EmptyState
+                            boxed={false}
+                            message={
+                              q
+                                ? `No organizations match "${q}".`
+                                : "No organizations found. Add leads with a domain to populate this view."
+                            }
+                          />
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -1097,19 +1187,29 @@ export default function LeadsPage() {
                               <p className="text-sm font-semibold">{org.name || "—"}</p>
                             </div>
                           </TableCell>
-                          <TableCell className="text-center">
-                            <EnrichDot stage={org.enrichmentStage} />
-                          </TableCell>
-                          <TableCell><span className="font-mono text-xs text-muted-foreground">{org.domain || "—"}</span></TableCell>
-                          <TableCell className="max-w-xs">
-                            <span className="text-xs text-muted-foreground line-clamp-2">{org.companyDescription || "—"}</span>
-                          </TableCell>
-                          <TableCell className="max-w-xs">
-                            <span className="text-xs text-muted-foreground line-clamp-2">{org.sellsTo || "—"}</span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <span className="font-mono text-xs font-semibold tabular-nums">{org.leads.length}</span>
-                          </TableCell>
+                          {orgVisibleCols.enrichment && (
+                            <TableCell className="text-center">
+                              <EnrichDot stage={org.enrichmentStage} />
+                            </TableCell>
+                          )}
+                          {orgVisibleCols.domain && (
+                            <TableCell><span className="font-mono text-xs text-muted-foreground">{org.domain || "—"}</span></TableCell>
+                          )}
+                          {orgVisibleCols.description && (
+                            <TableCell className="max-w-xs">
+                              <span className="text-xs text-muted-foreground line-clamp-2">{org.companyDescription || "—"}</span>
+                            </TableCell>
+                          )}
+                          {orgVisibleCols.sells_to && (
+                            <TableCell className="max-w-xs">
+                              <span className="text-xs text-muted-foreground line-clamp-2">{org.sellsTo || "—"}</span>
+                            </TableCell>
+                          )}
+                          {orgVisibleCols.leads && (
+                            <TableCell className="text-right">
+                              <span className="font-mono text-xs font-semibold tabular-nums">{org.leads.length}</span>
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))
                     )}
@@ -1117,8 +1217,7 @@ export default function LeadsPage() {
                 </Table>
               </div>
             </div>
-          );
-        })() : leadsViewMode === "kanban" ? (
+        ) : leadsViewMode === "kanban" ? (
           <>
             <KanbanBoard
               leads={displayLeads}

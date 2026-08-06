@@ -250,6 +250,10 @@ export async function fetchServiceHealth(token: string): Promise<ServiceIssue[]>
   return data.issues;
 }
 
+export async function fetchApolloCredits(token: string): Promise<{ remaining: number | null; limit: number | null }> {
+  return apiFetch<{ remaining: number | null; limit: number | null }>("/api/v1/apollo-credits", {}, token);
+}
+
 export type LeadActivityEvent = {
   event: string;
   detail: string | null;
@@ -457,6 +461,49 @@ export type AiUsageData = {
 export async function fetchAiUsage(token: string, refresh = false): Promise<AiUsageData> {
   const qs = refresh ? "?refresh=1" : "";
   return apiFetch(`/api/v1/settings/keys/usage/ai${qs}`, {}, token);
+}
+
+export type FirecrawlUsageHistoryEntry = {
+  id: string;
+  created_at: string;
+  event: string;
+  label: string;
+  domain: string | null;
+  chars: number | null;
+  message: string | null;
+};
+
+export type FirecrawlUsageData = {
+  key: KeyCheck & {
+    limit?: number | null;
+    billingPeriodStart?: string | null;
+    billingPeriodEnd?: string | null;
+  };
+  credits: {
+    remaining: number | null;
+    planCredits: number | null;
+    usedThisCycle: number | null;
+    billingPeriodStart: string | null;
+    billingPeriodEnd: string | null;
+  };
+  activity: {
+    today: number;
+    week: number;
+    month: number;
+    allTime: number;
+    success: number;
+    failed: number;
+    empty: number;
+    cacheHit: number;
+  };
+  daily: { date: string; scrapes: number; successes: number; failures: number }[];
+  history: FirecrawlUsageHistoryEntry[];
+  ledgerWindowDays: number;
+};
+
+export async function fetchFirecrawlUsage(token: string, refresh = false): Promise<FirecrawlUsageData> {
+  const qs = refresh ? "?refresh=1" : "";
+  return apiFetch(`/api/v1/settings/keys/usage/firecrawl${qs}`, {}, token);
 }
 
 export async function setProviderModel(token: string, provider: string, model: string | null): Promise<void> {

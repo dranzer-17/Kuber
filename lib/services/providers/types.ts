@@ -29,4 +29,13 @@ export interface CompletionOpts {
   maxTokens?: number;
 }
 
-export type CreditCheck = { ok: boolean; remaining: number | null; message: string };
+export type CreditCheck = {
+  ok: boolean;
+  remaining: number | null;
+  message: string;
+  /** Plan entitlement / pool size when the provider reports one (Apollo, Firecrawl). */
+  limit?: number | null;
+  /** Current billing-period bounds when the provider reports them (Firecrawl). */
+  billingPeriodStart?: string | null;
+  billingPeriodEnd?: string | null;
+};
