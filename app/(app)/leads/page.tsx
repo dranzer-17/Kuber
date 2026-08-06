@@ -587,6 +587,8 @@ export default function LeadsPage() {
     leadsTotal,
     loadMoreLeads,
     loadingMoreLeads,
+    loadAllLeads,
+    loadingAllLeads,
     searchLeads,
     checkedIds,
     setCheckedIds,
@@ -965,12 +967,12 @@ export default function LeadsPage() {
       </div>
 
       {/* ── Search + Columns toolbar ── */}
-      {leadsEntityMode === "individual" && leadsViewMode === "list" && (
+      {leadsEntityMode === "individual" && (leadsViewMode === "list" || leadsViewMode === "kanban") && (
         <div className="flex items-center gap-3 px-8 py-3 border-b border-border shrink-0">
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="Search leads…"
+            placeholder="Search leads or organization…"
             size="sm"
             wrapperClassName="flex-1 max-w-xs"
           />
@@ -1009,7 +1011,7 @@ export default function LeadsPage() {
                 </span>
               )}
             </Button>
-            <ColumnsDropdown visible={visibleCols} onChange={setVisibleCols} />
+            {leadsViewMode === "list" && <ColumnsDropdown visible={visibleCols} onChange={setVisibleCols} />}
             <span className="font-mono text-xs text-muted-foreground tabular-nums">{displayLeads.length} leads</span>
           </div>
         </div>
@@ -1130,11 +1132,11 @@ export default function LeadsPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => session && loadMoreLeads(session.access_token)}
-                  disabled={loadingMoreLeads}
+                  onClick={() => session && loadAllLeads(session.access_token)}
+                  disabled={loadingAllLeads}
                   className="text-xs"
                 >
-                  {loadingMoreLeads ? "Loading…" : `Show more (${leads.length} of ${leadsTotal})`}
+                  {loadingAllLeads ? `Loading… (${leads.length} of ${leadsTotal})` : `Load all leads (${leads.length} of ${leadsTotal})`}
                 </Button>
               </div>
             )}

@@ -28,6 +28,8 @@ type AppContextValue = {
   loadingLeads: boolean;
   loadMoreLeads: (token: string) => Promise<void>;
   loadingMoreLeads: boolean;
+  loadAllLeads: (token: string) => Promise<void>;
+  loadingAllLeads: boolean;
   searchLeads: (token: string, query: string, filters?: LeadListFilters) => Promise<{ leads: Lead[]; total: number }>;
 
   // Campaigns
@@ -106,6 +108,7 @@ export function AppProvider({
   const [leadsTotal,       setLeadsTotal     ] = useState<number | null>(initialLeadsTotal);
   const [loadingLeads,     setLoadingLeads   ] = useState(false);
   const [loadingMoreLeads, setLoadingMoreLeads] = useState(false);
+  const [loadingAllLeads, setLoadingAllLeads] = useState(false);
   const [campaigns,        setCampaigns      ] = useState<Campaign[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
 
@@ -236,6 +239,27 @@ export function AppProvider({
     finally { setLoadingMoreLeads(false); }
   }, [leads.length]);
 
+  /** Pages in every remaining lead in one call — for views (Kanban) where a
+   *  partial window skews the client-side status split instead of just
+   *  showing fewer rows. */
+  const loadAllLeads = useCallback(async (token: string) => {
+    setLoadingAllLeads(true);
+    try {
+      let page = Math.floor(leads.length / LEADS_PAGE_SIZE) + 1;
+      for (;;) {
+        const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page });
+        setLeads((prev) => {
+          const known = new Set(prev.map((l) => l.id));
+          return [...prev, ...res.leads.filter((l) => !known.has(l.id))];
+        });
+        setLeadsTotal(res.total);
+        if (res.leads.length < LEADS_PAGE_SIZE || page * LEADS_PAGE_SIZE >= res.total) break;
+        page++;
+      }
+    } catch { /* silently ignore */ }
+    finally { setLoadingAllLeads(false); }
+  }, [leads.length]);
+
   // Runs the search against the DB (not the client-loaded `leads` subset) so
   // it finds a match anywhere in the table, not just among the leads already
   // paged in. Independent of `leads` state — never touches it.
@@ -311,6 +335,8 @@ export function AppProvider({
     loadingLeads,
     loadMoreLeads,
     loadingMoreLeads,
+    loadAllLeads,
+    loadingAllLeads,
     searchLeads,
     campaigns,
     setCampaigns,
@@ -336,7 +362,7 @@ export function AppProvider({
     setDeleteLeadLoading,
   }), [
     session, loadingSession,
-    leads, leadsTotal, loadLeads, loadingLeads, loadMoreLeads, loadingMoreLeads, searchLeads,
+    leads, leadsTotal, loadLeads, loadingLeads, loadMoreLeads, loadingMoreLeads, loadAllLeads, loadingAllLeads, searchLeads,
     campaigns, loadCampaigns, loadingCampaigns,
     enrichingIds, handleEnrichLead,
     checkedIds, selectedLead, selectedOrgId,
