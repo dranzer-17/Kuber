@@ -6,7 +6,7 @@ import { isAppUser, getUserRole, type AppRole } from "@/lib/auth/roles";
 import { type Lead } from "@/lib/leads";
 import { type Campaign } from "@/components/app/create-campaign-modal";
 import { supabase } from "@/lib/supabase";
-import { fetchLeads, fetchLeadsCount, fetchCampaigns, rescrapeOrg } from "@/lib/api-client";
+import { fetchLeads, fetchLeadsCount, fetchCampaigns, rescrapeOrg, type LeadListFilters } from "@/lib/api-client";
 
 export type PrefillData = {
   prefillOrg?: { id?: string; name: string; industry: string; domain: string; country: string };
@@ -28,7 +28,7 @@ type AppContextValue = {
   loadingLeads: boolean;
   loadMoreLeads: (token: string) => Promise<void>;
   loadingMoreLeads: boolean;
-  searchLeads: (token: string, query: string, assignedTo?: string) => Promise<{ leads: Lead[]; total: number }>;
+  searchLeads: (token: string, query: string, filters?: LeadListFilters) => Promise<{ leads: Lead[]; total: number }>;
 
   // Campaigns
   campaigns: Campaign[];
@@ -239,12 +239,12 @@ export function AppProvider({
   // Runs the search against the DB (not the client-loaded `leads` subset) so
   // it finds a match anywhere in the table, not just among the leads already
   // paged in. Independent of `leads` state — never touches it.
-  const searchLeads = useCallback(async (token: string, query: string, assignedTo?: string): Promise<{ leads: Lead[]; total: number }> => {
+  const searchLeads = useCallback(async (token: string, query: string, filters?: LeadListFilters): Promise<{ leads: Lead[]; total: number }> => {
     const seen = new Set<string>();
     const all: Lead[] = [];
     let total = 0;
     for (let page = 1; ; page++) {
-      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page, q: query || undefined, assigned_to: assignedTo });
+      const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page, q: query || undefined, ...filters });
       for (const lead of res.leads) {
         if (seen.has(lead.id)) continue;
         seen.add(lead.id);

@@ -40,6 +40,14 @@ export const PatchLeadSchema = z.object({
   assigned_to: z.string().uuid().nullable().optional(),
 });
 
+/** "a,b,c" -> ["a","b","c"]. Empty/blank entries dropped so a trailing comma
+ *  or an empty param can never turn into an `.in(col, [""])` that matches
+ *  nothing. */
+const csvList = z
+  .string()
+  .transform((s) => s.split(",").map((v) => v.trim()).filter(Boolean))
+  .optional();
+
 export const LeadListQuerySchema = z.object({
   country: z.string().optional(),
   email_status: z.string().optional(),
@@ -49,6 +57,13 @@ export const LeadListQuerySchema = z.object({
   import_id: z.string().uuid().optional(),
   created_after: z.string().datetime().optional(),
   assigned_to: z.string().optional(),
+  // Multi-select filters, comma-separated. The Leads page used to apply these
+  // in the browser against the ~500 rows it had loaded, which silently missed
+  // anything further back than the newest page. They belong in the query.
+  statuses: csvList,
+  sources: csvList,
+  import_ids: csvList,
+  created_before: z.string().datetime().optional(),
   q: z.string().trim().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(2000).default(50),

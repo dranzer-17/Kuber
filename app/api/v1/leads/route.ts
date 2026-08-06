@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
   const parsed = LeadListQuerySchema.safeParse(sp);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid query", parsed.error.flatten());
 
-  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, q: search, page, limit } = parsed.data;
+  const { country, email_status, lead_source, organization_id, email_domain_catchall, import_id, created_after, assigned_to, statuses, sources, import_ids, created_before, q: search, page, limit } = parsed.data;
   const db = dbForUser(user);
 
   let q = onlyRevealedLeads(
@@ -120,6 +120,12 @@ export async function GET(req: NextRequest) {
   if (email_domain_catchall !== undefined) q = q.eq("email_domain_catchall", email_domain_catchall === "true");
   if (import_id) q = q.eq("import_id", import_id);
   if (created_after) q = q.gte("created_at", created_after);
+
+  // Multi-select equivalents of the four above, used by the Leads page filters.
+  if (statuses?.length) q = q.in("status", statuses);
+  if (sources?.length) q = q.in("lead_source", sources);
+  if (import_ids?.length) q = q.in("import_id", import_ids);
+  if (created_before) q = q.lte("created_at", created_before);
 
   if (search) {
     // Escape ilike wildcards so literal % / _ in the search text aren't

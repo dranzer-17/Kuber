@@ -1,13 +1,13 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, DB_LEAD_STATUS, DB_LEAD_SOURCE, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary, type LeadListFilters } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getBatchColor } from "@/lib/constants";
 import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
@@ -749,29 +749,45 @@ export default function LeadsPage() {
   // into `leads` — a lead further back than the loaded window would
   // otherwise never be findable. Debounced so we're not hitting the API on
   // every keystroke.
-  // The assignee filter goes to the DB for the same reason: `leads` only holds
-  // the first page (500 rows, newest first), and every other filter below runs
-  // against that array. An employee whose leads are all older than the newest
-  // 500 — exactly what a bulk import of historical leads produces — matched
-  // nothing at all, while their own login showed the full book. Filtering a
-  // window is not filtering.
+  // EVERY filter goes to the database, not to the browser. `leads` only holds
+  // the first page (500 rows, newest first), so filtering it was really
+  // "filter the newest 500" — an employee, batch or status whose rows all sit
+  // further back matched nothing, which is exactly what a bulk import of
+  // historical leads produces. Filtering a window is not filtering.
+  //
+  // Batch is chosen by label in the UI but stored as import_id, and two imports
+  // can share a label, so map the label to every id that carries it.
+  const serverFilters: LeadListFilters | undefined = useMemo(() => {
+    const f: LeadListFilters = {};
+    if (filters.assignees.size === 1) f.assigned_to = [...filters.assignees][0];
+    if (filters.statuses.size > 0) f.statuses = [...filters.statuses].map((s) => DB_LEAD_STATUS[s] ?? s);
+    if (filters.sources.size > 0) f.sources = [...filters.sources].map((s) => DB_LEAD_SOURCE[s] ?? s);
+    if (filters.batchLabels.size > 0) {
+      f.import_ids = importBatches.filter((b) => filters.batchLabels.has(b.label)).map((b) => b.id);
+      if (f.import_ids.length === 0) delete f.import_ids;
+    }
+    if (filters.createdFrom) f.created_after = filters.createdFrom.toISOString();
+    if (filters.createdTo) {
+      const to = new Date(filters.createdTo);
+      to.setHours(23, 59, 59, 999);
+      f.created_before = to.toISOString();
+    }
+    return Object.keys(f).length > 0 ? f : undefined;
+  }, [filters, importBatches]);
+
   useEffect(() => {
     const trimmed = searchQuery.trim();
-    // One assignee goes to the DB (the API takes a single `assigned_to`, and
-    // "unassigned" is its own sentinel there). Two or more still fall back to
-    // the client-side pass below — rare, and the API has no `in` filter yet.
-    const serverAssignee = filters.assignees.size === 1 ? [...filters.assignees][0] : undefined;
-    if (!trimmed && !serverAssignee) { setSearchResults(null); setSearchLoading(false); return; }
+    if (!trimmed && !serverFilters) { setSearchResults(null); setSearchLoading(false); return; }
     if (!session) return;
     setSearchLoading(true);
     const handle = setTimeout(() => {
-      searchLeads(session.access_token, trimmed, serverAssignee)
+      searchLeads(session.access_token, trimmed, serverFilters)
         .then((res) => setSearchResults(res.leads))
         .catch(() => setSearchResults([]))
         .finally(() => setSearchLoading(false));
     }, 300);
     return () => clearTimeout(handle);
-  }, [searchQuery, session, searchLeads, filters.assignees]);
+  }, [searchQuery, session, searchLeads, serverFilters]);
 
   const matchesFilters = (l: Lead) => {
     if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;

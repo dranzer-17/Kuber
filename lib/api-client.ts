@@ -191,13 +191,37 @@ export async function fetchLeadsCount(token: string): Promise<number> {
   return data.total;
 }
 
-export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string; q?: string; assigned_to?: string }): Promise<{ leads: Lead[]; total: number }> {
+/** The Leads page filters hold DISPLAY labels ("Input Required", "Apollo").
+ *  The database stores the enum values. Reverse the two maps once here so the
+ *  page never has to know the difference. */
+export const DB_LEAD_STATUS = Object.fromEntries(
+  Object.entries(LEAD_STATUS_MAP).map(([db, label]) => [label, db]),
+) as Record<string, string>;
+export const DB_LEAD_SOURCE = Object.fromEntries(
+  Object.entries(SOURCE_MAP).map(([db, label]) => [label, db]),
+) as Record<string, string>;
+
+export type LeadListFilters = {
+  assigned_to?: string;
+  statuses?: string[];
+  sources?: string[];
+  import_ids?: string[];
+  created_after?: string;
+  created_before?: string;
+};
+
+export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string; q?: string } & LeadListFilters): Promise<{ leads: Lead[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.page) qs.set("page", String(params.page));
   if (params?.organization_id) qs.set("organization_id", params.organization_id);
   if (params?.q) qs.set("q", params.q);
   if (params?.assigned_to) qs.set("assigned_to", params.assigned_to);
+  if (params?.statuses?.length) qs.set("statuses", params.statuses.join(","));
+  if (params?.sources?.length) qs.set("sources", params.sources.join(","));
+  if (params?.import_ids?.length) qs.set("import_ids", params.import_ids.join(","));
+  if (params?.created_after) qs.set("created_after", params.created_after);
+  if (params?.created_before) qs.set("created_before", params.created_before);
   const data = await apiFetch<{ leads: DbLead[]; total: number }>(`/api/v1/leads?${qs}`, {}, token);
   return { leads: data.leads.map(mapDbLead), total: data.total };
 }
