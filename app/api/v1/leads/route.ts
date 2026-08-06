@@ -67,8 +67,13 @@ async function upsertOrg(
       domain_source: normalizedDomain ? "manual" : null,
       ...(industry ? { industry } : {}),
       ...(country ? { country } : {}),
-      enrichment_stage: normalizedDomain ? "queued" : null,
-      enrichment_status: normalizedDomain ? "SCRAPE_QUEUED" : null,
+      // Queued either way. A manual entry always carries an email, and a work
+      // address gives up the company domain for free (sales@maapet.com ->
+      // maapet.com), so a missing website is something scrape-orgs' domain
+      // resolution can fix — not a reason to skip the pipeline. Leaving the
+      // stage null meant no website typed in = never enriched, ever.
+      enrichment_stage: "queued",
+      enrichment_status: "SCRAPE_QUEUED",
       enrichment_attempts: 0,
       created_at: new Date().toISOString(),
     })
@@ -252,8 +257,9 @@ export async function POST(req: NextRequest) {
     await db.from("imports").update({ lead_count: 1 }).eq("id", importId);
   }
 
-  // Fire enrichment if a domain was provided (new org will be queued)
-  if (organization_domain && process.env.INTERNAL_SECRET && (await getServiceSecret("firecrawl"))) {
+  // Fire enrichment regardless of whether a domain was typed in — scrape-orgs
+  // resolves a missing one from the lead's own email before it claims anything.
+  if (process.env.INTERNAL_SECRET && (await getServiceSecret("firecrawl"))) {
     const baseUrl = internalAppBaseUrl(req);
     const secret = process.env.INTERNAL_SECRET;
     after(() =>

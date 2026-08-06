@@ -175,14 +175,20 @@ async function processRows(
     .filter((n) => !nameToOrgId.has(n))
     .map((n) => {
       const row = rowsWithDomain.find((r) => !r.safeDomain && r.org_name.toLowerCase() === n)!;
-      // No website ⇒ nothing will ever scrape this org — conclude the pipeline
-      // now so its leads show Input Required (generic template) instead of
-      // sitting in "New" forever (planning.md Phase 3.2).
+      // No website in the sheet is NOT the end of the road — the row still has
+      // an email, and a work address gives up the company domain for free
+      // (sales@maapet.com -> maapet.com). Queue it so scrape-orgs' domain
+      // resolution can try, then scrape it like any other company. Only if the
+      // address is webmail (gmail/yahoo) does resolution give up, and it is
+      // resolution that concludes the org NO_DOMAIN -> Input Required.
+      //
+      // This used to be marked "failed / No website found" right here, which
+      // meant it was never queued, never resolved, and never scraped — a
+      // spreadsheet without a website column could never enrich at all.
       return {
         name: row.org_name,
-        enrichment_stage: "failed",
-        enrichment_status: "No website found",
-        enrichment_done_at: new Date().toISOString(),
+        enrichment_stage: "queued",
+        enrichment_status: "SCRAPE_QUEUED",
         created_at: new Date().toISOString(),
       };
     });
