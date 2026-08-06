@@ -91,7 +91,10 @@ export const ApolloSearchSchema = z.object({
   // Every lead inserted here eventually gets a paid Apollo bulk_match call —
   // these are the actual credit-spend ceilings for the import, enforced
   // server-side in apollo-search/route.ts regardless of what the client sends.
-  max_total_leads: z.number().int().min(25).max(1000).default(200),
+  // 500 is the ceiling for a single import, by the account owner's decision:
+  // one import is one burst of spend, and 500 is the largest burst worth risking
+  // in one go. It is enforced here, server-side, whatever the client sends.
+  max_total_leads: z.number().int().min(25).max(500).default(200),
   max_leads_per_keyword: z.union([z.literal(25), z.literal(50)]).default(50),
   // Strict mode trades range for safety: only the tightest tiers are allowed.
   strict_cap: z.boolean().default(false),

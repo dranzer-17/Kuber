@@ -698,7 +698,7 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
               <Select value={String(maxTotalLeads)} onValueChange={(v) => setMaxTotalLeads(Number(v))}>
                 <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(strictCap ? STRICT_TIERS : [25, 50, 100, 250, 500, 1000]).map((n) => (
+                  {(strictCap ? STRICT_TIERS : [25, 50, 100, 250, 500]).map((n) => (
                     <SelectItem key={n} value={String(n)} disabled={apolloRemaining != null && n > apolloRemaining}>
                       {n.toLocaleString()} leads
                     </SelectItem>
