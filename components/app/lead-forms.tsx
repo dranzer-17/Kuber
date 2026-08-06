@@ -599,6 +599,13 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
   // per-keyword cap (bounded by the overall cap) — shown below so a big
   // multi-keyword selection doesn't surprise anyone at import time.
   const keywordGroupCount = new Set(keywords.map(resolveApolloKeyword)).size;
+  // The server splits the import evenly across keywords (apollo-search), so this
+  // is what each one actually gets. The per-keyword cap only means anything when
+  // it is SMALLER than this — 100 leads across 9 groups is ~12 each, and picking
+  // "25 per keyword" there changes nothing at all.
+  const fairSharePerKeyword = Math.ceil(maxTotalLeads / Math.max(1, keywordGroupCount));
+  const perKeywordCapIsMoot = fairSharePerKeyword <= 25;
+  const effectivePerKeyword = Math.min(fairSharePerKeyword, maxPerKeyword);
 
   async function handleImport(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -714,21 +721,36 @@ export function ApolloForm({ onImport }: { onImport: (n: number) => void }) {
 
             <div className="space-y-1.5">
               <Label>Max leads per keyword</Label>
-              <Select value={String(maxPerKeyword)} onValueChange={(v) => setMaxPerKeyword(Number(v) as 25 | 50)}>
+              <Select
+                value={String(maxPerKeyword)}
+                onValueChange={(v) => setMaxPerKeyword(Number(v) as 25 | 50)}
+                disabled={perKeywordCapIsMoot}
+              >
                 <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {[25, 50].map((n) => (
-                    <SelectItem key={n} value={String(n)}>{n} leads per keyword</SelectItem>
+                    // An option above the fair share can never bite — the budget
+                    // runs out first — so offering it would be a control that
+                    // silently does nothing.
+                    <SelectItem key={n} value={String(n)} disabled={n >= fairSharePerKeyword}>
+                      {n} leads per keyword
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <p className="text-[11px] text-muted-foreground">
-              You selected <strong>{keywordGroupCount}</strong> keyword group{keywordGroupCount === 1 ? "" : "s"}. This
-              import will stop at <strong>{Math.min(maxTotalLeads, maxPerKeyword * keywordGroupCount).toLocaleString()} leads</strong>{" "}
-              total — whichever cap (overall or per-keyword) is reached first. Apollo is searched as deeply as needed to
-              reach that number, skipping anyone already in your list.
+              You selected <strong>{keywordGroupCount}</strong> keyword group{keywordGroupCount === 1 ? "" : "s"}. The{" "}
+              <strong>{maxTotalLeads.toLocaleString()}</strong> leads are split evenly between them —{" "}
+              <strong>
+                ~{effectivePerKeyword.toLocaleString()} per keyword
+              </strong>
+              {keywordGroupCount > 1 ? ", and whatever one keyword can't fill is passed to the others" : ""}.{" "}
+              {perKeywordCapIsMoot
+                ? "The per-keyword limit is off because the even split is already smaller than it."
+                : `The per-keyword limit of ${maxPerKeyword} applies on top, so this import can reach at most ${Math.min(maxTotalLeads, maxPerKeyword * keywordGroupCount).toLocaleString()}.`}{" "}
+              Apollo is searched as deeply as needed, skipping anyone already in your list.
             </p>
           </div>
         )}
