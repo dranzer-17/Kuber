@@ -255,6 +255,40 @@ async function inferDomainFromLeadEmails(db: Db, orgId: string): Promise<DomainI
   return { type: "resolved", domain: topDomain };
 }
 
+/** How many domainless companies to resolve per pass. Each one is a couple of
+ *  database round trips and no external call, but this runs before the scrape
+ *  work in the same invocation, so it has to leave the function's time budget
+ *  intact. A backlog drains over successive passes; the job runs every 15
+ *  minutes and costs nothing. */
+const DOMAIN_RESOLVE_BATCH = 40;
+
+/**
+ * Give queued companies that have no website a domain derived from their own
+ * leads' email addresses, so `claim_queued_orgs` can pick them up. Companies
+ * whose leads only have webmail addresses (gmail, yahoo…) can't be resolved and
+ * are concluded NO_DOMAIN, which moves their leads to Input Required.
+ */
+async function resolveDomainlessQueuedOrgs(db: Db, limit: number): Promise<void> {
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id")
+    .eq("enrichment_stage", "queued")
+    .is("domain", null)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  for (const org of orgs ?? []) {
+    const result = await inferDomainFromLeadEmails(db, org.id);
+    if (result.type === "duplicate") {
+      await mergeDuplicateOrg(db, org.id, result.targetOrgId, result.domain);
+    } else if (result.type === "failed") {
+      await markFailed(db, org.id, "NO_DOMAIN", "No website on the record and no usable company domain in its leads' emails");
+    }
+    // "resolved" needs nothing more — the org now has a domain and the claim
+    // below (or the next pass) will pick it up like any other.
+  }
+}
+
 // Reuse a cached scrape only if it's recent — company sites change, and a
 // stale profile is worse than a fresh one. 7 days is well past the retry
 // window we care about (the LLM-402 loop happens within minutes/hours).
@@ -642,6 +676,20 @@ export async function POST(req: NextRequest) {
   const batchSize = firecrawlCredits.remaining != null
     ? Math.max(1, Math.min(15, firecrawlCredits.remaining))
     : 15;
+  // Give domainless companies a domain BEFORE the claim, or they can never be
+  // claimed at all. claim_queued_orgs requires `domain is not null`, and the
+  // only code that could derive one (inferDomainFromLeadEmails, inside
+  // processOneOrg) runs *after* the claim — a company with no website could
+  // therefore never get one, because the step that would give it one only ran
+  // on companies that already had one. 929 leads from an Excel import with no
+  // website column sat on "New" for a week that way, never once attempted.
+  //
+  // Resolution is database-only (read the org's leads, take the most common
+  // non-webmail email domain) so it costs no Firecrawl or LLM credits. Anything
+  // that still can't be resolved is concluded NO_DOMAIN so its leads land on
+  // Input Required instead of waiting on New forever.
+  await resolveDomainlessQueuedOrgs(db, DOMAIN_RESOLVE_BATCH);
+
   const { data: claimedOrgs, error: claimError } = await db.rpc("claim_queued_orgs", { p_batch_size: batchSize });
   if (claimError) {
     return Response.json({ error: claimError.message }, { status: 500 });
