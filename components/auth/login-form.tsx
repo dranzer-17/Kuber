@@ -14,6 +14,10 @@ export function LoginForm() {
     {},
   );
   const [showPwd, setShowPwd] = useState(false);
+  // Controlled so a failed sign-in does not wipe the fields (server actions
+  // reset uncontrolled inputs when the action returns).
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   return (
     <div className="h-screen flex items-center justify-center bg-background p-4">
@@ -45,6 +49,8 @@ export function LoginForm() {
               autoComplete="email"
               placeholder="admin@company.com"
               disabled={isPending}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
           </div>
           <div className="space-y-1.5">
@@ -64,6 +70,8 @@ export function LoginForm() {
                 placeholder="••••••••"
                 className="pr-10"
                 disabled={isPending}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
               <button
                 type="button"
