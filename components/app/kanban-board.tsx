@@ -19,17 +19,25 @@ export function KanbanBoard({
   onCardClick,
   onRetryAllFailed,
   retryingAll,
+  columnTotals,
 }: {
   leads: Lead[];
   onCardClick: (lead: Lead) => void;
   /** Manager-only bulk retry for the "failed website" flavour of Input Required. Omit to hide the action. */
   onRetryAllFailed?: () => void;
   retryingAll?: boolean;
+  /** True per-stage totals from the database, keyed by display status. Without
+   *  these the header numbers count only the leads the browser has loaded — the
+   *  same account read 999 on the Dashboard and 500 across these columns.
+   *  Omitted when a filter or search is active, because `leads` is then already
+   *  the complete server-filtered set and counting it is correct. */
+  columnTotals?: Partial<Record<LeadStatus, number>>;
 }) {
   return (
     <div className="enter flex gap-2 overflow-x-auto pb-4 min-h-[500px]">
       {KANBAN_COLS.map((col) => {
         const colLeads = leads.filter((l) => kanbanColumnFor(l) === col.id);
+        const colTotal = columnTotals?.[col.id] ?? colLeads.length;
         const failedCount = col.id === "Input Required"
           ? colLeads.filter((l) => inputRequiredReason(l) === "failed").length
           : 0;
@@ -56,7 +64,7 @@ export function KanbanBoard({
                 </Button>
               )}
               <span className={cn("font-mono text-[10px] font-medium text-muted-foreground bg-secondary rounded-full px-1.5 py-0.5 tabular-nums shrink-0", !(col.id === "Input Required" && onRetryAllFailed && failedCount > 0) && "ml-auto")}>
-                {colLeads.length}
+                {colTotal}
               </span>
             </div>
             <div className="flex flex-col gap-1.5">

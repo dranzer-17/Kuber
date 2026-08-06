@@ -1,6 +1,6 @@
 "use client";
 
-import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, DB_LEAD_STATUS, DB_LEAD_SOURCE, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary, type LeadListFilters } from "@/lib/api-client";
+import { bulkDeleteLeads, bulkAssignLeads, fetchUsers, fetchImports, retryAllFailedEnrichment, fetchLeadStatusCounts, DB_LEAD_STATUS, DB_LEAD_SOURCE, type ImportBatch, type Profile, type BulkAssignStrategy, type AssignmentSummary, type LeadListFilters } from "@/lib/api-client";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -110,6 +110,11 @@ function activeFilterCount(f: FilterState) {
 }
 
 const UNASSIGNED_FILTER_VALUE = "unassigned";
+
+/** db enum -> display label, the inverse of DB_LEAD_STATUS. */
+const LEAD_STATUS_LABEL: Record<string, LeadStatus> = Object.fromEntries(
+  Object.entries(DB_LEAD_STATUS).map(([label, db]) => [db, label as LeadStatus]),
+) as Record<string, LeadStatus>;
 
 function assigneeDisplayName(
   assignedTo: string | null,
@@ -775,6 +780,24 @@ export default function LeadsPage() {
     return Object.keys(f).length > 0 ? f : undefined;
   }, [filters, importBatches]);
 
+  // True per-stage totals for the Kanban headers. The board renders whatever
+  // cards are loaded (with its own "Show more" below), but the numbers on the
+  // columns have to be the real ones or they contradict the Dashboard.
+  const [kanbanTotals, setKanbanTotals] = useState<Partial<Record<LeadStatus, number>>>({});
+  useEffect(() => {
+    if (!session) return;
+    fetchLeadStatusCounts(session.access_token)
+      .then((byStatus) => {
+        const totals: Partial<Record<LeadStatus, number>> = {};
+        for (const [dbStatus, n] of Object.entries(byStatus)) {
+          const label = LEAD_STATUS_LABEL[dbStatus];
+          if (label) totals[label] = (totals[label] ?? 0) + n;
+        }
+        setKanbanTotals(totals);
+      })
+      .catch(() => {});
+  }, [session, leads.length]);
+
   useEffect(() => {
     const trimmed = searchQuery.trim();
     if (!trimmed && !serverFilters) { setSearchResults(null); setSearchLoading(false); return; }
@@ -1096,7 +1119,8 @@ export default function LeadsPage() {
         })() : leadsViewMode === "kanban" ? (
           <>
             <KanbanBoard
-              leads={leads}
+              leads={displayLeads}
+              columnTotals={searchResults ? undefined : kanbanTotals}
               onCardClick={(lead) => setSelectedLead(lead)}
               onRetryAllFailed={role === "manager" ? handleRetryAllFailed : undefined}
               retryingAll={retryingAll}

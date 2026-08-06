@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { onlyRevealedLeads } from "@/lib/server/lead-visibility";
+import { getLeadStatusCounts } from "@/lib/server/leads-count";
 import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function GET(req: NextRequest) {
@@ -20,5 +21,12 @@ export async function GET(req: NextRequest) {
   if (user.role === "employee") q = q.eq("assigned_to", user.id);
   const { count, error } = await q;
   if (error) return fail(500, "INTERNAL", error.message);
-  return ok({ total: count ?? 0 });
+
+  // Per-stage totals for the Kanban column headers. The board used to count the
+  // ~500 rows the browser had loaded, so the same account showed 999 leads on
+  // the Dashboard and 500 across the board's five columns.
+  const byStatus = await getLeadStatusCounts(db, {
+    assignedTo: user.role === "employee" ? user.id : undefined,
+  });
+  return ok({ total: count ?? 0, by_status: byStatus });
 }

@@ -191,6 +191,13 @@ export async function fetchLeadsCount(token: string): Promise<number> {
   return data.total;
 }
 
+/** Per-stage totals straight from the database — what the Kanban column headers
+ *  show, so they agree with the Dashboard instead of counting loaded rows. */
+export async function fetchLeadStatusCounts(token: string): Promise<Record<string, number>> {
+  const data = await apiFetch<{ total: number; by_status: Record<string, number> }>("/api/v1/leads/count", {}, token);
+  return data.by_status ?? {};
+}
+
 /** The Leads page filters hold DISPLAY labels ("Input Required", "Apollo").
  *  The database stores the enum values. Reverse the two maps once here so the
  *  page never has to know the difference. */

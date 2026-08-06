@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getLeadStatusCounts, getLeadMonthlyCounts } from "@/lib/server/leads-count";
 
 const ENRICHED_STATUSES = new Set(["enriching", "enriched", "open", "closed"]);
 
@@ -30,17 +31,18 @@ export type DashboardAnalytics = {
 };
 
 export async function getDashboardAnalytics(db: SupabaseClient): Promise<DashboardAnalytics> {
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
-  sixMonthsAgo.setDate(1);
-  sixMonthsAgo.setHours(0, 0, 0, 0);
+  const now = new Date();
+  // The six month buckets the growth chart plots, oldest first.
+  const monthStarts = Array.from({ length: 6 }, (_, i) =>
+    new Date(now.getFullYear(), now.getMonth() - (5 - i), 1),
+  );
 
   const [
     { count: totalLeads },
     { data: tempRows },
     { data: pending },
-    { data: statusRows },
-    { data: recentLeadRows },
+    statusRows,
+    monthlyLeadCounts,
   ] = await Promise.all([
     db.from("leads").select("id", { count: "exact", head: true }).eq("is_deleted", false),
     db.from("campaign_leads").select("lead_temperature"),
@@ -54,12 +56,8 @@ export async function getDashboardAnalytics(db: SupabaseClient): Promise<Dashboa
       .eq("status", "draft")
       .order("created_at", { ascending: false })
       .limit(8),
-    db.from("leads").select("status").eq("is_deleted", false),
-    db
-      .from("leads")
-      .select("created_at")
-      .eq("is_deleted", false)
-      .gte("created_at", sixMonthsAgo.toISOString()),
+    getLeadStatusCounts(db),
+    getLeadMonthlyCounts(db, monthStarts),
   ]);
 
   const temperatureBreakdown = { hot: 0, cold: 0, ooo: 0, unsubscribed: 0, unclassified: 0 };
@@ -93,31 +91,20 @@ export async function getDashboardAnalytics(db: SupabaseClient): Promise<Dashboa
     Won: 0,
     Closed: 0,
   };
-  const monthlyCounts: Record<string, number> = {};
 
-  for (const row of statusRows ?? []) {
-    if (ENRICHED_STATUSES.has(row.status)) enrichedLeads++;
-    stageCounts[dbStatusToStage(row.status)]++;
-  }
-  for (const row of recentLeadRows ?? []) {
-    const key = (row.created_at as string).slice(0, 7);
-    monthlyCounts[key] = (monthlyCounts[key] ?? 0) + 1;
+  // statusRows is now a {status: count} map from the database, not a row dump
+  // that PostgREST silently truncated at 1,000 (which is why this panel and the
+  // Kanban board disagreed on the same account).
+  for (const [status, n] of Object.entries(statusRows ?? {}) as [string, number][]) {
+    if (ENRICHED_STATUSES.has(status)) enrichedLeads += n;
+    stageCounts[dbStatusToStage(status)] += n;
   }
 
-  const now = new Date();
-  const monthLabels = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return d.toLocaleDateString("en-US", { month: "short" });
-  });
-  const monthKeys = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
-
+  const monthLabels = monthStarts.map((d) => d.toLocaleDateString("en-US", { month: "short" }));
   let cumulative = 0;
-  const pipelineGrowth = monthKeys.map((key, i) => {
-    cumulative += monthlyCounts[key] ?? 0;
-    return { month: monthLabels[i], leads: cumulative };
+  const pipelineGrowth = monthLabels.map((label, i) => {
+    cumulative += monthlyLeadCounts[i] ?? 0;
+    return { month: label, leads: cumulative };
   });
 
   const stageDonutData = STAGE_NAMES
@@ -144,10 +131,10 @@ export async function getDashboardAnalytics(db: SupabaseClient): Promise<Dashboa
  * see — their assigned leads, plus campaigns they created or were assigned.
  */
 export async function getEmployeeDashboard(db: SupabaseClient, userId: string): Promise<DashboardAnalytics> {
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
-  sixMonthsAgo.setDate(1);
-  sixMonthsAgo.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const monthStarts = Array.from({ length: 6 }, (_, i) =>
+    new Date(now.getFullYear(), now.getMonth() - (5 - i), 1),
+  );
 
   const [{ data: myLeads }, { data: accessibleCampaigns }] = await Promise.all([
     db.from("leads")
@@ -234,34 +221,29 @@ export async function getEmployeeDashboard(db: SupabaseClient, userId: string): 
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 8);
 
+  // Counted by the database, not tallied from `myLeads` — that fetch is capped
+  // at 1,000 rows by PostgREST with no error, and this employee already holds
+  // 999. One more lead and every number on their dashboard would have started
+  // silently under-reporting.
+  const [statusCounts, monthlyLeadCounts] = await Promise.all([
+    getLeadStatusCounts(db, { assignedTo: userId }),
+    getLeadMonthlyCounts(db, monthStarts, { assignedTo: userId }),
+  ]);
+
   let enrichedLeads = 0;
   const stageCounts: Record<(typeof STAGE_NAMES)[number], number> = {
     New: 0, "Input Required": 0, Enriched: 0, Won: 0, Closed: 0,
   };
-  const monthlyCounts: Record<string, number> = {};
-  for (const row of myLeads ?? []) {
-    if (ENRICHED_STATUSES.has(row.status)) enrichedLeads++;
-    stageCounts[dbStatusToStage(row.status)]++;
-    if ((row.created_at as string) >= sixMonthsAgo.toISOString()) {
-      const key = (row.created_at as string).slice(0, 7);
-      monthlyCounts[key] = (monthlyCounts[key] ?? 0) + 1;
-    }
+  for (const [status, n] of Object.entries(statusCounts) as [string, number][]) {
+    if (ENRICHED_STATUSES.has(status)) enrichedLeads += n;
+    stageCounts[dbStatusToStage(status)] += n;
   }
 
-  const now = new Date();
-  const monthLabels = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return d.toLocaleDateString("en-US", { month: "short" });
-  });
-  const monthKeys = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
-
+  const monthLabels = monthStarts.map((d) => d.toLocaleDateString("en-US", { month: "short" }));
   let cumulative = 0;
-  const pipelineGrowth = monthKeys.map((key, i) => {
-    cumulative += monthlyCounts[key] ?? 0;
-    return { month: monthLabels[i], leads: cumulative };
+  const pipelineGrowth = monthLabels.map((label, i) => {
+    cumulative += monthlyLeadCounts[i] ?? 0;
+    return { month: label, leads: cumulative };
   });
 
   const stageDonutData = STAGE_NAMES
