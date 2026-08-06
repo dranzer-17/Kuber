@@ -191,12 +191,13 @@ export async function fetchLeadsCount(token: string): Promise<number> {
   return data.total;
 }
 
-export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string; q?: string }): Promise<{ leads: Lead[]; total: number }> {
+export async function fetchLeads(token: string, params?: { limit?: number; page?: number; organization_id?: string; q?: string; assigned_to?: string }): Promise<{ leads: Lead[]; total: number }> {
   const qs = new URLSearchParams();
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.page) qs.set("page", String(params.page));
   if (params?.organization_id) qs.set("organization_id", params.organization_id);
   if (params?.q) qs.set("q", params.q);
+  if (params?.assigned_to) qs.set("assigned_to", params.assigned_to);
   const data = await apiFetch<{ leads: DbLead[]; total: number }>(`/api/v1/leads?${qs}`, {}, token);
   return { leads: data.leads.map(mapDbLead), total: data.total };
 }

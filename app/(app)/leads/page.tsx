@@ -749,19 +749,29 @@ export default function LeadsPage() {
   // into `leads` — a lead further back than the loaded window would
   // otherwise never be findable. Debounced so we're not hitting the API on
   // every keystroke.
+  // The assignee filter goes to the DB for the same reason: `leads` only holds
+  // the first page (500 rows, newest first), and every other filter below runs
+  // against that array. An employee whose leads are all older than the newest
+  // 500 — exactly what a bulk import of historical leads produces — matched
+  // nothing at all, while their own login showed the full book. Filtering a
+  // window is not filtering.
   useEffect(() => {
     const trimmed = searchQuery.trim();
-    if (!trimmed) { setSearchResults(null); setSearchLoading(false); return; }
+    // One assignee goes to the DB (the API takes a single `assigned_to`, and
+    // "unassigned" is its own sentinel there). Two or more still fall back to
+    // the client-side pass below — rare, and the API has no `in` filter yet.
+    const serverAssignee = filters.assignees.size === 1 ? [...filters.assignees][0] : undefined;
+    if (!trimmed && !serverAssignee) { setSearchResults(null); setSearchLoading(false); return; }
     if (!session) return;
     setSearchLoading(true);
     const handle = setTimeout(() => {
-      searchLeads(session.access_token, trimmed)
+      searchLeads(session.access_token, trimmed, serverAssignee)
         .then((res) => setSearchResults(res.leads))
         .catch(() => setSearchResults([]))
         .finally(() => setSearchLoading(false));
     }, 300);
     return () => clearTimeout(handle);
-  }, [searchQuery, session, searchLeads]);
+  }, [searchQuery, session, searchLeads, filters.assignees]);
 
   const matchesFilters = (l: Lead) => {
     if (filters.statuses.size > 0 && !filters.statuses.has(l.status)) return false;
@@ -789,7 +799,10 @@ export default function LeadsPage() {
   // A search query runs against the whole DB (searchResults), not just the
   // leads currently paged into the client — see searchLeads in app-context.
   const q = searchQuery.trim();
-  const displayLeads = sortLeads((q ? (searchResults ?? []) : leads).filter(matchesFilters), leadsSort);
+  // searchResults is the server-side result set — populated by a search term, an
+  // assignee filter, or both. Prefer it whenever it exists: it is the complete
+  // match from the database, where `leads` is only the newest page.
+  const displayLeads = sortLeads((searchResults ?? leads).filter(matchesFilters), leadsSort);
 
   const totalPages = Math.max(1, Math.ceil(displayLeads.length / pageSize));
   const safePage = Math.min(page, totalPages);
