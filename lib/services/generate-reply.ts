@@ -6,6 +6,9 @@ import { appendSignatureToBody } from "@/lib/reply-body-html";
 import { listThreadEmails, type InstantlyEmail } from "@/lib/services/instantly";
 
 const ReplySchema = z.object({ subject: z.string(), body: z.string() });
+const RevisionReplySchema = ReplySchema.extend({
+  signature: z.string().optional(),
+});
 
 // How a reply is written lives in the editable `reply_drafter_prompt` setting,
 // which now carries these rules plus its own precedence section putting the
@@ -14,6 +17,55 @@ const ReplySchema = z.object({ subject: z.string(), body: z.string() });
 // the prompt's "most important rule" asks for a one or two sentence answer to a
 // short transactional reply, while the code demanded "3 to 6 sentences" and
 // claimed to override anything above it. Same defect as the cold-email path.
+
+const REPLY_REVISION_PREFIX = [
+  "REVISION MODE — you are editing an existing reply draft, not writing a new one.",
+  "Apply ONLY the user's Instruction to the Current reply subject, body, and signature/footer below.",
+  "Preserve wording, structure, and tone everywhere the Instruction does not touch.",
+  "Example: if asked to remove the last paragraph, delete it and leave the rest identical.",
+  "The signature/footer IS editable. If the Instruction asks to change or remove the footer/signature, put the result in \"signature\" (empty string to remove it).",
+  "If the Instruction does not mention the footer/signature, return signature as \"unchanged\".",
+  "Do NOT invent a different reply from scratch.",
+  "Return STRICT JSON: {\"subject\": string, \"body\": string, \"signature\": string}.",
+  "\"body\" is the reply WITHOUT the signature/footer. \"signature\" is the footer block.",
+  "",
+].join("\n");
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripTrailingSignature(plain: string, signatureBlock: string): string {
+  if (!signatureBlock.trim()) return plain;
+  const sigLines = signatureBlock.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  if (sigLines.length === 0) return plain;
+  const first = sigLines[0];
+  const idx = plain.lastIndexOf(first);
+  if (idx > 20) {
+    const tail = plain.slice(idx);
+    const matched = sigLines.filter((line) => tail.includes(line)).length;
+    if (matched >= Math.min(2, sigLines.length)) return plain.slice(0, idx).trimEnd();
+  }
+  return plain;
+}
+
+function resolveRevisedSignature(returned: string | undefined, original: string): string {
+  if (returned === undefined) return original;
+  const t = returned.trim();
+  if (!t || /^(unchanged|same|keep)$/i.test(t)) return original;
+  return t;
+}
 
 interface GenerateReplyArgs {
   replyDraftId: string;
@@ -25,6 +77,8 @@ interface GenerateReplyArgs {
   threadId?: string | null;
   aiPromptContext?: string | null;
   customInstruction?: string;
+  /** Previous reply draft to edit when a custom instruction is provided. */
+  previousDraft?: { subject: string | null; body: string | null } | null;
 }
 
 export async function generateReplyDraft(
@@ -85,32 +139,71 @@ export async function generateReplyDraft(
     const productBlock = products.length > 0
       ? "\n\nPRODUCT REFERENCE LIBRARY:\n\n" + products.map((p) => `${p.name.toUpperCase()}\n${p.description}`).join("\n\n")
       : "";
-    const system = drafter
-      + (companyContext ? `\n\nCompany context: ${companyContext}` : "")
-      + productBlock
-      + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "");
 
-    const user = [
-      `Campaign: "${campaignName}"`,
-      `Original reply subject: ${args.replySubject ?? "(none)"}`,
-      ``,
-      `Full conversation so far (oldest first):`,
-      threadContext,
-      aiPromptContext ? `Campaign context: ${aiPromptContext}` : "",
-      args.customInstruction ? `Additional instruction: ${args.customInstruction}` : "",
-    ].filter(Boolean).join("\n");
+    const revisionInstruction = args.customInstruction?.trim() || "";
+    const previousPlain = args.previousDraft?.body
+      ? stripTrailingSignature(htmlToPlainText(args.previousDraft.body), signatureBlock)
+      : "";
+    const isRevision =
+      !!revisionInstruction &&
+      !!(args.previousDraft?.body?.trim() || args.previousDraft?.subject?.trim()) &&
+      previousPlain.length > 0;
 
-    const { json } = await complete<{ subject: string; body: string }>({ system, user });
-    const parsed = ReplySchema.safeParse(json);
+    const system = isRevision
+      ? REPLY_REVISION_PREFIX
+        + drafter
+        + (companyContext ? `\n\nCompany context: ${companyContext}` : "")
+        + productBlock
+        + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "")
+      : drafter
+        + (companyContext ? `\n\nCompany context: ${companyContext}` : "")
+        + productBlock
+        + (aiPromptContext ? `\n\nAdditional campaign context:\n${aiPromptContext}` : "");
+
+    const user = isRevision
+      ? [
+          `Campaign: "${campaignName}"`,
+          "",
+          "Current reply subject:",
+          args.previousDraft?.subject?.trim() || "(none)",
+          "",
+          "Current reply body (without signature/footer):",
+          previousPlain,
+          "",
+          "Current signature / footer (editable when the Instruction asks about footer/signature):",
+          signatureBlock || "(none)",
+          "",
+          `Instruction: ${revisionInstruction}`,
+        ].join("\n")
+      : [
+          `Campaign: "${campaignName}"`,
+          `Original reply subject: ${args.replySubject ?? "(none)"}`,
+          ``,
+          `Full conversation so far (oldest first):`,
+          threadContext,
+          aiPromptContext ? `Campaign context: ${aiPromptContext}` : "",
+          args.customInstruction ? `Additional instruction: ${args.customInstruction}` : "",
+        ].filter(Boolean).join("\n");
+
+    const { json } = await complete<{ subject: string; body: string; signature?: string }>({ system, user });
+    const parsed = isRevision ? RevisionReplySchema.safeParse(json) : ReplySchema.safeParse(json);
     if (!parsed.success) throw new Error("Reply shape mismatch");
 
     let body = parsed.data.body.trim()
-      .replace(/\[Your Name\]/gi, "")
-      .replace(/\n+\s*(best regards|regards|sincerely|thanks|thank you|cheers)[.,]?\s*$/i, "")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-    if (signatureBlock) {
-      body = appendSignatureToBody(body, signatureBlock);
+      .replace(/\[Your Name\]/gi, "");
+    if (!isRevision) {
+      body = body.replace(/\n+\s*(best regards|regards|sincerely|thanks|thank you|cheers)[.,]?\s*$/i, "");
+    }
+    body = body.replace(/\n{3,}/g, "\n\n").trim();
+
+    const effectiveSignature = isRevision
+      ? resolveRevisedSignature(
+          "signature" in parsed.data ? parsed.data.signature : undefined,
+          signatureBlock,
+        )
+      : signatureBlock;
+    if (effectiveSignature) {
+      body = appendSignatureToBody(body, effectiveSignature);
     }
 
     await db.from("reply_drafts").update({

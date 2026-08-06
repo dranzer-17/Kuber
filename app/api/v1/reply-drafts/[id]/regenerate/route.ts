@@ -48,6 +48,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     threadId: null,
     aiPromptContext,
     customInstruction: instruction,
+    // With an instruction, edit the current reply — don't rewrite from the thread.
+    previousDraft: instruction?.trim()
+      ? { subject: old.subject, body: old.body }
+      : null,
   });
 
   const { data: fresh } = await db.from("reply_drafts").select("*").eq("id", rd.id).maybeSingle();

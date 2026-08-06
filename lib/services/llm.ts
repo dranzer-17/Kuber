@@ -77,6 +77,7 @@ export const DRAFT_JSON_SUFFIX =
   '\n\nReturn ONLY valid JSON with no markdown fences: {"subject": string, "body": string, "product_match": string}.\n' +
   'product_match must be the exact name of the matched product from the PRODUCT REFERENCE LIBRARY, or "none" if no product fits.\n' +
   '"body" is the complete email for a first email, or the full 2-4 sentence nudge for a follow-up. Begin it with the greeting line ("Dear {first name}," or "Dear Sir/Ma\'am,"), and follow any Additional instruction that asks for a different salutation. Do NOT write a sign-off or signature block; the signature is appended in code.\n' +
-  'If an Additional instruction is given, it overrides the default structure and length asked for above.\n' +
+  'If an Additional instruction is given alone, it overrides the default structure and length asked for above.\n' +
+  'If a Current subject/body/signature is also provided (REVISION MODE), apply ONLY that instruction — do not rewrite the rest. The signature/footer is editable when asked.\n' +
   '"subject" is the filled subject line for a first email; for a follow-up you may return an empty string (the subject is cleared in code anyway).';
 

@@ -60,7 +60,7 @@ function RegenerateDraftsModalInner({
               Regenerate <span className="font-mono tabular-nums">{total}</span> draft{total !== 1 ? "s" : ""}
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Each lead gets a fresh AI draft. The current wording is kept in Version history.
+              With an instruction, each draft is edited from its current wording. Without one, each gets a fresh AI rewrite. Prior versions stay in history.
             </p>
           </div>
           <Button

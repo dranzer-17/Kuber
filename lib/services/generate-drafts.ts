@@ -43,7 +43,13 @@ const DraftSchema = z.object({
   product_match: z.string(),
 });
 
+const RevisionDraftSchema = DraftSchema.extend({
+  /** Footer/signature block. Omit or "unchanged" to keep the current one. */
+  signature: z.string().optional(),
+});
+
 type DraftLLMOutput = z.infer<typeof DraftSchema>;
+type RevisionDraftLLMOutput = z.infer<typeof RevisionDraftSchema>;
 
 type OrgData = {
   name?: string | null;
@@ -100,6 +106,101 @@ function plainToHtml(plain: string): string {
       .replace(/\n/g, "<br>") +
     "</p>"
   );
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Drop the appended signature so the model edits the email body only. */
+function stripTrailingSignature(plain: string, signatureBlock: string): string {
+  if (!signatureBlock.trim()) return plain;
+  const sigLines = signatureBlock
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (sigLines.length === 0) return plain;
+
+  let out = plain.trimEnd();
+  const first = sigLines[0];
+  const idx = out.lastIndexOf(first);
+  if (idx > 40) {
+    const tail = out.slice(idx);
+    // Only cut if the tail roughly matches the signature (avoid chopping body text
+    // that happens to share a first line with the sig, e.g. a person's name).
+    const matched = sigLines.filter((line) => tail.includes(line)).length;
+    if (matched >= Math.min(2, sigLines.length)) {
+      return out.slice(0, idx).trimEnd();
+    }
+  }
+  return out;
+}
+
+export type PreviousDraftContent = {
+  subject: string | null;
+  body: string | null;
+};
+
+// When the user regenerates with an instruction ("remove the last paragraph"),
+// the CURRENT email is the base — not a fresh write from lead data. Without this
+// the model treats "Additional instruction" as a style hint and rewrites everything.
+const REVISION_SYSTEM_PREFIX = [
+  "REVISION MODE — you are editing an existing cold email, not writing a new one.",
+  "Apply ONLY the user's Instruction to the Current subject, Current body, and Current signature/footer below.",
+  "Preserve wording, structure, tone, facts, product mentions, and length everywhere the Instruction does not touch.",
+  "Example: if the Instruction is \"remove the last paragraph\", delete that paragraph and leave every other sentence identical.",
+  "The signature/footer IS editable. If the Instruction asks to change, rewrite, shorten, or remove the footer/signature/closing sign-off, put the result in the \"signature\" JSON field (use an empty string to remove it).",
+  "If the Instruction does not mention the footer/signature, return signature as \"unchanged\" (or omit it) and leave Current signature exactly as-is.",
+  "Do NOT invent a new pitch, rephrase for style, or restructure the email unless the Instruction explicitly asks for that.",
+  "Return STRICT JSON: {\"subject\": string, \"body\": string, \"signature\": string, \"product_match\": string}.",
+  "\"body\" is the email WITH greeting but WITHOUT the signature/footer block.",
+  "\"signature\" is the footer block appended after the body (name, title, company, contact, etc.).",
+  "Set product_match to \"unchanged\" unless the Instruction asks to change the product.",
+  "",
+].join("\n");
+
+function buildRevisionUserPrompt(
+  lead: LeadRow,
+  campaignName: string,
+  customInstruction: string,
+  previous: { subject: string; body: string; signature: string },
+  stepNumber: number,
+): string {
+  const name = [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "Unknown";
+  return [
+    `Campaign: "${campaignName}"`,
+    `Email step: ${stepNumber}`,
+    `Recipient: ${name}`,
+    "",
+    "Current subject:",
+    previous.subject || "(empty)",
+    "",
+    "Current body (without signature/footer):",
+    previous.body,
+    "",
+    "Current signature / footer (editable — change this when the Instruction asks about the footer, signature, or closing sign-off):",
+    previous.signature || "(none)",
+    "",
+    `Instruction: ${customInstruction.trim()}`,
+  ].join("\n");
+}
+
+function resolveRevisedSignature(returned: string | undefined, original: string): string {
+  if (returned === undefined) return original;
+  const t = returned.trim();
+  if (!t || /^(unchanged|same|keep)$/i.test(t)) return original;
+  return t;
 }
 
 // How an email gets written now lives entirely in the editable system prompt
@@ -208,6 +309,11 @@ export async function generateOneDraft(
   stepNumber = 1,
   /** Set when this draft is part of a bulk regeneration run; surfaced in the lead's activity log. */
   bulkJobId?: string,
+  /**
+   * When regenerating with a custom instruction, pass the previous version so
+   * the model edits that email instead of writing a new one from lead data.
+   */
+  previousDraft?: PreviousDraftContent | null,
 ): Promise<{ ok: true; draftId: string; status: string } | { ok: false; reason: string }> {
   const lead = unwrapLead(target.leads);
   if (!lead) {
@@ -292,10 +398,20 @@ export async function generateOneDraft(
   // When the company has no usable profile (no website / unscrapeable / enrichment
   // failed → lead status "input_required"), there is nothing to personalise with.
   // Use the ready-made template and only fill in the recipient's name/company.
+  // Exception: a regenerate WITH an instruction must still edit the existing
+  // email — falling through to the template would wipe the user's draft.
   const org = unwrapOrg(lead.organizations);
   const hasOrgData = !!org?.company_description?.trim();
+  const revisionInstruction = customInstruction?.trim() || "";
+  const previousPlainBody = previousDraft?.body
+    ? stripTrailingSignature(htmlToPlainText(previousDraft.body), signatureBlock)
+    : "";
+  const isRevision =
+    !!revisionInstruction &&
+    !!(previousDraft?.body?.trim() || previousDraft?.subject?.trim()) &&
+    previousPlainBody.length > 0;
 
-  if (!hasOrgData) {
+  if (!hasOrgData && !isRevision) {
     try {
       const template = await getGenericTemplate(db);
       const firstName = lead.first_name?.trim() ?? "";
@@ -374,18 +490,39 @@ export async function generateOneDraft(
     ]);
     // Style, structure and precedence all live in the system prompt now; code
     // only supplies the data it is written against (sender, products) and the
-    // per-campaign context.
-    const systemPrompt =
-      baseSystemPrompt
-      + buildCompanyBlock(companyContext)
-      + buildProductReferenceBlock(products);
+    // per-campaign context. Revision mode prefixes hard edit rules so an
+    // instruction like "remove the last paragraph" cannot trigger a full rewrite.
+    const systemPrompt = isRevision
+      ? REVISION_SYSTEM_PREFIX
+        + baseSystemPrompt
+        + buildCompanyBlock(companyContext)
+        + buildProductReferenceBlock(products)
+      : baseSystemPrompt
+        + buildCompanyBlock(companyContext)
+        + buildProductReferenceBlock(products);
 
-    const { json } = await complete<DraftLLMOutput>({
+    const userPrompt = isRevision
+      ? buildRevisionUserPrompt(
+          lead,
+          campaignName,
+          revisionInstruction,
+          {
+            subject: previousDraft?.subject?.trim() || "",
+            body: previousPlainBody,
+            signature: signatureBlock,
+          },
+          stepNumber,
+        )
+      : buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName);
+
+    const { json } = await complete<DraftLLMOutput | RevisionDraftLLMOutput>({
       system: systemPrompt,
-      user: buildUserPrompt(lead, campaignName, customInstruction, aiPromptContext, stepNumber, effectiveAttachmentName),
+      user: userPrompt,
     });
 
-    const validated = DraftSchema.safeParse(json);
+    const validated = isRevision
+      ? RevisionDraftSchema.safeParse(json)
+      : DraftSchema.safeParse(json);
     if (!validated.success) {
       const issues = validated.error.issues
         .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
@@ -394,19 +531,33 @@ export async function generateOneDraft(
       throw new Error(`Draft shape mismatch — ${issues}`);
     }
 
+    const effectiveSignature = isRevision
+      ? resolveRevisedSignature(
+          "signature" in validated.data ? validated.data.signature : undefined,
+          signatureBlock,
+        )
+      : signatureBlock;
+
     // Safety nets only — these clean up output, they never impose structure or
     // length, so a custom instruction can still shape the email freely. The
     // unfilled-placeholder and duplicate-sign-off strips exist because the
     // signature is appended below; the em-dash strip is because em dashes are a
     // well-known AI-writing tell and compliance with the prompt rule is not
-    // guaranteed.
+    // guaranteed. In revision mode we keep intentional closings (the footer
+    // lives in `signature`, not in these strips).
     let aiBody = validated.data.body
       .trim()
       .replace(/\[Your Name\]/gi, "")
       .replace(/\[Your (Title|Position)\]/gi, "")
       .replace(/\[Your Contact Information\]/gi, "")
-      .replace(/\[Your Company\]/gi, "")
-      .replace(/\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i, "")
+      .replace(/\[Your Company\]/gi, "");
+    if (!isRevision) {
+      aiBody = aiBody.replace(
+        /\n+\s*(best regards|regards|sincerely|warm regards|thanks|thank you|cheers)[.,]?\s*$/i,
+        "",
+      );
+    }
+    aiBody = aiBody
       .replace(/\s*[—–]\s*/g, ", ")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
@@ -434,7 +585,7 @@ export async function generateOneDraft(
     const linkBrochure = stepNumber === 1 && !!effectiveAttachmentName && !!effectiveAttachmentUrl && /brochure/i.test(aiBody);
     if (linkBrochure) aiBody = aiBody.replace(/brochure/i, BROCHURE_TOKEN);
 
-    let finalBody = plainToHtml([aiBody, signatureBlock].filter(Boolean).join("\n\n"));
+    let finalBody = plainToHtml([aiBody, effectiveSignature].filter(Boolean).join("\n\n"));
     if (linkBrochure) {
       finalBody = finalBody.replace(
         BROCHURE_TOKEN,

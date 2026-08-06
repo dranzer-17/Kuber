@@ -2599,7 +2599,7 @@ export function CampaignDetail({
                         <Input
                           value={regenQuery}
                           onChange={(e) => setRegenQuery(e.target.value)}
-                          placeholder='Optional instruction, e.g. Use "Dear Sir," instead of the name, or make it shorter…'
+                          placeholder='Describe the change, e.g. "remove the last paragraph", change the footer, or use "Dear Sir,"…'
                           onKeyDown={(e) => e.key === "Enter" && handleRegenerate()}
                         />
                         <Button size="sm" onClick={handleRegenerate} disabled={regenerating} className="gap-1.5">

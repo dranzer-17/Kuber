@@ -296,7 +296,7 @@ export function ReplyDraftBox({
             <Input
               value={regenQuery}
               onChange={(e) => setRegenQuery(e.target.value)}
-              placeholder={aiUsed ? "Optional instruction, e.g. Make it shorter…" : "Optional instruction, e.g. Focus on pricing…"}
+              placeholder={aiUsed ? 'Describe the change, e.g. "remove the last paragraph"…' : "Optional instruction, e.g. Focus on pricing…"}
               className="text-sm"
               onKeyDown={(e) => { if (e.key === "Enter") void handleRegenerate(); }}
             />

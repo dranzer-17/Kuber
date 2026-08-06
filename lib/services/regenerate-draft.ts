@@ -61,7 +61,7 @@ export async function regenerateOneDraft(
 
   const { data: oldDraft } = await db
     .from("email_drafts")
-    .select("id, status, lead_id, campaign_id, version, step_number")
+    .select("id, status, lead_id, campaign_id, version, step_number, subject, body")
     .eq("id", draftId)
     .maybeSingle();
 
@@ -147,6 +147,12 @@ export async function regenerateOneDraft(
     newDraftRow.id,
     oldDraft.step_number ?? 1,
     opts.bulkJobId,
+    // Instruction regenerates must edit THIS email. Without the previous
+    // subject/body the model only sees lead data + the instruction and rewrites
+    // the whole message (e.g. "remove the last paragraph" becomes a new pitch).
+    opts.customInstruction?.trim()
+      ? { subject: oldDraft.subject, body: oldDraft.body }
+      : null,
   );
 
   if (!result.ok) {
