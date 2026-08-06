@@ -62,12 +62,24 @@ export interface EnrichTarget {
 // app, never asked about again) and removed from `leads` immediately, instead
 // of lingering as "has_email=true, email=null" to be re-charged on every
 // future enrichment pass.
-// A lead whose bulk_match call keeps genuinely failing (Apollo timeout/5xx,
-// not a credits problem) gets one more try per pass, up to this many lifetime
-// attempts, before being archived for good -- mirrors
-// organizations.enrichment_attempts on the scraping side, which already caps
-// retries instead of letting a stuck item loop forever.
-export const MAX_ENRICH_ATTEMPTS = 3;
+// TWO REQUESTS PER PERSON, EVER: the first ask, plus exactly one retry if it
+// fails. On the second failure the lead is archived and never asked again.
+//
+// Apollo bills on receipt, so a failed request has already been paid for and a
+// retry is a second charge for the same person. One retry covers a genuine
+// one-off blip; anything beyond that is paying repeatedly for the same answer.
+// This was 3 until the July 2026 overspend (3,222 credits charged for 1,403
+// people) made the account owner's ceiling explicit.
+//
+// Worst case per person is therefore 2 credits, for life -- and the
+// `enrich_attempts < MAX` filter on the candidate query enforces it at the
+// point of selection, so it holds even if the archive write itself fails.
+//
+// The trade-off, stated plainly: a lead that fails twice is not retried a third
+// time. It lands in `unenrichable_leads` with reason 'apollo_retry_exhausted',
+// where it can be exported and re-imported deliberately -- a human choosing to
+// spend a credit, rather than the system spending it automatically.
+export const MAX_ENRICH_ATTEMPTS = 2;
 
 /**
  * Take a lead out of the Apollo-eligible pool the instant Apollo answers.
@@ -393,11 +405,12 @@ export async function enrichLeads(
     }
 
     if (!creditsExhausted && !rateLimited && attempted.length > 0) {
-      // A genuine per-request failure (Apollo timeout/5xx/network, not
-      // credits) on a batch Apollo actually received. Bump each lead's lifetime
-      // attempt count; past MAX_ENRICH_ATTEMPTS, archive it for good instead of
-      // leaving it to be reclaimed (and Apollo re-charged for) by every future
-      // self-chain or 15-minute watchdog pass forever.
+      // A genuine per-request failure (Apollo timeout/5xx/network, not credits
+      // or a rate limit) on a request Apollo actually received — so it was
+      // already paid for. First failure bumps the lead to 1 attempt and leaves
+      // it for one retry; the second archives it for good. The
+      // `enrich_attempts < MAX` filter on the candidate query enforces the same
+      // ceiling at selection time, so it holds even if the archive write fails.
       const { data: current } = await db.from("leads")
         .select("id, enrich_attempts")
         .in("id", attempted.map((t) => t.id));
