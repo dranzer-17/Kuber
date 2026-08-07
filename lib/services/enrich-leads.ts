@@ -188,6 +188,46 @@ export async function enrichLeads(
   // as "retry exhausted") threw away leads Apollo had never even seen.
   const attemptedLeadIds = new Set<string>();
 
+  // Attempts are recorded BEFORE each chunk is sent, not in the catch block.
+  // Apollo bills on receipt, so "we asked" must be durable even when this
+  // function is killed outright (redeploy, timeout, OOM) and no catch ever
+  // runs — an unrecorded ask re-selects the lead next pass and pays Apollo
+  // again for an answer already bought, which is exactly the July 2026 failure
+  // mode with a smaller blast radius. A recorded-but-unanswered ask merely
+  // wastes one of the lead's two lifetime slots: the safe direction. Chunks
+  // Apollo refused wholesale (credits gone, rate limit) are reverted in the
+  // catch block, preserving the "not the lead's fault" release policy.
+  const preAttempts = new Map<string, number>();
+  {
+    const { data } = await db
+      .from("leads")
+      .select("id, enrich_attempts")
+      .in("id", targets.map((t) => t.id));
+    for (const r of data ?? []) {
+      preAttempts.set(r.id as string, (r.enrich_attempts as number) ?? 0);
+    }
+  }
+
+  /** Writes per-lead attempt values grouped by value (one UPDATE per distinct
+   *  value — in practice a single statement, since a chunk's leads almost
+   *  always share a count). Throws on the first write error so an unrecorded
+   *  ask can never reach Apollo. */
+  const writeAttempts = async (ids: string[], valueOf: (id: string) => number) => {
+    const groups = new Map<number, string[]>();
+    for (const id of ids) {
+      const v = valueOf(id);
+      const g = groups.get(v);
+      if (g) g.push(id); else groups.set(v, [id]);
+    }
+    for (const [value, groupIds] of groups) {
+      const { error } = await db
+        .from("leads")
+        .update({ enrich_attempts: value })
+        .in("id", groupIds);
+      if (error) throw new Error(`enrich_attempts write failed: ${error.message}`);
+    }
+  };
+
   try {
     for (let i = 0; i < targets.length; i += chunkSize) {
       const chunkTargets = targets.slice(i, i + chunkSize);
@@ -197,6 +237,13 @@ export async function enrichLeads(
         organization_name: t.org_name ?? undefined,
       }));
 
+      // Record the ask first (see preAttempts above). If this write fails the
+      // chunk aborts before Apollo is called — the leads were never sent, are
+      // not in attemptedLeadIds, and are released unpenalised by the catch.
+      await writeAttempts(
+        chunkTargets.map((t) => t.id),
+        (id) => (preAttempts.get(id) ?? 0) + 1,
+      );
       for (const t of chunkTargets) attemptedLeadIds.add(t.id);
       const result = await bulkMatch(chunkDetails);
       totalCredits += result.credits_consumed ?? 0;
@@ -404,13 +451,29 @@ export async function enrichLeads(
         .in("id", releaseUnpenalised.map((t) => t.id)).is("email", null);
     }
 
+    if ((creditsExhausted || rateLimited) && attempted.length > 0) {
+      // The ask was recorded before the request went out, but a wholesale
+      // refusal (empty balance, rate limit) is Apollo's state, not the lead's
+      // — put their counters back so the refusal doesn't burn a lifetime slot.
+      // If the process dies before this revert lands, the recorded ask stands:
+      // that wastes a slot at worst, and never re-bills.
+      const stillPending = attempted.filter((t) => !resolvedLeadIds.has(t.id));
+      if (stillPending.length > 0) {
+        await writeAttempts(
+          stillPending.map((t) => t.id),
+          (id) => preAttempts.get(id) ?? 0,
+        );
+      }
+    }
+
     if (!creditsExhausted && !rateLimited && attempted.length > 0) {
       // A genuine per-request failure (Apollo timeout/5xx/network, not credits
       // or a rate limit) on a request Apollo actually received — so it was
-      // already paid for. First failure bumps the lead to 1 attempt and leaves
-      // it for one retry; the second archives it for good. The
-      // `enrich_attempts < MAX` filter on the candidate query enforces the same
-      // ceiling at selection time, so it holds even if the archive write fails.
+      // already paid for. The ask is already on the counter (recorded before
+      // the request), so nothing to bump here: leads at the ceiling are
+      // archived for good, the rest are released for their one retry. The
+      // `enrich_attempts < MAX` filter on the candidate query enforces the
+      // same ceiling at selection time, so it holds even if the archive fails.
       const { data: current } = await db.from("leads")
         .select("id, enrich_attempts")
         .in("id", attempted.map((t) => t.id));
@@ -418,22 +481,18 @@ export async function enrichLeads(
         (current ?? []).map((r) => [r.id as string, (r.enrich_attempts as number) ?? 0]),
       );
 
-      const toArchive: EnrichTarget[] = [];
-      const toBump: Array<{ target: EnrichTarget; nextAttempts: number }> = [];
-      for (const target of attempted) {
-        const nextAttempts = (attemptsById.get(target.id) ?? 0) + 1;
-        if (nextAttempts >= MAX_ENRICH_ATTEMPTS) toArchive.push(target);
-        else toBump.push({ target, nextAttempts });
-      }
+      const toArchive = attempted.filter(
+        (t) => (attemptsById.get(t.id) ?? 0) >= MAX_ENRICH_ATTEMPTS,
+      );
+      const toRelease = attempted.filter(
+        (t) => (attemptsById.get(t.id) ?? 0) < MAX_ENRICH_ATTEMPTS,
+      );
 
       for (const target of toArchive) {
         // Out of attempts: settle it first, exactly like a "no email" answer.
         // Whatever happens to the archive after this, the lead is no longer an
         // Apollo question and can never be billed for again.
         await settleAsAnswered(db, target);
-        await db.from("leads")
-          .update({ enrich_attempts: MAX_ENRICH_ATTEMPTS })
-          .eq("id", target.id);
         try {
           await archiveUnenrichableLead(db, target, null, "apollo_retry_exhausted");
           archived++;
@@ -455,10 +514,10 @@ export async function enrichLeads(
         });
       }
 
-      for (const { target, nextAttempts } of toBump) {
+      if (toRelease.length > 0) {
         await db.from("leads")
-          .update({ enrich_attempts: nextAttempts, enrich_locked_at: null })
-          .eq("id", target.id).is("email", null);
+          .update({ enrich_locked_at: null })
+          .in("id", toRelease.map((t) => t.id)).is("email", null);
       }
     }
   }

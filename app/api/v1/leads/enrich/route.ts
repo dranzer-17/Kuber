@@ -287,6 +287,38 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({ import_id: importId }),
         }).catch(() => {})
       );
+    } else if (user.companyId === null) {
+      // Import finished, and the caller is the service role — i.e. the daily
+      // resume job. That job kicks only ONE import per pass (parallel kicks
+      // can rate-limit each other, and Apollo bills 429-rejected requests),
+      // so the chain itself walks on to the next import that still has
+      // unrevealed leads. Serial by construction: the next import starts only
+      // after this one is fully done. Terminates because every successful
+      // pass settles, archives, or emails its leads — a lead can't re-enter
+      // the pending pool — and any failure sets `warning`, which stops the
+      // chain entirely. Managers' manual enrich never reaches this branch.
+      const { data: nextPending } = await db
+        .from("leads")
+        .select("import_id")
+        .eq("lead_source", "apollo")
+        .eq("has_email", true)
+        .eq("is_deleted", false)
+        .lt("enrich_attempts", MAX_ENRICH_ATTEMPTS)
+        .is("email", null)
+        .not("import_id", "is", null)
+        .neq("import_id", importId)
+        .limit(1);
+      const nextImportId = nextPending?.[0]?.import_id as string | undefined;
+      if (nextImportId) {
+        const authHeader = req.headers.get("authorization") ?? "";
+        after(() =>
+          fetch(`${baseUrl}/api/v1/leads/enrich`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": authHeader },
+            body: JSON.stringify({ import_id: nextImportId }),
+          }).catch(() => {})
+        );
+      }
     }
   }
 

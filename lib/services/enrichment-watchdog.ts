@@ -53,20 +53,33 @@ export async function triggerEnrichWatchdog(baseUrl: string, db: Db) {
     .is("email", null)
     .not("import_id", "is", null);
 
-  const importIds = [...new Set((pending ?? []).map((r) => r.import_id as string))].slice(0, 5);
-  if (importIds.length === 0) return;
+  // ONE import per kick — not five in parallel. Concurrent kicks meant up to
+  // five bulk_match streams hitting Apollo at once, which can rate-limit each
+  // other, and Apollo bills a 429-rejected request the same as a served one.
+  // The enrich route walks the rest serially on its own: it self-chains
+  // through the import's batches, and (service-role callers only) chains on to
+  // the next pending import once this one is finished. A chain that dies is
+  // resumed by tomorrow's pass — this is the safety net, not the fast path.
+  const importId = [...new Set((pending ?? []).map((r) => r.import_id as string))][0];
+  if (!importId) return;
 
-  for (const importId of importIds) {
-    void fetch(`${baseUrl}/api/v1/leads/enrich`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}` },
-      body: JSON.stringify({ import_id: importId }),
-    }).catch(() => {});
-  }
+  void fetch(`${baseUrl}/api/v1/leads/enrich`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}` },
+    body: JSON.stringify({ import_id: importId }),
+  }).catch(() => {});
 }
 
 /** A running regeneration job is considered stalled once its heartbeat is this old. */
 const REGEN_STALE_MINUTES = 5;
+
+/** A job still stalling this long after it was created is not coming back on
+ *  its own — by then every watchdog pass has already re-kicked it dozens of
+ *  times. Fail it instead of kicking it forever: an unbounded kick loop burns
+ *  a lambda per pass, can keep paying LLM providers for completions that
+ *  finish server-side after our timeout, and holds uq_draft_regen_active_job
+ *  so no fresh run can ever be started on that campaign. */
+const REGEN_EXPIRE_HOURS = 24;
 
 /** Revive bulk draft-regeneration jobs whose batch self-chain died mid-run —
  *  the same failure mode the two watchdogs above exist for. Each batch bumps
@@ -79,21 +92,60 @@ export async function triggerRegenerationWatchdog(baseUrl: string, db: Db) {
   if (!secret) return;
 
   const staleBefore = new Date(Date.now() - REGEN_STALE_MINUTES * 60 * 1000).toISOString();
+  const expiredBefore = new Date(Date.now() - REGEN_EXPIRE_HOURS * 60 * 60 * 1000).toISOString();
 
   const { data: stalled } = await db
     .from("draft_regeneration_jobs")
-    .select("id")
+    .select("id, company_id, created_at")
     .in("status", ["queued", "running"])
     .or(`heartbeat_at.is.null,heartbeat_at.lt.${staleBefore}`)
     .lt("created_at", staleBefore)
     .limit(5);
 
+  // Same per-company cache the draft-generation watchdog below uses: no
+  // provider will serve the batch, so kicking it just marks items failed for
+  // nothing and chews through the job's leads during an outage.
+  const companyHasUsableLlm = new Map<string, boolean>();
+
   for (const job of stalled ?? []) {
+    const now = new Date().toISOString();
+
+    if (job.created_at && (job.created_at as string) < expiredBefore) {
+      // Out of patience (see REGEN_EXPIRE_HOURS). Items the job never finished
+      // are failed with a reason the UI can show; the job row leaves
+      // queued/running so the unique active-job index releases and a human can
+      // start a fresh, deliberate run.
+      await db
+        .from("draft_regeneration_job_items")
+        .update({ status: "failed", error: `Watchdog: job stalled for over ${REGEN_EXPIRE_HOURS}h`, updated_at: now })
+        .eq("job_id", job.id)
+        .in("status", ["pending", "running"]);
+      await db
+        .from("draft_regeneration_jobs")
+        .update({ status: "failed", finished_at: now, heartbeat_at: now })
+        .eq("id", job.id);
+      continue;
+    }
+
+    const companyId = job.company_id as string | null;
+    if (companyId) {
+      let usable = companyHasUsableLlm.get(companyId);
+      if (usable === undefined) {
+        usable = await hasUsableLlmKey(db, companyId);
+        companyHasUsableLlm.set(companyId, usable);
+      }
+      // Leave the job queued/running untouched: when a key comes back, the
+      // next pass revives it. The 24h ceiling above bounds how long that
+      // waiting can go on. (The outage banner is already raised per company by
+      // the draft-generation watchdog below.)
+      if (!usable) continue;
+    }
+
     // Items left 'running' belong to the batch that died; put them back in the
     // queue. Anything already done/failed keeps its outcome.
     await db
       .from("draft_regeneration_job_items")
-      .update({ status: "pending", updated_at: new Date().toISOString() })
+      .update({ status: "pending", updated_at: now })
       .eq("job_id", job.id)
       .eq("status", "running");
 
