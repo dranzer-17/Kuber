@@ -118,10 +118,12 @@ function htmlToText(html: string): string {
 }
 
 function RichTextEditor({
-  label, value, onChange, placeholder, minHeight = 240, helper,
+  label, value, onChange, placeholder, minHeight = 240, helper, singleLineBreaks = false,
 }: {
   label: string; value: string; onChange: (v: string) => void;
   placeholder?: string; minHeight?: number; helper?: string;
+  /** Enter inserts a line break instead of a paragraph. For sign-off blocks. */
+  singleLineBreaks?: boolean;
 }) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const lastSyncedValue = useRef<string | null>(null);
@@ -141,6 +143,19 @@ function RichTextEditor({
   }
 
   function runCommand(cmd: EditorCommand) { editorRef.current?.focus(); document.execCommand(cmd); syncValue(); }
+
+  // contentEditable's Enter starts a new paragraph, which htmlToText writes out
+  // as a blank line between every entry. Correct for a prompt, wrong for a
+  // sign-off block, where the name, title and contact lines belong on
+  // consecutive lines. Users were left choosing between a blank line (Enter)
+  // and no break at all (backspace, which merges the paragraphs and runs the
+  // lines together); the single break needed Shift+Enter, which nobody guesses.
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (!singleLineBreaks || e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    document.execCommand("insertLineBreak");
+    syncValue();
+  }
 
   function addLink() {
     editorRef.current?.focus();
@@ -183,7 +198,7 @@ function RichTextEditor({
         </div>
         <div ref={editorRef} role="textbox" aria-label={label} aria-multiline="true"
           contentEditable suppressContentEditableWarning data-placeholder={placeholder}
-          onInput={syncValue} onBlur={syncValue}
+          onInput={syncValue} onBlur={syncValue} onKeyDown={handleKeyDown}
           className="rich-editor min-w-0 bg-card px-4 py-3 text-sm leading-6 text-foreground outline-none"
           style={{ minHeight }} />
       </div>
@@ -783,6 +798,7 @@ export function SettingsView() {
                           value={mySignature}
                           onChange={setMySignature}
                           minHeight={160}
+                          singleLineBreaks
                           placeholder={"Your Name\nYour Title\nKuber Polyplast\n+91-XXXXXXXXXX"}
                         />
                         {!mySignature.trim() && myDefaults.signature && (
@@ -900,7 +916,7 @@ export function SettingsView() {
                         </div>
                       </div>
                       <p className="text-xs text-muted-foreground">Contact lines appended at the end of every generated email.</p>
-                      <RichTextEditor label="Contact footer" value={sigContact} onChange={setSigContact} minHeight={160}
+                      <RichTextEditor label="Contact footer" value={sigContact} onChange={setSigContact} minHeight={160} singleLineBreaks
                         placeholder={"Kuber Polyplast\n+91-XXXXXXXXXX\nsales@kuberpolyplast.com"} />
                     </section>
                   )}
