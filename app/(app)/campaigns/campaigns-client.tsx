@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SearchInput } from "@/components/ui/search-input";
+import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { Card } from "@/components/ui/card";
 import {
@@ -103,6 +104,11 @@ export function CampaignsClient({ initialCampaigns }: { initialCampaigns: Campai
       <div className="flex items-center justify-between gap-3">
         <p className="eyebrow">Outreach · Campaigns</p>
       </div>
+
+      {/* Drafts are written here, so a dead LLM key has to be visible here. It
+          was only on Leads and Dashboard, which is why a whole campaign could
+          show "No draft" on every row with no explanation anywhere. */}
+      <ServiceHealthBanner />
 
       <div className="flex items-center gap-3 flex-wrap">
         <SearchInput

@@ -66,6 +66,17 @@ export async function GET(req: NextRequest) {
         severity: "critical",
         message: "No configured LLM provider can generate company profiles right now — add or top up a key in Settings > Keys.",
       });
+    } else if (row.event === "DRAFT_LLM_UNAVAILABLE") {
+      // Drafts have their own branch because the two rules above are worded for
+      // company profiles, and because an OpenRouter 402 carries neither the
+      // word "openai" nor a code the next rule matches — so a drafts outage on
+      // that key alone would have shown nothing at all.
+      add({
+        service: "LLM providers",
+        kind: "credits",
+        severity: "critical",
+        message: "Email drafts can't be generated — no LLM provider has credits. Top up or add a key in Settings > Keys.",
+      });
     } else if (row.source === "llm" && err.includes("openai") && (err.includes("401") || err.includes("403") || err.includes("insufficient_quota") || err.includes("429"))) {
       add({ service: "OpenAI", kind: "credits", severity: "critical", message: "OpenAI is rejecting requests — check its API key / billing." });
     }

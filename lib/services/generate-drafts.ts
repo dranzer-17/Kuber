@@ -92,6 +92,79 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
+/** Marker written into email_drafts.rejection_reason when a draft failed because
+ *  no LLM provider would serve the request — not because of anything about the
+ *  lead. fetchDraftTargets and countPendingDrafts skip rows carrying it, so an
+ *  outage cannot burn through a lead's three retries.
+ *
+ *  On 7 Aug 2026 both of the client's keys ran dry mid-campaign (OpenAI 429
+ *  insufficient_quota, OpenRouter 402) and 32 consecutive attempts failed in
+ *  ~3.5s each. Ten leads hit the retry cap and were permanently skipped for a
+ *  reason that had nothing to do with them. */
+export const PROVIDER_UNAVAILABLE = "provider_unavailable";
+
+/** Credit/auth signatures that mean "the provider refused everyone", not "this
+ *  lead is unwriteable". Kept broad on purpose: a false positive costs one
+ *  extra retry, a false negative permanently strands a lead. */
+export function isProviderOutage(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("insufficient_quota") ||
+    m.includes("credit_balance_exhausted") ||
+    m.includes("no credits remaining") ||
+    m.includes("out of credits") ||
+    m.includes("requires more credits") ||
+    m.includes("no usable llm provider") ||
+    m.includes("quota") ||
+    / 4(01|02|03|29)/.test(m) ||
+    m.includes("rate limit")
+  );
+}
+
+/** One place for what happens when a draft attempt throws.
+ *
+ *  Previously both catch blocks wrote status 'failed' and nothing else:
+ *  rejection_reason stayed null, so the campaign view showed "No draft" with no
+ *  explanation, and nothing reached enrichment_logs, which is what the
+ *  service-health banner reads. A whole campaign could die of an empty billing
+ *  account with no indication anywhere in the UI. */
+async function recordDraftFailure(
+  db: SupabaseClient,
+  draftId: string,
+  leadId: string,
+  campaignId: string,
+  stepNumber: number,
+  err: unknown,
+): Promise<void> {
+  const message = (err as Error).message ?? "Unknown error";
+  const outage = isProviderOutage(message);
+  const now = new Date().toISOString();
+
+  await db.from("email_drafts").update({
+    status: "failed",
+    rejection_reason: `${outage ? PROVIDER_UNAVAILABLE + ": " : ""}${message}`.slice(0, 500),
+    updated_at: now,
+  }).eq("id", draftId);
+
+  if (outage) {
+    // source 'llm' + the raw provider error is what the service-health banner
+    // matches on. Best-effort: a failed log row must never mask the real error.
+    try {
+      await db.from("enrichment_logs").insert({
+        source: "llm",
+        event: "DRAFT_LLM_UNAVAILABLE",
+        error: message.slice(0, 500),
+        payload: { campaign_id: campaignId, draft_id: draftId, step: stepNumber },
+        created_at: now,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  await logLeadEvent(db, leadId, "draft_failed", "Email draft generation failed", {
+    metadata: { campaign_id: campaignId, draft_id: draftId, step: stepNumber, reason: message, provider_outage: outage },
+  });
+}
+
 /** Drop the appended signature so the model edits the email body only. */
 function stripTrailingSignature(plain: string, signatureBlock: string): string {
   if (!signatureBlock.trim()) return plain;
@@ -442,11 +515,7 @@ export async function generateOneDraft(
       // Mark only the draft row failed — campaign_leads.draft_id stays NULL so
       // the auto-generator retries this lead on the next batch instead of
       // skipping it forever (planning.md Phase 6.5).
-      const now = new Date().toISOString();
-      await db.from("email_drafts").update({ status: "failed", updated_at: now }).eq("id", activeDraftId);
-      await logLeadEvent(db, lead.id, "draft_failed", "Email draft generation failed", {
-        metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, reason: (err as Error).message },
-      });
+      await recordDraftFailure(db, activeDraftId, lead.id, campaignId, stepNumber, err);
       return { ok: false, reason: (err as Error).message };
     }
   }
@@ -605,14 +674,7 @@ export async function generateOneDraft(
     // the auto-generator retries this lead on the next batch instead of
     // skipping it forever (planning.md Phase 6.5). fetchDraftTargets caps
     // retries at 3 failed versions per lead/step.
-    const now = new Date().toISOString();
-    await db.from("email_drafts").update({
-      status: "failed",
-      updated_at: now,
-    }).eq("id", activeDraftId);
-    await logLeadEvent(db, lead.id, "draft_failed", "Email draft generation failed", {
-      metadata: { campaign_id: campaignId, draft_id: activeDraftId, step: stepNumber, reason: (err as Error).message },
-    });
+    await recordDraftFailure(db, activeDraftId, lead.id, campaignId, stepNumber, err);
     return { ok: false, reason: (err as Error).message };
   }
 }
@@ -635,12 +697,16 @@ export async function fetchDraftTargets(
   // Failed drafts leave draft_id NULL so leads are retried — but cap retries at
   // 3 failed versions per lead/step to stop a pathological lead looping the LLM
   // forever (planning.md Phase 6.5). Beyond the cap, retry is manual.
+  // Outage failures are excluded: they say nothing about the lead. The null
+  // branch keeps historic rows (written before rejection_reason was recorded)
+  // counting exactly as they did before.
   const { data: failedDrafts } = await db
     .from("email_drafts")
     .select("lead_id")
     .eq("campaign_id", campaignId)
     .eq("step_number", stepNumber)
-    .eq("status", "failed");
+    .eq("status", "failed")
+    .or(`rejection_reason.is.null,rejection_reason.not.like.${PROVIDER_UNAVAILABLE}%`);
   const failCount = new Map<string, number>();
   for (const d of failedDrafts ?? []) {
     failCount.set(d.lead_id, (failCount.get(d.lead_id) ?? 0) + 1);
@@ -720,7 +786,8 @@ export async function countPendingDrafts(db: SupabaseClient, campaignId: string)
       .select("lead_id")
       .eq("campaign_id", campaignId)
       .eq("step_number", 1)
-      .eq("status", "failed");
+      .eq("status", "failed")
+      .or(`rejection_reason.is.null,rejection_reason.not.like.${PROVIDER_UNAVAILABLE}%`);
     const failCount = new Map<string, number>();
     for (const d of failedDrafts ?? []) {
       failCount.set(d.lead_id, (failCount.get(d.lead_id) ?? 0) + 1);

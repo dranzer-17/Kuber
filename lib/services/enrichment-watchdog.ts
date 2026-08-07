@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MAX_ENRICH_ATTEMPTS } from "@/lib/services/enrich-leads";
 import { countPendingDrafts } from "@/lib/services/generate-drafts";
+import { SERVICE_PROVIDER_IDS } from "@/lib/services/providers/registry";
+import { ENV_KEY_VARS } from "@/lib/services/provider-keys";
 
 type Db = SupabaseClient;
 
@@ -141,6 +143,43 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
 
   const staleBefore = new Date(Date.now() - DRAFT_STALE_MINUTES * 60 * 1000).toISOString();
 
+  // Nothing to gain from restarting a campaign no provider will serve. When
+  // both of the client's keys ran dry, this job re-kicked the campaign every
+  // 15 minutes and every attempt failed in ~3.5s — costing no money (a 429
+  // bills nothing) but chewing through the leads' three retries until ten were
+  // permanently skipped.
+  //
+  // Reads the key health we already record rather than asking a provider for a
+  // balance: a balance check is itself an API call, and that habit is what made
+  // Apollo's usage impossible to account for.
+  //
+  // Checked PER COMPANY, because provider_keys is company-scoped and one
+  // tenant's healthy key says nothing about another's. A process-level env key
+  // counts as usable — resolveKey falls back to it when every database key is
+  // cooling off, so ignoring it here would halt generation that could still
+  // run.
+  const envLlmKeyConfigured = (Object.entries(ENV_KEY_VARS) as [string, string][])
+    .filter(([provider]) => !(SERVICE_PROVIDER_IDS as readonly string[]).includes(provider))
+    .some(([, envVar]) => (process.env[envVar] ?? "").trim().length > 0);
+
+  const companyHasUsableLlm = new Map<string, boolean>();
+  const hasUsableLlm = async (companyId: string): Promise<boolean> => {
+    if (envLlmKeyConfigured) return true;
+    const cached = companyHasUsableLlm.get(companyId);
+    if (cached !== undefined) return cached;
+    const { data } = await db
+      .from("provider_keys")
+      .select("id")
+      .eq("company_id", companyId)
+      .not("provider", "in", `(${SERVICE_PROVIDER_IDS.join(",")})`)
+      .eq("is_active", true)
+      .or(`status.eq.healthy,and(status.eq.cooling_off,cooling_off_until.lte.${new Date().toISOString()})`)
+      .limit(1);
+    const usable = (data ?? []).length > 0;
+    companyHasUsableLlm.set(companyId, usable);
+    return usable;
+  };
+
   // Deliberately NOT filtered on status = 'processing'. The reset call above
   // flips exactly these campaigns to 'draft' on its way past (it releases any
   // campaign in 'processing' with nothing actively generating), so a scan for
@@ -160,7 +199,7 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
   // "has pending leads" test into the query instead of filtering here.
   const { data: candidates } = await db
     .from("campaigns")
-    .select("id")
+    .select("id, company_id")
     .in("status", ["draft", "processing"])
     .eq("is_deleted", false)
     .not("draft_generation_started_at", "is", null)
@@ -171,6 +210,8 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
   for (const campaign of candidates ?? []) {
     if (kicked >= MAX_DRAFT_KICKS_PER_PASS) break;
     const campaignId = campaign.id as string;
+
+    if (!(await hasUsableLlm(campaign.company_id as string))) continue;
 
     // Nothing left to write — a finished campaign must not be kicked, and this
     // is also what stops a pathological lead being retried forever: leads past
