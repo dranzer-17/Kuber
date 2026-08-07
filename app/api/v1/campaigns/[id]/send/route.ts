@@ -6,6 +6,16 @@ import { SendCampaignSchema } from "@/lib/validators/campaigns";
 import { assertCampaignAccess } from "@/lib/auth/scope";
 import { dbForUser } from "@/lib/supabase/scoped";
 
+// No override before: this route ran on whatever the platform's default
+// timeout happened to be, with zero declared margin. Instantly's bulk-add
+// tops out at 100 req/s and 6000/min (shared workspace-wide), so the real
+// worst case here isn't lead volume — it's a slow country-bucket loop (each
+// bucket needs a campaign create/patch call, its lead batches, then its own
+// activation call) plus this app's own 2s inter-batch spacing. 120s matches
+// the other multi-step Instantly/DB routes in this app (bulk-delete) and
+// leaves comfortable headroom over the worst realistic 1000-lead case.
+export const maxDuration = 120;
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   let user: Awaited<ReturnType<typeof requireAuth>>;
   try { user = await requireAuth(req); } catch (r) { return r as Response; }

@@ -13,7 +13,13 @@ import {
 import { toInstantlyTimezone } from "@/lib/instantly-timezones";
 import { getSendingAccounts } from "@/lib/services/service-keys";
 
-const BATCH = 100;
+// Instantly's own limit on POST /api/v2/leads/add is maxItems: 1000 per call —
+// 100 was our own extra-cautious choice, not anything the API requires. 500
+// keeps meaningful headroom under that cap (a bad/oversized batch can't ever
+// approach the hard limit) while cutting round-trips and mandatory 2s
+// between-batch waits by 5x versus the old size: a 1000-lead campaign in one
+// country bucket is now 2 calls + 1 wait instead of 10 calls + 9 waits.
+const BATCH = 500;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ─── Country → timezone resolution ───────────────────────────────────────────
