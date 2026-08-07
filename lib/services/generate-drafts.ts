@@ -101,7 +101,7 @@ function stripTrailingSignature(plain: string, signatureBlock: string): string {
     .filter(Boolean);
   if (sigLines.length === 0) return plain;
 
-  let out = plain.trimEnd();
+  const out = plain.trimEnd();
   const first = sigLines[0];
   const idx = out.lastIndexOf(first);
   if (idx > 40) {
