@@ -5,7 +5,7 @@ import { safeSecretEqual } from "@/lib/auth/secret";
 import { internalAppBaseUrl } from "@/lib/internal-url";
 import { runEnrichmentWatchdog } from "@/lib/services/enrichment-watchdog";
 
-// Meant to be hit often (every 15-20 min) — separate from reconcile-counters'
+// Meant to be hit often (every 10 min, pg_cron) — separate from reconcile-counters'
 // daily cron, which was the only safety net before this and left up to a
 // day's gap whenever the enrichment self-chain silently died (confirmed live
 // this happened: server stayed up, relay just stopped, backlog sat untouched

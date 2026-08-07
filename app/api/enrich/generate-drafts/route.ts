@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
     // key usable?" from provider_keys, so a stale-healthy row or an env-var key
     // that is itself dry passes the check and fails the call, and the route
     // would chain into itself forever. Ending the run is the safe stop — the
-    // watchdog re-kicks this campaign within 15 minutes once a key works again.
+    // watchdog re-kicks this campaign within 10 minutes once a key works again.
     if (isProviderOutage(result.reason)) { llmOutage = true; break; }
   }
 

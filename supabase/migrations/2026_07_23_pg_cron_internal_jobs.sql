@@ -73,9 +73,19 @@ revoke all on function public.ping_internal_route(text, integer) from anon, auth
 
 -- cron.schedule upserts on job name, so re-running this migration re-points the
 -- existing jobs rather than stacking duplicates.
+-- 10 minutes, not 15: this is the only thing that restarts draft generation
+-- after it stops, and the pause is now deliberate as well as accidental — the
+-- generate-drafts route refuses to start on an empty LLM balance and does not
+-- self-chain, so this job is what picks a campaign back up once a key is
+-- topped up. 15 minutes of a campaign sitting visibly still after the fix was
+-- applied read as "nothing is happening". Costs nothing to shorten: every
+-- nudge behind this endpoint is free (Firecrawl + the LLM providers), and a
+-- pass with no work to do is two cheap "is there anything unfinished?" reads.
+-- The one paid job, resume-apollo-reveal, is deliberately NOT here — it runs
+-- daily precisely so it cannot do this many passes.
 select cron.schedule(
   'enrichment-watchdog',
-  '*/15 * * * *',
+  '*/10 * * * *',
   $$select public.ping_internal_route('/api/internal/enrichment-watchdog')$$
 );
 

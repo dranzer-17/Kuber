@@ -160,7 +160,7 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
 
   // One banner row per company per pass. While an outage lasts this job is the
   // only writer left — generation correctly never starts, so nothing else
-  // reports it — and service-health only looks back 6 hours. Firing every 15
+  // reports it — and service-health only looks back 6 hours. Firing every 10
   // minutes keeps the red banner up for the whole outage and lets it clear on
   // its own once a key works again.
   const loggedOutage = new Set<string>();
@@ -248,7 +248,7 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
  *
  *  Everything here is FREE: scraping is Firecrawl, draft regeneration is the
  *  LLM providers. No Apollo call can originate from this function, which is why
- *  it is safe to run every 15 minutes. The one paid job, triggerEnrichWatchdog,
+ *  it is safe to run every 10 minutes. The one paid job, triggerEnrichWatchdog,
  *  is deliberately excluded and runs on its own daily schedule. */
 export async function runEnrichmentWatchdog(baseUrl: string, db: Db) {
   triggerScrapeWatchdog(baseUrl);
