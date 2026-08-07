@@ -12,6 +12,22 @@ import {
 
 export const maxDuration = 55;
 
+// Stop starting new drafts once this much of the budget is gone.
+//
+// The batch used to be a flat count of 10, and the self-chain that continues
+// the campaign sits AFTER the loop. A draft takes ~6.4s against a 55s ceiling,
+// so ten of them need ~64s: the lambda was killed partway through the ninth
+// every single time, the chain kickoff was never reached, and generation
+// stopped dead. Measured on the client's 100-lead campaign — 8 drafts written
+// between 07:36:24 and 07:37:08, the ninth left stuck in "generating" at
+// 07:37:15 (55.8s after start), then nothing. Every campaign over ~8 leads had
+// been silently capping at 8.
+//
+// A time budget instead of a count means we never begin a draft we cannot
+// finish, and the loop always exits with enough runway to hand off to the next
+// invocation. It also self-adjusts if the model gets slower or faster.
+const DRAFT_TIME_BUDGET_MS = 40_000;
+
 export async function POST(req: NextRequest) {
   if (!safeSecretEqual(req.headers.get("x-internal-secret"), process.env.INTERNAL_SECRET)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -73,8 +89,11 @@ export async function POST(req: NextRequest) {
 
   let succeeded = 0;
   let failed = 0;
+  const startedAt = Date.now();
+  let ranOutOfTime = false;
 
   for (const target of targets) {
+    if (Date.now() - startedAt > DRAFT_TIME_BUDGET_MS) { ranOutOfTime = true; break; }
     const result = await generateOneDraft(
       cdb,
       target,
@@ -93,7 +112,7 @@ export async function POST(req: NextRequest) {
 
   const remaining = await countPendingDrafts(cdb, campaignId);
 
-  if (remaining > 0) {
+  if (remaining > 0 || ranOutOfTime) {
     const baseUrl = internalAppBaseUrl(req);
     const secret = process.env.INTERNAL_SECRET!;
     // after() keeps the lambda alive until the next batch kickoff actually leaves
@@ -116,7 +135,7 @@ export async function POST(req: NextRequest) {
   }
 
   return Response.json({
-    processed: targets.length,
+    processed: succeeded + failed,
     succeeded,
     failed,
     remaining,

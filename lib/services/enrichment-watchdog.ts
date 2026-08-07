@@ -103,6 +103,68 @@ export async function triggerRegenerationWatchdog(baseUrl: string, db: Db) {
   }
 }
 
+/** A campaign that has written no draft in this long has lost its chain. */
+const DRAFT_STALE_MINUTES = 5;
+
+/** Revive INITIAL draft generation whose self-chain died mid-run.
+ *
+ *  triggerRegenerationWatchdog above covers bulk *re*generation; first-pass
+ *  generation had no net at all. Its only recovery was the
+ *  reset_stuck_draft_generation call at the top of the worker itself — which
+ *  cannot help, because the thing that needs reviving is that same worker. A
+ *  campaign whose chain died stayed "processing" forever with no way back.
+ *
+ *  Confirmed live on the client's 100-lead campaign: 8 drafts written, the
+ *  chain died with the lambda, and it sat untouched for 20 minutes until
+ *  someone noticed.
+ *
+ *  Liveness is measured by the most recent draft row, not campaigns.updated_at,
+ *  which only moves on a status flip — a healthy run writes a draft every ~6s
+ *  and so is never mistaken for stalled, while a dead one is picked up on the
+ *  next pass. That matters: kicking a campaign that is still running would hand
+ *  two workers the same targets and duplicate drafts.
+ *
+ *  Free (LLM providers, no Apollo), so it is safe at the 15-minute cadence. */
+export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
+  const secret = process.env.INTERNAL_SECRET;
+  if (!secret) return;
+
+  // Marks 'generating' rows older than the cutoff as failed (retry-able) and
+  // releases campaigns with nothing actually in flight.
+  try {
+    await db.rpc("reset_stuck_draft_generation", { stale_minutes: DRAFT_STALE_MINUTES });
+  } catch { /* non-fatal */ }
+
+  const staleBefore = new Date(Date.now() - DRAFT_STALE_MINUTES * 60 * 1000).toISOString();
+
+  const { data: processing } = await db
+    .from("campaigns")
+    .select("id")
+    .eq("status", "processing")
+    .eq("is_deleted", false)
+    .lt("draft_generation_started_at", staleBefore)
+    .limit(5);
+
+  for (const campaign of processing ?? []) {
+    const { data: lastDraft } = await db
+      .from("email_drafts")
+      .select("created_at")
+      .eq("campaign_id", campaign.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Still producing — leave it alone.
+    if (lastDraft?.created_at && lastDraft.created_at > staleBefore) continue;
+
+    void fetch(`${baseUrl}/api/enrich/generate-drafts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-secret": secret },
+      body: JSON.stringify({ campaign_id: campaign.id }),
+    }).catch(() => {});
+  }
+}
+
 /** Runs the nudges together — this is the whole job of the frequent watchdog.
  *
  *  Everything here is FREE: scraping is Firecrawl, draft regeneration is the
@@ -112,4 +174,5 @@ export async function triggerRegenerationWatchdog(baseUrl: string, db: Db) {
 export async function runEnrichmentWatchdog(baseUrl: string, db: Db) {
   triggerScrapeWatchdog(baseUrl);
   await triggerRegenerationWatchdog(baseUrl, db);
+  await triggerDraftGenerationWatchdog(baseUrl, db);
 }
