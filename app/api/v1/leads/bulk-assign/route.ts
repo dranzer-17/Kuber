@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { dbId } from "@/lib/validators/id";
 import { requireManager } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { bulkAssignByStrategy } from "@/lib/services/assignment";
@@ -8,9 +9,9 @@ import { dbForUser } from "@/lib/supabase/scoped";
 // skip_already_assigned (spec §4): when true, leads that already have an owner
 // are left untouched — only pool/unassigned leads are processed.
 const BulkAssignSchema = z.discriminatedUnion("strategy", [
-  z.object({ strategy: z.literal("manual"), ids: z.array(z.string().uuid()).min(1), assigned_to: z.string().uuid().nullable(), skip_already_assigned: z.boolean().optional() }),
-  z.object({ strategy: z.literal("round_robin"), ids: z.array(z.string().uuid()).min(1), skip_already_assigned: z.boolean().optional() }),
-  z.object({ strategy: z.literal("territory"), ids: z.array(z.string().uuid()).min(1), skip_already_assigned: z.boolean().optional() }),
+  z.object({ strategy: z.literal("manual"), ids: z.array(dbId).min(1), assigned_to: dbId.nullable(), skip_already_assigned: z.boolean().optional() }),
+  z.object({ strategy: z.literal("round_robin"), ids: z.array(dbId).min(1), skip_already_assigned: z.boolean().optional() }),
+  z.object({ strategy: z.literal("territory"), ids: z.array(dbId).min(1), skip_already_assigned: z.boolean().optional() }),
 ]);
 
 export async function POST(req: NextRequest) {

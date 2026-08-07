@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dbId } from "./id";
 
 // Territory is a list of countries the employee receives leads for — the
 // output of the same region/country picker the Apollo import uses. Names are
@@ -48,7 +49,7 @@ export const PatchUserSchema = z
     // The successor, for the "manual" strategy. A bare reassign_to with no
     // strategy still means "manual" — that was the only option this endpoint
     // had before handover_strategy existed.
-    reassign_to: z.string().uuid().optional(),
+    reassign_to: dbId.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.handover_strategy === "manual" && !data.reassign_to) {

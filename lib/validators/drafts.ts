@@ -1,13 +1,14 @@
 import { z } from "zod";
+import { dbId } from "./id";
 
 export const GenerateDraftsSchema = z.object({
-  campaign_id: z.string().uuid(),
-  lead_ids: z.array(z.string().uuid()).optional(),
+  campaign_id: dbId,
+  lead_ids: z.array(dbId).optional(),
   limit: z.number().int().min(1).max(200).default(25),
 });
 
 export const DraftsQuerySchema = z.object({
-  campaign_id: z.string().uuid().optional(),
+  campaign_id: dbId.optional(),
   status: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -22,7 +23,7 @@ export const PatchDraftSchema = z.discriminatedUnion("action", [
 ]);
 
 export const BulkApproveSchema = z.object({
-  draft_ids: z.array(z.string().uuid()).min(1).max(200),
+  draft_ids: z.array(dbId).min(1).max(200),
 });
 
 export const RegenerateDraftSchema = z.object({
@@ -33,20 +34,20 @@ export const RegenerateDraftSchema = z.object({
 // this campaign" — the server resolves the target list either way, so the ids
 // here only ever narrow it (see lib/services/regeneration-jobs.ts).
 export const BulkRegenerateSchema = z.object({
-  campaign_lead_ids: z.array(z.string().uuid()).min(1).max(500).optional(),
+  campaign_lead_ids: z.array(dbId).min(1).max(500).optional(),
   custom_instruction: z.string().max(1000).optional(),
   step_number: z.number().int().min(1).default(1),
 });
 
 export const ManualDraftSchema = z.object({
-  campaign_lead_id: z.string().uuid(),
+  campaign_lead_id: dbId,
   step_number: z.number().int().min(2),
   subject: z.string(),
   body: z.string().min(1),
 });
 
 export const FollowUpRegenerateSchema = z.object({
-  campaign_lead_id: z.string().uuid(),
+  campaign_lead_id: dbId,
   step_number: z.number().int().min(2),
   body: z.string(),
   instruction: z.string().optional(),
@@ -62,7 +63,7 @@ export const FollowUpStepTemplateRegenerateSchema = z.object({
 // reply in the same conversation, unlike the step-1 draft's PatchDraftSchema
 // "edit" action, which requires a non-empty subject.
 export const FollowUpSaveSchema = z.object({
-  campaign_lead_id: z.string().uuid(),
+  campaign_lead_id: dbId,
   step_number: z.number().int().min(2),
   subject: z.string(),
   body: z.string().min(1),

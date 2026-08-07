@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dbId } from "./id";
 
 export const CreateCampaignSchema = z.object({
   name: z.string().min(1),
@@ -26,7 +27,7 @@ export const CreateCampaignSchema = z.object({
   attachment_size: z.number().int().optional(),
   attachment_url:  z.string().optional().nullable(),
   // Per-admin signature
-  signature_user_id: z.string().uuid().optional(),
+  signature_user_id: dbId.optional(),
 });
 
 export const PatchCampaignSchema = z.object({
@@ -44,7 +45,7 @@ export const PatchCampaignSchema = z.object({
 });
 
 export const AddLeadsToCampaignSchema = z.object({
-  lead_ids: z.array(z.string().uuid()).min(1),
+  lead_ids: z.array(dbId).min(1),
 });
 
 export const CampaignLeadsQuerySchema = z.object({
@@ -54,7 +55,7 @@ export const CampaignLeadsQuerySchema = z.object({
 });
 
 export const PatchCampaignLeadSchema = z.object({
-  campaign_lead_id: z.string().uuid(),
+  campaign_lead_id: dbId,
   crm_status: z.enum([
     "new", "enriched", "draft", "approved", "sent", "replied", "won", "closed", "failed", "skipped",
   ]),
@@ -73,5 +74,5 @@ export const CampaignStepsSchema = z.object({
 });
 
 export const SendCampaignSchema = z.object({
-  campaign_lead_ids: z.array(z.string().uuid()).min(1).optional(),
+  campaign_lead_ids: z.array(dbId).min(1).optional(),
 });

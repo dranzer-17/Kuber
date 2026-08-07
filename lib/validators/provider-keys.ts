@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dbId } from "./id";
 
 export const CreateProviderKeySchema = z.object({
   provider: z.string().min(1),
@@ -15,7 +16,7 @@ export const PatchProviderKeySchema = z.object({
 
 export const ReorderProviderKeysSchema = z.object({
   provider: z.string().min(1),
-  orderedIds: z.array(z.string().uuid()).min(1),
+  orderedIds: z.array(dbId).min(1),
 });
 
 export const SetProviderModelSchema = z.object({

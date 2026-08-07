@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dbId } from "./id";
 import { domainField } from "@/lib/validators/organizations";
 
 export const CreateLeadSchema = z.object({
@@ -17,8 +18,8 @@ export const CreateLeadSchema = z.object({
   organization_country: z.string().optional(),
   batch_name: z.string().optional(),
   color: z.string().optional(),
-  import_id: z.string().uuid().optional(),
-  assigned_to: z.string().uuid().nullable().optional(),
+  import_id: dbId.optional(),
+  assigned_to: dbId.nullable().optional(),
 });
 
 export const PatchLeadSchema = z.object({
@@ -37,7 +38,7 @@ export const PatchLeadSchema = z.object({
   // Single-lead reassignment (manager-only, enforced in the route) — the
   // previous only way to move one lead was bulk-assign or a campaign-assign
   // side effect (review §3.2). null = return to the pool.
-  assigned_to: z.string().uuid().nullable().optional(),
+  assigned_to: dbId.nullable().optional(),
 });
 
 /** "a,b,c" -> ["a","b","c"]. Empty/blank entries dropped so a trailing comma
@@ -52,9 +53,9 @@ export const LeadListQuerySchema = z.object({
   country: z.string().optional(),
   email_status: z.string().optional(),
   lead_source: z.enum(["apollo", "excel", "manual"]).optional(),
-  organization_id: z.string().uuid().optional(),
+  organization_id: dbId.optional(),
   email_domain_catchall: z.enum(["true", "false"]).optional(),
-  import_id: z.string().uuid().optional(),
+  import_id: dbId.optional(),
   created_after: z.string().datetime().optional(),
   assigned_to: z.string().optional(),
   // Multi-select filters, comma-separated. The Leads page used to apply these
@@ -86,7 +87,7 @@ export const ApolloSearchSchema = z.object({
   batch_name: z.string().min(1),
   color: z.string().default("violet"),
   preview: z.boolean().optional(),
-  assigned_to: z.string().uuid().nullable().optional(),
+  assigned_to: dbId.nullable().optional(),
   assignment_strategy: ImportAssignmentStrategy,
   // Every lead inserted here eventually gets a paid Apollo bulk_match call —
   // these are the actual credit-spend ceilings for the import, enforced
@@ -111,7 +112,7 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     mapping: z.record(z.string(), z.string()),
     batch_name: z.string().min(1),
     color: z.string().default("violet"),
-    assigned_to: z.string().uuid().nullable().optional(),
+    assigned_to: dbId.nullable().optional(),
     assignment_strategy: ImportAssignmentStrategy,
   }),
   z.object({
@@ -120,20 +121,20 @@ export const ExcelImportSchema = z.discriminatedUnion("mode", [
     mapping: z.record(z.string(), z.string()),
     batch_name: z.string().min(1),
     color: z.string().default("violet"),
-    assigned_to: z.string().uuid().nullable().optional(),
+    assigned_to: dbId.nullable().optional(),
     assignment_strategy: ImportAssignmentStrategy,
   }),
 ]);
 
 export const EnrichSchema = z.union([
   z.object({
-    campaign_id: z.string().uuid(),
+    campaign_id: dbId,
     limit: z.number().int().min(1).max(200).default(50),
   }),
   z.object({
-    lead_ids: z.array(z.string().uuid()).min(1).max(200),
+    lead_ids: z.array(dbId).min(1).max(200),
   }),
   z.object({
-    import_id: z.string().uuid(),
+    import_id: dbId,
   }),
 ]);

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { dbId } from "@/lib/validators/id";
 import { requireManager } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { removeLeadFromOutreach } from "@/lib/services/lead-removal";
@@ -8,7 +9,7 @@ import { dbForUser } from "@/lib/supabase/scoped";
 export const maxDuration = 120;
 
 const BulkDeleteSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1).max(500),
+  ids: z.array(dbId).min(1).max(500),
 });
 
 export async function POST(req: NextRequest) {

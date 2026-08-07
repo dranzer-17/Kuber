@@ -1,12 +1,13 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { dbId } from "@/lib/validators/id";
 import { requireManager } from "@/lib/auth/api-auth";
 import { ok, fail } from "@/lib/api-response";
 import { logLeadEvents } from "@/lib/services/lead-events";
 import { dbForUser } from "@/lib/supabase/scoped";
 
 const AssignCampaignSchema = z.object({
-  assigned_to: z.string().uuid().nullable(),   // null = return to the manager pool
+  assigned_to: dbId.nullable(),   // null = return to the manager pool
   reassign_leads: z.boolean().optional().default(false),
 });
 
