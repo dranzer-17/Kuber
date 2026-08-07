@@ -1155,6 +1155,13 @@ export function CampaignDetail({
 
   async function handleRegenerate() {
     if (!selected?.email_drafts?.id) return;
+    // An instruction is required. With an empty box this used to fall through to
+    // a from-scratch rewrite, so one button meant two different things depending
+    // on whether a field had text in it — and pressing it twice with the same
+    // instruction produced byte-identical drafts, which read as "regenerate does
+    // nothing". Rewriting from scratch has its own labelled button
+    // ("Regenerate using new system prompt").
+    if (!regenQuery.trim()) return;
     const clId = selected.id;
     setRegenerating(true);
     markRegenerating([clId], true);
@@ -2608,9 +2615,14 @@ export function CampaignDetail({
                           placeholder='Describe the change — multiple lines are fine, e.g. paste a block and say "remove this"'
                           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleRegenerate(); }}
                         />
-                        <Button size="sm" onClick={handleRegenerate} disabled={regenerating} className="gap-1.5">
+                        <Button size="sm" onClick={handleRegenerate} disabled={regenerating || !regenQuery.trim()} className="gap-1.5">
                           <RotateCcw className="size-3.5" /> Regenerate
                         </Button>
+                        {!regenQuery.trim() && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Describe what to change — regenerating without an instruction would rewrite the email from scratch.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>

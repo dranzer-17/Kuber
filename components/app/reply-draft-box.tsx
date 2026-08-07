@@ -176,6 +176,9 @@ export function ReplyDraftBox({
   }
 
   async function handleRegenerate() {
+    // Same rule as the campaign drawer, but only once an AI draft exists:
+    // the first "Generate with AI" legitimately has nothing to revise.
+    if (aiUsed && !regenQuery.trim()) return;
     setRegenerating(true);
     try {
       const updated = await regenerateReplyDraft(token, draftId, regenQuery || undefined);
@@ -302,7 +305,7 @@ export function ReplyDraftBox({
               className="text-sm resize-y"
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handleRegenerate(); }}
             />
-            <Button size="sm" disabled={regenerating} onClick={() => void handleRegenerate()} className="gap-1.5">
+            <Button size="sm" disabled={regenerating || (aiUsed && !regenQuery.trim())} onClick={() => void handleRegenerate()} className="gap-1.5">
               {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : (aiUsed ? <RotateCcw className="size-3.5" /> : <Sparkles className="size-3.5" />)}
               {aiUsed ? "Regenerate" : "Generate with AI"}
             </Button>
