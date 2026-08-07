@@ -49,7 +49,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const {
-    session, loadingSession, role, leads, setLeads, leadsTotal, loadCampaigns, setCampaigns, loadLeads,
+    session, loadingSession, role, leads, setLeads, leadsTotal, leadsByIds, loadCampaigns, setCampaigns, loadLeads,
     checkedIds, setCheckedIds, selectedLead, setSelectedLead, selectedOrgId, setSelectedOrgId,
     showAddLeads, setShowAddLeads, manualPrefill, setManualPrefill,
     showCreateCampaign, setShowCreateCampaign, deletingLead, setDeletingLead,
@@ -320,7 +320,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
           setCheckedIds(new Set());
           router.push(`/campaigns/${c.id}`);
         }}
-        leads={leads.filter((l) => checkedIds.has(l.id) && isCampaignEligible(l))}
+        leads={leadsByIds(checkedIds).filter(isCampaignEligible)}
       />
 
       <AddLeadsDrawer

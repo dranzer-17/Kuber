@@ -31,6 +31,11 @@ type AppContextValue = {
   loadAllLeads: (token: string) => Promise<void>;
   loadingAllLeads: boolean;
   searchLeads: (token: string, query: string, filters?: LeadListFilters) => Promise<{ leads: Lead[]; total: number }>;
+  /** Resolve lead ids to objects across EVERY lead this session has seen —
+   *  the loaded pages and any server-filtered result set. Selecting rows in a
+   *  filtered view and reading them back out of `leads` silently dropped
+   *  anything outside the newest page. */
+  leadsByIds: (ids: Set<string>) => Lead[];
 
   // Campaigns
   campaigns: Campaign[];
@@ -105,6 +110,17 @@ export function AppProvider({
   const [loadingSession, setLoadingSession] = useState(!initialSession);
 
   const [leads,            setLeads          ] = useState<Lead[]>([]);
+  // Every lead seen this session, by id. `leads` holds only the newest page, so
+  // a selection made in a filtered view could not be resolved from it — the
+  // Create-campaign modal received a fraction of what the user had ticked.
+  const leadIndex = useRef<Map<string, Lead>>(new Map());
+  const rememberLeads = useCallback((rows: Lead[]) => {
+    for (const l of rows) leadIndex.current.set(l.id, l);
+  }, []);
+  const leadsByIds = useCallback(
+    (ids: Set<string>) => [...ids].map((id) => leadIndex.current.get(id)).filter(Boolean) as Lead[],
+    [],
+  );
   const [leadsTotal,       setLeadsTotal     ] = useState<number | null>(initialLeadsTotal);
   const [loadingLeads,     setLoadingLeads   ] = useState(false);
   const [loadingMoreLeads, setLoadingMoreLeads] = useState(false);
@@ -211,6 +227,7 @@ export function AppProvider({
     if (!opts?.background) setLoadingLeads(true);
     try {
       const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page: 1 });
+      rememberLeads(res.leads);
       setLeads((prev) => {
         if (prev.length <= res.leads.length) return res.leads;
         const fresh = new Set(res.leads.map((l) => l.id));
@@ -222,7 +239,7 @@ export function AppProvider({
       leadsInFlight.current = false;
       if (!opts?.background) setLoadingLeads(false);
     }
-  }, []);
+  }, [rememberLeads]);
 
   /** Appends the next page only. */
   const loadMoreLeads = useCallback(async (token: string) => {
@@ -230,6 +247,7 @@ export function AppProvider({
     try {
       const nextPage = Math.floor(leads.length / LEADS_PAGE_SIZE) + 1;
       const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page: nextPage });
+      rememberLeads(res.leads);
       setLeads((prev) => {
         const known = new Set(prev.map((l) => l.id));
         return [...prev, ...res.leads.filter((l) => !known.has(l.id))];
@@ -237,7 +255,7 @@ export function AppProvider({
       setLeadsTotal(res.total);
     } catch { /* silently ignore */ }
     finally { setLoadingMoreLeads(false); }
-  }, [leads.length]);
+  }, [leads.length, rememberLeads]);
 
   /** Pages in every remaining lead in one call — for views (Kanban) where a
    *  partial window skews the client-side status split instead of just
@@ -248,6 +266,7 @@ export function AppProvider({
       let page = Math.floor(leads.length / LEADS_PAGE_SIZE) + 1;
       for (;;) {
         const res = await fetchLeads(token, { limit: LEADS_PAGE_SIZE, page });
+        rememberLeads(res.leads);
         setLeads((prev) => {
           const known = new Set(prev.map((l) => l.id));
           return [...prev, ...res.leads.filter((l) => !known.has(l.id))];
@@ -258,7 +277,7 @@ export function AppProvider({
       }
     } catch { /* silently ignore */ }
     finally { setLoadingAllLeads(false); }
-  }, [leads.length]);
+  }, [leads.length, rememberLeads]);
 
   // Runs the search against the DB (not the client-loaded `leads` subset) so
   // it finds a match anywhere in the table, not just among the leads already
@@ -275,10 +294,11 @@ export function AppProvider({
         all.push(lead);
       }
       total = res.total;
+      rememberLeads(res.leads);
       if (res.leads.length < LEADS_PAGE_SIZE || all.length >= total) break;
     }
     return { leads: all, total };
-  }, []);
+  }, [rememberLeads]);
 
   const loadCampaigns = useCallback(async (token: string) => {
     setLoadingCampaigns(true);
@@ -338,6 +358,7 @@ export function AppProvider({
     loadAllLeads,
     loadingAllLeads,
     searchLeads,
+    leadsByIds,
     campaigns,
     setCampaigns,
     loadCampaigns,
