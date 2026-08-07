@@ -10,6 +10,7 @@ import {
   getGenericTemplate,
 } from "@/lib/services/settings";
 import { logLeadEvent } from "@/lib/services/lead-events";
+import { PROVIDER_UNAVAILABLE, isProviderOutage } from "@/lib/services/provider-errors";
 
 /** Activity-timeline wording for a finished draft. */
 function draftCreatedDetail(stepNumber: number, status: string): string {
@@ -92,33 +93,39 @@ function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
 }
 
-/** Marker written into email_drafts.rejection_reason when a draft failed because
- *  no LLM provider would serve the request — not because of anything about the
- *  lead. fetchDraftTargets and countPendingDrafts skip rows carrying it, so an
- *  outage cannot burn through a lead's three retries.
- *
- *  On 7 Aug 2026 both of the client's keys ran dry mid-campaign (OpenAI 429
- *  insufficient_quota, OpenRouter 402) and 32 consecutive attempts failed in
- *  ~3.5s each. Ten leads hit the retry cap and were permanently skipped for a
- *  reason that had nothing to do with them. */
-export const PROVIDER_UNAVAILABLE = "provider_unavailable";
+// Both moved to provider-errors.ts so provider-keys.ts can share the same
+// vocabulary without importing this module, and so the predicates stay testable
+// without dragging zod/supabase in. Imported (they are used below) AND
+// re-exported, so existing importers of this module are unchanged.
+export { PROVIDER_UNAVAILABLE, isProviderOutage };
 
-/** Credit/auth signatures that mean "the provider refused everyone", not "this
- *  lead is unwriteable". Kept broad on purpose: a false positive costs one
- *  extra retry, a false negative permanently strands a lead. */
-export function isProviderOutage(message: string): boolean {
-  const m = message.toLowerCase();
-  return (
-    m.includes("insufficient_quota") ||
-    m.includes("credit_balance_exhausted") ||
-    m.includes("no credits remaining") ||
-    m.includes("out of credits") ||
-    m.includes("requires more credits") ||
-    m.includes("no usable llm provider") ||
-    m.includes("quota") ||
-    / 4(01|02|03|29)/.test(m) ||
-    m.includes("rate limit")
-  );
+/** Write the row the service-health banner watches for.
+ *
+ *  `source: 'llm'` + `DRAFT_LLM_UNAVAILABLE` is what /api/v1/service-health
+ *  matches to raise the red "no LLM provider has credits" banner, which every
+ *  role sees. Best-effort by design: a logging failure must never mask the
+ *  real error or block the caller.
+ *
+ *  `companyId` is explicit because the watchdog calls this with an UNSCOPED
+ *  client — and the banner reads through a company-scoped one, so a row
+ *  written without it is invisible to the very UI it exists to feed. Scoped
+ *  callers can pass null and let the client stamp it. */
+export async function logLlmUnavailable(
+  db: SupabaseClient,
+  companyId: string | null,
+  error: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await db.from("enrichment_logs").insert({
+      source: "llm",
+      event: "DRAFT_LLM_UNAVAILABLE",
+      error: error.slice(0, 500),
+      ...(companyId ? { company_id: companyId } : {}),
+      payload,
+      created_at: new Date().toISOString(),
+    });
+  } catch { /* non-fatal */ }
 }
 
 /** One place for what happens when a draft attempt throws.
@@ -147,17 +154,10 @@ async function recordDraftFailure(
   }).eq("id", draftId);
 
   if (outage) {
-    // source 'llm' + the raw provider error is what the service-health banner
-    // matches on. Best-effort: a failed log row must never mask the real error.
-    try {
-      await db.from("enrichment_logs").insert({
-        source: "llm",
-        event: "DRAFT_LLM_UNAVAILABLE",
-        error: message.slice(0, 500),
-        payload: { campaign_id: campaignId, draft_id: draftId, step: stepNumber },
-        created_at: now,
-      });
-    } catch { /* non-fatal */ }
+    // db is company-scoped here, so the insert stamps company_id itself.
+    await logLlmUnavailable(db, null, message, {
+      campaign_id: campaignId, draft_id: draftId, step: stepNumber,
+    });
   }
 
   await logLeadEvent(db, leadId, "draft_failed", "Email draft generation failed", {
@@ -713,6 +713,30 @@ export async function fetchDraftTargets(
   }
   const overFailCap = (leadId: string) => (failCount.get(leadId) ?? 0) >= 3;
 
+  // Capped leads are excluded IN THE QUERY, not just from the rows it returns.
+  // Filtering afterwards meant they still occupied the fetch window: every
+  // campaign_leads row of a bulk import shares one created_at, so `order by
+  // created_at` is a tie and the capped leads sat at the front of it. On
+  // ANKIT's 100-lead campaign all 20 slots of the window were capped leads,
+  // fetchDraftTargets returned zero targets, and the route concluded
+  // "no_more_pending" and stopped self-chaining — with 44 leads still waiting.
+  // Topping up credits would not have restarted it.
+  //
+  // The nil uuid keeps the list non-empty so the filter can be applied
+  // unconditionally — `not.in.()` is a syntax error, and wrapping the builder
+  // in a conditional helper instead sent tsc into TS2589 ("type instantiation
+  // excessively deep") on Supabase's chained generics. A sentinel that matches
+  // no lead is the cheaper answer than fighting the type.
+  //
+  // ponytail: sends the capped ids as a literal `not.in` list, fine while
+  // campaigns are hundreds of leads (100 uuids ≈ 3.7KB of URL). If one ever
+  // runs to five figures, push the cap into a SQL view or an RPC.
+  const cappedLeadIds = [
+    "00000000-0000-0000-0000-000000000000",
+    ...[...failCount.entries()].filter(([, n]) => n >= 3).map(([id]) => id),
+  ];
+  const notCapped = `(${cappedLeadIds.join(",")})`;
+
   if (stepNumber === 1) {
     const { data: rows } = await db
       .from("campaign_leads")
@@ -727,6 +751,7 @@ export async function fetchDraftTargets(
       .eq("campaign_id", campaignId)
       .is("draft_id", null)
       .in("crm_status", ["new", "enriched", "draft"])
+      .not("lead_id", "in", notCapped)
       .not("leads.email", "is", null)
       .order("created_at", { ascending: true })
       .limit(limit * 2);
@@ -757,6 +782,7 @@ export async function fetchDraftTargets(
     `)
     .eq("campaign_id", campaignId)
     .in("crm_status", ["approved", "sent"])
+    .not("lead_id", "in", notCapped)
     .not("leads.email", "is", null)
     .order("created_at", { ascending: true })
     .limit(limit * 2);

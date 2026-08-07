@@ -1,8 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MAX_ENRICH_ATTEMPTS } from "@/lib/services/enrich-leads";
-import { countPendingDrafts } from "@/lib/services/generate-drafts";
-import { SERVICE_PROVIDER_IDS } from "@/lib/services/providers/registry";
-import { ENV_KEY_VARS } from "@/lib/services/provider-keys";
+import { countPendingDrafts, logLlmUnavailable } from "@/lib/services/generate-drafts";
+import { hasUsableLlmKey } from "@/lib/services/provider-keys";
 
 type Db = SupabaseClient;
 
@@ -146,39 +145,25 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
   // Nothing to gain from restarting a campaign no provider will serve. When
   // both of the client's keys ran dry, this job re-kicked the campaign every
   // 15 minutes and every attempt failed in ~3.5s — costing no money (a 429
-  // bills nothing) but chewing through the leads' three retries until ten were
-  // permanently skipped.
-  //
-  // Reads the key health we already record rather than asking a provider for a
-  // balance: a balance check is itself an API call, and that habit is what made
-  // Apollo's usage impossible to account for.
-  //
-  // Checked PER COMPANY, because provider_keys is company-scoped and one
-  // tenant's healthy key says nothing about another's. A process-level env key
-  // counts as usable — resolveKey falls back to it when every database key is
-  // cooling off, so ignoring it here would halt generation that could still
-  // run.
-  const envLlmKeyConfigured = (Object.entries(ENV_KEY_VARS) as [string, string][])
-    .filter(([provider]) => !(SERVICE_PROVIDER_IDS as readonly string[]).includes(provider))
-    .some(([, envVar]) => (process.env[envVar] ?? "").trim().length > 0);
-
+  // bills nothing) but chewing through the leads' three retries until they
+  // were permanently skipped. hasUsableLlmKey reads the key health already on
+  // provider_keys instead of asking a provider for a balance; the route itself
+  // repeats the same check, so a kick from any other source is guarded too.
   const companyHasUsableLlm = new Map<string, boolean>();
   const hasUsableLlm = async (companyId: string): Promise<boolean> => {
-    if (envLlmKeyConfigured) return true;
     const cached = companyHasUsableLlm.get(companyId);
     if (cached !== undefined) return cached;
-    const { data } = await db
-      .from("provider_keys")
-      .select("id")
-      .eq("company_id", companyId)
-      .not("provider", "in", `(${SERVICE_PROVIDER_IDS.join(",")})`)
-      .eq("is_active", true)
-      .or(`status.eq.healthy,and(status.eq.cooling_off,cooling_off_until.lte.${new Date().toISOString()})`)
-      .limit(1);
-    const usable = (data ?? []).length > 0;
+    const usable = await hasUsableLlmKey(db, companyId);
     companyHasUsableLlm.set(companyId, usable);
     return usable;
   };
+
+  // One banner row per company per pass. While an outage lasts this job is the
+  // only writer left — generation correctly never starts, so nothing else
+  // reports it — and service-health only looks back 6 hours. Firing every 15
+  // minutes keeps the red banner up for the whole outage and lets it clear on
+  // its own once a key works again.
+  const loggedOutage = new Set<string>();
 
   // Deliberately NOT filtered on status = 'processing'. The reset call above
   // flips exactly these campaigns to 'draft' on its way past (it releases any
@@ -211,13 +196,32 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
     if (kicked >= MAX_DRAFT_KICKS_PER_PASS) break;
     const campaignId = campaign.id as string;
 
-    if (!(await hasUsableLlm(campaign.company_id as string))) continue;
+    const companyId = campaign.company_id as string;
 
     // Nothing left to write — a finished campaign must not be kicked, and this
     // is also what stops a pathological lead being retried forever: leads past
     // the 3-failure cap are not counted as pending, so the campaign goes quiet
     // instead of burning LLM calls on every pass.
+    //
+    // Checked BEFORE the LLM check now, so a company whose only stale
+    // campaigns are already finished never raises an outage banner about work
+    // that does not exist.
     if ((await countPendingDrafts(db, campaignId)) === 0) continue;
+
+    if (!(await hasUsableLlm(companyId))) {
+      if (!loggedOutage.has(companyId)) {
+        loggedOutage.add(companyId);
+        // db is unscoped here, so company_id has to be passed explicitly or
+        // the banner's scoped read will never see this row.
+        await logLlmUnavailable(
+          db,
+          companyId,
+          "Every configured LLM key is out of credits or rejected — draft generation is paused.",
+          { campaign_id: campaignId, source: "watchdog" },
+        );
+      }
+      continue;
+    }
 
     const { data: lastDraft } = await db
       .from("email_drafts")

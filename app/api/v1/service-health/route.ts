@@ -58,10 +58,10 @@ export async function GET(req: NextRequest) {
     // key means the newest-first row ordering's dedup-by-service correctly
     // lets the most recent event win.
     if (row.event === "PRIMARY_LLM_LOW_CREDITS_FALLBACK_ACTIVE") {
-      add({ service: "LLM providers", kind: "credits", severity: "warning", message: row.error ?? "" });
+      add({ service: "LLM API key", kind: "credits", severity: "warning", message: row.error ?? "" });
     } else if (row.event === "SKIPPED_LOW_CREDITS" && (err.includes("no usable llm provider") || err.includes("openrouter") || err.includes("credit"))) {
       add({
-        service: "LLM providers",
+        service: "LLM API key",
         kind: "credits",
         severity: "critical",
         message: "No configured LLM provider can generate company profiles right now — add or top up a key in Settings > Keys.",
@@ -71,11 +71,15 @@ export async function GET(req: NextRequest) {
       // company profiles, and because an OpenRouter 402 carries neither the
       // word "openai" nor a code the next rule matches — so a drafts outage on
       // that key alone would have shown nothing at all.
+      // Worded for BOTH audiences on purpose: this banner is not gated by role
+      // (dashboard, leads, campaigns list and campaign detail all render it),
+      // and an employee cannot open Settings > Keys — telling them to go there
+      // would be the only instruction they are unable to follow.
       add({
-        service: "LLM providers",
+        service: "LLM API key",
         kind: "credits",
         severity: "critical",
-        message: "Email drafts can't be generated — no LLM provider has credits. Top up or add a key in Settings > Keys.",
+        message: "Out of credits — email drafts are paused and no new ones will be generated. A manager needs to top up or replace the key in Settings > Keys.",
       });
     } else if (row.source === "llm" && err.includes("openai") && (err.includes("401") || err.includes("403") || err.includes("insufficient_quota") || err.includes("429"))) {
       add({ service: "OpenAI", kind: "credits", severity: "critical", message: "OpenAI is rejecting requests — check its API key / billing." });

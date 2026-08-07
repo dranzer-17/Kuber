@@ -86,6 +86,7 @@ import {
 } from "@/lib/leads";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ServiceHealthBanner } from "@/components/app/service-health-banner";
 import { computeCampaignStats } from "@/lib/campaign-status";
 
 /**
@@ -1729,6 +1730,14 @@ export function CampaignDetail({
             </Button>
           </div>
         )}
+      </div>
+
+      {/* Drafts stalling on a dead API key is felt HERE first — an employee
+          watching their own campaign sit at "No draft" is the person most
+          likely to notice and the least able to explain it. The banner renders
+          nothing when healthy, so empty:hidden collapses the spacing away. */}
+      <div className="shrink-0 px-6 pt-4 empty:hidden">
+        <ServiceHealthBanner />
       </div>
 
       {/* ── Section tabs — horizontal, directly under the campaign name ── */}

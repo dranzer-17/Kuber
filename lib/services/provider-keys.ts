@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProviderId } from "@/lib/services/providers/types";
+import { SERVICE_PROVIDER_IDS } from "@/lib/services/providers/registry";
+import { isOutOfCredits } from "@/lib/services/provider-errors";
 
 type Db = SupabaseClient;
 
@@ -110,6 +112,35 @@ export interface KeyFailureInfo {
   message: string;
 }
 
+/** Is there an LLM key worth trying for this company right now?
+ *
+ *  Reads the health already recorded on provider_keys rather than asking a
+ *  provider for a balance — a balance check is itself an API call, and that
+ *  habit is what made Apollo's usage impossible to account for. A
+ *  process-level env key counts as usable, because getActiveKey falls back to
+ *  it when every stored key is out.
+ *
+ *  Checked PER COMPANY: provider_keys is company-scoped, and one tenant's
+ *  healthy key says nothing about another's. Pass an unscoped client — the
+ *  company filter is explicit here. */
+export async function hasUsableLlmKey(db: Db, companyId: string): Promise<boolean> {
+  const envLlmKeyConfigured = (Object.entries(ENV_KEY_VARS) as [ProviderId, string][])
+    .filter(([provider]) => !(SERVICE_PROVIDER_IDS as readonly string[]).includes(provider))
+    .some(([, envVar]) => (process.env[envVar] ?? "").trim().length > 0);
+  if (envLlmKeyConfigured) return true;
+
+  const { data } = await db
+    .from("provider_keys")
+    .select("id")
+    .eq("company_id", companyId)
+    .not("provider", "in", `(${SERVICE_PROVIDER_IDS.join(",")})`)
+    .eq("is_active", true)
+    .or(`status.eq.healthy,and(status.eq.cooling_off,cooling_off_until.lte.${new Date().toISOString()})`)
+    .limit(1);
+
+  return (data ?? []).length > 0;
+}
+
 /** Only call this after fetchWithRetry has already exhausted its in-place
  *  retries against this exact key — 402 is non-retryable there, and 429
  *  retries in-place up to 3x before giving up, so by the time an error
@@ -126,6 +157,16 @@ export async function markKeyFailed(db: Db, keyId: string | null, info: KeyFailu
   if (info.status === 401 || info.status === 403) {
     // Bad credential — no amount of waiting fixes it. Stays dead until an
     // admin fixes it or re-checks it via the UI.
+    updates.status = "dead";
+    updates.cooling_off_until = null;
+  } else if (isOutOfCredits(info.message)) {
+    // An empty balance does not refill on a timer, so cooling off is the wrong
+    // response to it: the cooldown expired, getActiveKey handed the same dry
+    // key straight back out, and the next batch of leads burned their retries
+    // on it. That loop capped 20 of the 100 leads in ANKIT's APOLLO CAMPAIGN 1
+    // on 7 Aug 2026 — permanently skipped for a reason that had nothing to do
+    // with them. Dead until a human tops up and hits Re-check, which sets the
+    // row back to healthy (settings/keys/[id]/check).
     updates.status = "dead";
     updates.cooling_off_until = null;
   } else if (info.status === 402) {

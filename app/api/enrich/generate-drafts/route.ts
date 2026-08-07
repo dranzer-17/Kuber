@@ -8,7 +8,10 @@ import {
   fetchDraftTargets,
   generateOneDraft,
   countPendingDrafts,
+  logLlmUnavailable,
+  isProviderOutage,
 } from "@/lib/services/generate-drafts";
+import { hasUsableLlmKey } from "@/lib/services/provider-keys";
 
 export const maxDuration = 55;
 
@@ -61,6 +64,31 @@ export async function POST(req: NextRequest) {
   // it, which is also what stamps company_id on the email_drafts rows.
   const cdb = createScopedClient(campaign.company_id as string);
 
+  // Pre-flight: never start work no provider will serve.
+  //
+  // Every trigger reaches generation through this route — the user's initial
+  // "generate drafts", the self-chain below, and the watchdog — so one guard
+  // here covers all three. Without it a dry key produced a failed email_drafts
+  // row per lead at ~2.3s each, and three of those permanently capped the
+  // lead: 20 of the 100 leads in ANKIT's APOLLO CAMPAIGN 1 were written off on
+  // 7 Aug 2026 for an empty billing account that had nothing to do with them.
+  //
+  // Returning BEFORE fetchDraftTargets is the point. Bailing out later would
+  // still have to decide what to do with leads already claimed; bailing here
+  // means no lead is touched at all, so nothing needs forgiving afterwards.
+  if (!(await hasUsableLlmKey(db, campaign.company_id as string))) {
+    // Feeds the red service-health banner. reset_stuck_draft_generation above
+    // has already released the campaign from 'processing', so the UI shows a
+    // stopped campaign plus a banner saying why, instead of a silent stall.
+    await logLlmUnavailable(
+      cdb,
+      null,
+      "Every configured LLM key is out of credits or rejected — draft generation was not started.",
+      { campaign_id: campaignId, step: stepNumber },
+    );
+    return Response.json({ processed: 0, succeeded: 0, failed: 0, status: "llm_unavailable" });
+  }
+
   // Only STEP-1 runs drive the campaign's status (draft ↔ processing). A
   // follow-up (step > 1) run happens on an already-ACTIVE campaign — flipping
   // its status here dragged live campaigns back to "Draft" in the UI
@@ -91,6 +119,7 @@ export async function POST(req: NextRequest) {
   let failed = 0;
   const startedAt = Date.now();
   let ranOutOfTime = false;
+  let llmOutage = false;
 
   for (const target of targets) {
     if (Date.now() - startedAt > DRAFT_TIME_BUDGET_MS) { ranOutOfTime = true; break; }
@@ -106,11 +135,35 @@ export async function POST(req: NextRequest) {
       undefined,
       stepNumber,
     );
-    if (result.ok) succeeded++;
-    else failed++;
+    if (result.ok) { succeeded++; continue; }
+    failed++;
+
+    // The pre-flight above runs once per batch, so a key that dies on the
+    // FIRST lead still leaves nine more to be attempted against a provider we
+    // now know is refusing everyone. Those failures are forgiven
+    // (rejection_reason carries PROVIDER_UNAVAILABLE, so they don't count
+    // toward any lead's retry cap) but they are pointless work that writes
+    // rows a human has to read past. Stop the batch.
+    //
+    // And do NOT self-chain afterwards. Re-entering would rely on the
+    // pre-flight to break the cycle, which it cannot promise: it answers "is a
+    // key usable?" from provider_keys, so a stale-healthy row or an env-var key
+    // that is itself dry passes the check and fails the call, and the route
+    // would chain into itself forever. Ending the run is the safe stop — the
+    // watchdog re-kicks this campaign within 15 minutes once a key works again.
+    if (isProviderOutage(result.reason)) { llmOutage = true; break; }
   }
 
   const remaining = await countPendingDrafts(cdb, campaignId);
+
+  if (llmOutage) {
+    // Leave the campaign released (reset_stuck_draft_generation already put it
+    // back to 'draft') and stop. Leads keep their retries; the banner is up;
+    // the watchdog owns resuming this.
+    return Response.json({
+      processed: succeeded + failed, succeeded, failed, remaining, status: "llm_unavailable",
+    });
+  }
 
   if (remaining > 0 || ranOutOfTime) {
     const baseUrl = internalAppBaseUrl(req);
