@@ -235,28 +235,41 @@ function AppShell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className={cn("border-t border-border", sidebarCollapsed ? "p-2 flex flex-col items-center gap-2" : "p-3 space-y-2")}>
-            {apolloCredits?.remaining != null && (
-              <div
-                title={
-                  apolloCredits.limit != null
-                    ? `Apollo key credits: ${apolloCredits.remaining.toLocaleString()} / ${apolloCredits.limit.toLocaleString()} left`
-                    : `Apollo key credits: ${apolloCredits.remaining.toLocaleString()} left`
-                }
-                className={cn(
-                  "text-muted-foreground",
-                  sidebarCollapsed
-                    ? "font-mono text-[9px] tabular-nums text-center leading-tight"
-                    : "flex items-baseline justify-between gap-2 px-1 text-[11px]",
-                )}
-              >
-                {!sidebarCollapsed && <span className="font-medium shrink-0">Key credits</span>}
-                <span className="font-mono tabular-nums">
-                  {apolloCredits.limit != null
-                    ? `${apolloCredits.remaining.toLocaleString()}/${apolloCredits.limit.toLocaleString()}`
-                    : apolloCredits.remaining.toLocaleString()}
-                </span>
-              </div>
-            )}
+            {apolloCredits?.remaining != null && (() => {
+              const { remaining, limit } = apolloCredits;
+              // Same "consumed" progress-bar treatment as the Apollo credit
+              // pools on the usage page (see CreditPoolRow), so the sidebar
+              // readout matches the rest of the app rather than being plain text.
+              const consumed = limit != null ? Math.max(0, limit - remaining) : null;
+              const pct = limit != null && limit > 0 ? Math.min(100, Math.round((consumed! / limit) * 100)) : null;
+              const barColor = pct == null ? "bg-primary" : pct >= 90 ? "bg-destructive" : pct >= 60 ? "bg-amber-400" : "bg-primary";
+              const titleText = limit != null
+                ? `Apollo key credits: ${remaining.toLocaleString()} / ${limit.toLocaleString()} left`
+                : `Apollo key credits: ${remaining.toLocaleString()} left`;
+
+              return (
+                <div title={titleText} className={cn(sidebarCollapsed ? "w-full space-y-1" : "space-y-1 px-1")}>
+                  <div
+                    className={cn(
+                      "text-muted-foreground",
+                      sidebarCollapsed
+                        ? "font-mono text-[9px] tabular-nums text-center leading-tight"
+                        : "flex items-baseline justify-between gap-2 text-[11px]",
+                    )}
+                  >
+                    {!sidebarCollapsed && <span className="font-medium shrink-0">Apollo key credits</span>}
+                    <span className="font-mono tabular-nums">
+                      {limit != null ? `${remaining.toLocaleString()}/${limit.toLocaleString()}` : remaining.toLocaleString()}
+                    </span>
+                  </div>
+                  {pct != null && (
+                    <div className={cn("h-1 rounded-full bg-secondary overflow-hidden", sidebarCollapsed ? "w-8 mx-auto" : "w-full")}>
+                      <div className={cn("h-full rounded-full transition-[width]", barColor)} style={{ width: `${pct}%` }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* External Google Form — a plain `<a target="_blank">`, not next/link,
                 since this leaves the app entirely rather than routing within it. */}
