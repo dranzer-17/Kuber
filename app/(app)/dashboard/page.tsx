@@ -8,6 +8,7 @@ const EMPTY_ANALYTICS: DashboardAnalytics = {
   temperatureBreakdown: { hot: 0, cold: 0, ooo: 0, unsubscribed: 0, unclassified: 0 },
   pendingReplies: [],
   totalLeads: 0,
+  leadsThisMonth: 0,
   enrichedLeads: 0,
   pipelineGrowth: [],
   stageDonutData: [],

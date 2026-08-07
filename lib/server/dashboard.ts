@@ -25,6 +25,10 @@ export type DashboardAnalytics = {
     createdAt: string;
   }>;
   totalLeads: number;
+  /** Leads created in the CURRENT calendar month. The Monthly Goals card was
+   *  measuring an all-time total against a monthly target, so it read
+   *  "1000/50" and pinned at 100% forever. */
+  leadsThisMonth: number;
   enrichedLeads: number;
   pipelineGrowth: Array<{ month: string; leads: number }>;
   stageDonutData: Array<{ name: string; value: number; color: string }>;
@@ -119,6 +123,7 @@ export async function getDashboardAnalytics(db: SupabaseClient): Promise<Dashboa
     temperatureBreakdown,
     pendingReplies,
     totalLeads: totalLeads ?? 0,
+    leadsThisMonth: monthlyLeadCounts[monthlyLeadCounts.length - 1] ?? 0,
     enrichedLeads,
     pipelineGrowth,
     stageDonutData,
@@ -136,18 +141,12 @@ export async function getEmployeeDashboard(db: SupabaseClient, userId: string): 
     new Date(now.getFullYear(), now.getMonth() - (5 - i), 1),
   );
 
-  const [{ data: myLeads }, { data: accessibleCampaigns }] = await Promise.all([
-    db.from("leads")
-      .select("id, status, created_at")
-      .eq("is_deleted", false)
-      .eq("assigned_to", userId),
-    db.from("campaigns")
-      .select("id")
-      .eq("is_deleted", false)
-      .or(`created_by.eq.${userId},assigned_to.eq.${userId}`),
-  ]);
+  const { data: accessibleCampaigns } = await db
+    .from("campaigns")
+    .select("id")
+    .eq("is_deleted", false)
+    .or(`created_by.eq.${userId},assigned_to.eq.${userId}`);
 
-  const myLeadIds = (myLeads ?? []).map((l) => l.id as string);
   const campaignIds = (accessibleCampaigns ?? []).map((c) => c.id as string);
 
   // Campaign-lead rows in scope: my campaigns' rows ∪ rows of my leads.
@@ -158,12 +157,21 @@ export async function getEmployeeDashboard(db: SupabaseClient, userId: string): 
       .in("campaign_id", campaignIds);
     for (const r of data ?? []) clById.set(r.id as string, r as never);
   }
-  if (myLeadIds.length > 0) {
+  // Filtered by joining leads, not by feeding an `.in()` a list of this
+  // employee's lead ids. That list came from a plain select, which PostgREST
+  // caps at 1,000 rows without erroring — an employee holding 1,769 leads lost
+  // every campaign_lead row belonging to lead 1,001 onward, so their
+  // temperature breakdown and pending replies quietly under-reported. Same
+  // inner-join filter the campaigns route already uses.
+  {
     const { data } = await db.from("campaign_leads")
-      .select("id, lead_temperature, campaign_id")
-      .in("lead_id", myLeadIds);
+      .select("id, lead_temperature, campaign_id, leads!inner(assigned_to)")
+      .eq("leads.assigned_to", userId);
     for (const r of data ?? []) clById.set(r.id as string, r as never);
   }
+  // ponytail: clRows is still a JS tally over a fetch — fine at today's volume,
+  // but it caps at 1,000 campaign_lead rows. Move to head-counts per temperature
+  // if a single employee ever exceeds that many campaign leads.
   const clRows = [...clById.values()];
 
   const temperatureBreakdown = { hot: 0, cold: 0, ooo: 0, unsubscribed: 0, unclassified: 0 };
@@ -253,7 +261,11 @@ export async function getEmployeeDashboard(db: SupabaseClient, userId: string): 
   return {
     temperatureBreakdown,
     pendingReplies,
-    totalLeads: myLeadIds.length,
+    // NOT myLeadIds.length — that array is the same PostgREST fetch the comment
+    // above warns about, silently capped at 1,000 rows, which is exactly why an
+    // employee past 1k leads saw a flat "1000". statusCounts is DB-counted.
+    totalLeads: Object.values(statusCounts).reduce((a, b) => a + b, 0),
+    leadsThisMonth: monthlyLeadCounts[monthlyLeadCounts.length - 1] ?? 0,
     enrichedLeads,
     pipelineGrowth,
     stageDonutData,

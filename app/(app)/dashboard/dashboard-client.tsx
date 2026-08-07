@@ -30,6 +30,7 @@ export function DashboardClient({
       imports={imports}
       loading={false}
       totalLeads={analytics.totalLeads}
+      leadsThisMonth={analytics.leadsThisMonth}
       enrichedLeads={analytics.enrichedLeads}
       hotCount={analytics.temperatureBreakdown.hot}
       pipelineGrowth={analytics.pipelineGrowth}

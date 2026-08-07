@@ -67,6 +67,7 @@ interface DashboardViewProps {
   imports: ImportBatch[];
   loading?: boolean;
   totalLeads: number;
+  leadsThisMonth?: number;
   enrichedLeads: number;
   hotCount: number;
   pipelineGrowth: Array<{ month: string; leads: number }>;
@@ -82,6 +83,7 @@ export function DashboardView({
   imports,
   loading = false,
   totalLeads,
+  leadsThisMonth = 0,
   enrichedLeads,
   hotCount,
   pipelineGrowth,
@@ -353,15 +355,26 @@ export function DashboardView({
           <Card className="p-5 space-y-4">
             <p className="eyebrow">Targets</p>
             <h3 className="font-display text-sm font-semibold -mt-2.5">Monthly Goals</h3>
+            {/* Leads is true month-to-date. Emails/Replies are lifetime campaign
+                counters — Instantly gives no per-month history and nothing local
+                records a send date, so there is no MTD figure to show.
+                ponytail: add a monthly send ledger if these need to be true MTD. */}
             {[
-              { label: "Leads Added", current: totalLeads,   goal: 50  },
-              { label: "Emails Sent", current: totalSent,    goal: 100 },
-              { label: "Replies",     current: totalReplied, goal: 20  },
+              { label: "Leads Added", current: leadsThisMonth, goal: 50,  period: "this month" },
+              { label: "Emails Sent", current: totalSent,      goal: 100, period: "all time"   },
+              { label: "Replies",     current: totalReplied,   goal: 20,  period: "all time"   },
             ].map((item) => (
               <div key={item.label}>
                 <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-muted-foreground">{item.label}</span>
-                  <span className="text-muted-foreground font-mono font-medium tabular-nums">{item.current}/{item.goal}</span>
+                  <span className="text-muted-foreground">
+                    {item.label}
+                    <span className="ml-1.5 text-[10px] text-muted-foreground/60">{item.period}</span>
+                  </span>
+                  <span className="text-muted-foreground font-mono font-medium tabular-nums">
+                    {item.current >= item.goal
+                      ? `${item.current} ✓`
+                      : `${item.current}/${item.goal}`}
+                  </span>
                 </div>
                 <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div
