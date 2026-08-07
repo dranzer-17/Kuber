@@ -19,7 +19,7 @@ const HYDRATE_COOLDOWN_MS = 10 * 60 * 1000;
 const hydrateCooldown = new Map<string, number>();
 
 export type UniboxTab = "primary" | "others";
-export type UniboxReadState = "unread" | "read" | "replied" | "needs_reply";
+export type UniboxReadState = "unread" | "read" | "replied" | "needs_reply" | "no_reply";
 
 export type UniboxThreadSummary = {
   thread_id: string;
@@ -31,6 +31,8 @@ export type UniboxThreadSummary = {
   preview: string | null;
   latest_at: string;
   latest_direction: string;
+  /** False for threads we sent into that the lead has never answered. */
+  has_reply: boolean;
   unread_count: number;
   message_count: number;
   interest_status: number | null;
@@ -453,13 +455,17 @@ function matchesTab(tab: UniboxTab, row: { is_focused: boolean; is_auto_reply: b
 
 function matchesReadState(
   state: UniboxReadState,
-  summary: { unread_count: number; latest_direction: string },
+  summary: { unread_count: number; latest_direction: string; has_reply: boolean },
 ): boolean {
   switch (state) {
     case "unread": return summary.unread_count > 0;
     case "read": return summary.unread_count === 0;
-    case "replied": return summary.latest_direction !== "received";
+    // "Replied" means WE answered a lead who wrote in — a campaign thread the
+    // lead never answered is "no_reply", not "replied", even though its last
+    // message is also outbound.
+    case "replied": return summary.has_reply && summary.latest_direction !== "received";
     case "needs_reply": return summary.latest_direction === "received";
+    case "no_reply": return !summary.has_reply;
     default: return true;
   }
 }
@@ -522,6 +528,13 @@ export async function getThreads(db: Db, filters: {
   cursor?: string;
   limit?: number;
   scope?: UniboxScope;
+  /**
+   * Include threads the lead has never answered (a pure outbound campaign
+   * send). The Unibox wants these — it is a mailbox, not a reply queue. The
+   * campaign Outbox does NOT: it renders inbound messages only, so an
+   * unanswered thread would show up there as an empty row.
+   */
+  include_unreplied?: boolean;
 }): Promise<{
   threads: UniboxThreadSummary[];
   next_cursor: string | null;
@@ -597,7 +610,7 @@ export async function getThreads(db: Db, filters: {
     msgs.sort((a, b) => String(a.timestamp_email).localeCompare(String(b.timestamp_email)));
     const latest = msgs[msgs.length - 1];
     const hasReceived = msgs.some((m) => m.direction === "received");
-    if (!hasReceived) continue;
+    if (!hasReceived && !filters.include_unreplied) continue;
 
     const leadEmail = latest.lead_email;
     const interest = (latest.campaign_lead_id ? statusByCampaignLead.get(latest.campaign_lead_id) : undefined)
@@ -642,6 +655,7 @@ export async function getThreads(db: Db, filters: {
       preview: latest.content_preview,
       latest_at: latest.timestamp_email,
       latest_direction: latest.direction,
+      has_reply: hasReceived,
       unread_count: unreadInbound.length,
       message_count: msgs.length,
       interest_status: interest?.interest_status ?? null,

@@ -1,4 +1,4 @@
-export type UniboxReadStateFilter = "all" | "unread" | "read" | "replied" | "needs_reply";
+export type UniboxReadStateFilter = "all" | "unread" | "read" | "replied" | "needs_reply" | "no_reply";
 export type UniboxInterestFilter = "all" | "lead" | number;
 
 export const READ_STATE_OPTIONS: { value: UniboxReadStateFilter; label: string }[] = [
@@ -7,6 +7,7 @@ export const READ_STATE_OPTIONS: { value: UniboxReadStateFilter; label: string }
   { value: "read", label: "Read" },
   { value: "replied", label: "Replied" },
   { value: "needs_reply", label: "Needs reply" },
+  { value: "no_reply", label: "No reply yet" },
 ];
 
 export const INTEREST_FILTER_OPTIONS: { value: UniboxInterestFilter; label: string; color: string }[] = [

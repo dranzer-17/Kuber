@@ -27,7 +27,7 @@ import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-const READ_STATE_VALUES: UniboxReadStateFilter[] = ["all", "unread", "read", "replied", "needs_reply"];
+const READ_STATE_VALUES: UniboxReadStateFilter[] = ["all", "unread", "read", "replied", "needs_reply", "no_reply"];
 
 function parseReadStateParam(v: string | null): UniboxReadStateFilter {
   return v && (READ_STATE_VALUES as string[]).includes(v) ? (v as UniboxReadStateFilter) : "all";

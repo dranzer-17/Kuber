@@ -14,7 +14,7 @@ function parseInterest(raw: string | null): number | "lead" | undefined {
 
 function parseReadState(raw: string | null): UniboxReadState | undefined {
   if (!raw || raw === "all") return undefined;
-  const valid: UniboxReadState[] = ["unread", "read", "replied", "needs_reply"];
+  const valid: UniboxReadState[] = ["unread", "read", "replied", "needs_reply", "no_reply"];
   return valid.includes(raw as UniboxReadState) ? (raw as UniboxReadState) : undefined;
 }
 
@@ -52,6 +52,8 @@ export async function GET(req: NextRequest) {
     interest_status: parseInterest(sp.get("interest")),
     cursor: sp.get("cursor") ?? undefined,
     limit: sp.get("limit") ? Number(sp.get("limit")) : 30,
+    // The Unibox is a mailbox: it shows every thread in scope, answered or not.
+    include_unreplied: true,
     scope,
   });
 

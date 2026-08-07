@@ -1441,6 +1441,7 @@ export type UniboxThreadSummary = {
   preview: string | null;
   latest_at: string;
   latest_direction: string;
+  has_reply: boolean;
   unread_count: number;
   message_count: number;
   interest_status: number | null;
