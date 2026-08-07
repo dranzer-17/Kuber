@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DRAFT_JSON_SUFFIX } from "@/lib/services/llm";
+import { DRAFT_JSON_SUFFIX, MANDATORY_FORMATTING_RULES } from "@/lib/services/llm";
 
 // Settings live in two layers (planning.md Phase 1):
 //   • `settings`       — company-wide defaults, editable by managers only.
@@ -76,9 +76,8 @@ export async function resolveDraftPrompt(db: SupabaseClient, ownerId: string | n
 export async function resolveReplyPrompt(db: SupabaseClient, ownerId: string | null | undefined): Promise<string> {
   const user = await getUserSettings(db, ownerId);
   const personal = user?.reply_prompt?.trim();
-  if (personal) return personal;
-  const { drafter } = await getReplyPrompts(db);
-  return drafter;
+  const base = personal || (await getReplyPrompts(db)).drafter;
+  return `${base.trimEnd()}${MANDATORY_FORMATTING_RULES}`;
 }
 
 /** The campaign owner's personal "From" name, else the company default. */
@@ -113,10 +112,11 @@ async function buildClientContextBlock(db: SupabaseClient): Promise<string> {
  */
 export async function resolveDraftSystemPrompt(db: SupabaseClient, ownerId: string | null | undefined): Promise<string> {
   const base = await resolveDraftPrompt(db, ownerId);
+  const withFormatting = `${base.trimEnd()}${MANDATORY_FORMATTING_RULES}`;
   const withJson =
-    /["']subject["']/.test(base) && /["']body["']/.test(base) && /["']product_match["']/.test(base)
-      ? base
-      : `${base.trimEnd()}${DRAFT_JSON_SUFFIX}`;
+    /["']subject["']/.test(withFormatting) && /["']body["']/.test(withFormatting) && /["']product_match["']/.test(withFormatting)
+      ? withFormatting
+      : `${withFormatting.trimEnd()}${DRAFT_JSON_SUFFIX}`;
   const contextBlock = await buildClientContextBlock(db);
   return `${withJson}\n\n${contextBlock}`;
 }

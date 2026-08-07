@@ -68,6 +68,28 @@ export interface ExtractionOutput {
 
 export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Return ONLY valid JSON, no markdown fences: { "description": string (2-3 sentences: what they manufacture and who they sell to), "primary_products": string[] }`;
 
+// Appended to EVERY drafting/reply system prompt — personal or company —
+// after whichever one is in effect (resolveDraftSystemPrompt / resolveReplyPrompt
+// are strict either/or: a personal prompt fully REPLACES the company default,
+// not layers on top of it). The company default has its own detailed
+// FORMATTING section; a personal prompt is usually free prose about tone and
+// content that never mentions formatting at all, so emails came out with zero
+// bold anywhere — technically on-brief, visually flat.
+//
+// Kept deliberately narrow: formatting only, never length/structure/tone, so
+// it can't fight a personal prompt's own rules the way an earlier "override
+// everything" block did on the reply path (see generate-reply.ts history —
+// that one dictated sentence counts and got reverted for contradicting the
+// prompt it was appended to).
+export const MANDATORY_FORMATTING_RULES =
+  "\n\nFORMATTING (always applies, independent of the drafting style above):\n" +
+  "- Bold the 2 to 4 most load-bearing facts using **double asterisks** — the matched " +
+  "product/service name, and any concrete number, spec, or certification actually present " +
+  "in the material (years of experience, capacity, certifications, countries served). " +
+  "Never bold a whole sentence or a vague phrase.\n" +
+  "- If there is more than one offering, strength, or feature to list, put each on its own " +
+  "line starting with \"- \", instead of running them together in a sentence.";
+
 // Appended only to a drafting prompt that does not already declare this JSON
 // contract itself (see resolveDraftSystemPrompt) — e.g. a user's personal
 // prompt written as free prose. The greeting rule must match what code does:
