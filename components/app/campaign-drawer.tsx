@@ -2561,7 +2561,7 @@ export function CampaignDetail({
                       {selected.email_drafts.status === "approved" && !isPreviewingHistory && (
                         <>
                           <p className="text-sm text-green-400 flex items-center gap-1.5 mr-1">
-                            <CheckCircle2 className="size-4" /> Certified — ready to send
+                            <CheckCircle2 className="size-4" /> Certified. Ready to send.
                           </p>
                           <Button variant="outline" className="gap-1.5" disabled={certifying} onClick={handleReopen}>
                             <RotateCcw className="size-3.5" /> Reopen for editing

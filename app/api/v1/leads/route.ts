@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = CreateLeadSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
 
   const { organization_name, organization_domain, organization_industry, organization_country, email, batch_name, color, import_id: providedImportId, assigned_to: requestedAssignedTo, ...leadFields } = parsed.data;
   const assigned_to = requestedAssignedTo ?? null;

@@ -10,7 +10,7 @@ export async function PUT(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = ReorderProviderKeysSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
   const { provider, orderedIds } = parsed.data;
 
   const db = dbForUser(user);

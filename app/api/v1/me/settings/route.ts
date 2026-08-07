@@ -67,7 +67,7 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = PatchUserSettingsSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
 
   const patch: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(parsed.data)) {

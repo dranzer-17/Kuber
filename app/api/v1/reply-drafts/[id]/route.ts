@@ -29,7 +29,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try { user = await requireAuth(req); } catch (r) { return r as Response; }
   const { id } = await params;
   const parsed = PatchSchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
   const db = dbForUser(user);
   try { await assertReplyDraftAccess(db, user, id); } catch (r) { return r as Response; }
   const now = new Date().toISOString();

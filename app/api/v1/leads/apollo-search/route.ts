@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = ApolloSearchSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
 
   const { keywords, locations, titles, seniorities, batch_name, color, preview, assigned_to, assignment_strategy, max_leads_per_keyword } = parsed.data;
   // Mutable: clamped down (never up) to Apollo's real remaining balance below,

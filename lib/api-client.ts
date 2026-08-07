@@ -12,6 +12,30 @@ async function getToken(): Promise<string> {
   return data.session?.access_token ?? "";
 }
 
+// Every route that fails zod validation returns the same generic top-level
+// message ("Invalid request") — it means "the request payload didn't match the
+// schema", not that some literal "body" field is wrong. The actual reason
+// (which field, what rule it broke) is computed server-side via
+// `parsed.error.flatten()` and sent as `error.details`, but every caller that
+// just did `setError(e.message)` was showing the generic wrapper and throwing
+// the specific reason away — indistinguishable from a real bug on both sides
+// of the request. Fold the field-level detail into the message itself so any
+// UI that already surfaces `e.message` gets something a user (or the next
+// person debugging this) can actually act on.
+function describeApiError(error: { code?: string; message?: string; details?: unknown } | null | undefined, status: number): string {
+  const details = error?.details as { fieldErrors?: Record<string, string[]>; formErrors?: string[] } | undefined;
+  const fieldMessages = Object.entries(details?.fieldErrors ?? {})
+    .filter(([, msgs]) => Array.isArray(msgs) && msgs.length > 0)
+    .map(([field, msgs]) => `${field} — ${msgs[0]}`);
+  if (fieldMessages.length > 0) {
+    return `${error?.message ?? "Invalid request"}: ${fieldMessages.join("; ")}`;
+  }
+  if (details?.formErrors?.length) {
+    return `${error?.message ?? "Invalid request"}: ${details.formErrors.join("; ")}`;
+  }
+  return error?.message ?? `API error ${status}`;
+}
+
 async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const tok = token ?? await getToken();
   const res = await fetch(path, {
@@ -32,7 +56,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string)
       await supabase.auth.signOut();
       if (typeof window !== "undefined") window.location.href = "/";
     }
-    const err = new Error(json.error?.message ?? `API error ${res.status}`) as Error & { code?: string; details?: unknown };
+    const err = new Error(describeApiError(json.error, res.status)) as Error & { code?: string; details?: unknown };
     err.code = json.error?.code;
     err.details = json.error?.details;
     throw err;

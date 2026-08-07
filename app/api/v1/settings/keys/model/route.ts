@@ -11,7 +11,7 @@ export async function PUT(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = SetProviderModelSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
   const { provider, model } = parsed.data;
 
   if (!(provider in PROVIDER_META)) return fail(400, "INVALID_PROVIDER", `Unknown provider "${provider}"`);

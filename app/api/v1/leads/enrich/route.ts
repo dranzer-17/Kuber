@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = EnrichSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
 
   // DB-first key resolution (Settings > Keys), matching bulkMatch()'s own path
   // — an env-only check 503s the whole email-reveal pass in production.

@@ -13,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   await params; // campaign id validated by auth + client context
   const body = await req.json().catch(() => null);
   const parsed = FollowUpStepTemplateRegenerateSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
 
   try {
     const rewritten = await regenerateFollowUpTemplateText({

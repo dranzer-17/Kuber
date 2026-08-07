@@ -15,7 +15,7 @@ export async function PUT(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = SetLlmTierRolesSchema.safeParse(body);
-  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid body", parsed.error.flatten());
+  if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
   const { primary, fallback } = parsed.data;
 
   if (primary && !DEFAULT_LLM_TIER_ORDER.includes(primary as (typeof DEFAULT_LLM_TIER_ORDER)[number])) {
