@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MAX_ENRICH_ATTEMPTS } from "@/lib/services/enrich-leads";
+import { countPendingDrafts } from "@/lib/services/generate-drafts";
 
 type Db = SupabaseClient;
 
@@ -137,30 +138,46 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
 
   const staleBefore = new Date(Date.now() - DRAFT_STALE_MINUTES * 60 * 1000).toISOString();
 
-  const { data: processing } = await db
+  // Deliberately NOT filtered on status = 'processing'. The reset call above
+  // flips exactly these campaigns to 'draft' on its way past (it releases any
+  // campaign in 'processing' with nothing actively generating), so a scan for
+  // 'processing' afterwards finds nothing and the stalled campaign is never
+  // revived. draft_generation_started_at is the signal that survives: it means
+  // generation was asked for, whatever the status has since been set to.
+  const { data: candidates } = await db
     .from("campaigns")
     .select("id")
-    .eq("status", "processing")
+    .in("status", ["draft", "processing"])
     .eq("is_deleted", false)
+    .not("draft_generation_started_at", "is", null)
     .lt("draft_generation_started_at", staleBefore)
     .limit(5);
 
-  for (const campaign of processing ?? []) {
+  for (const campaign of candidates ?? []) {
+    const campaignId = campaign.id as string;
+
+    // Nothing left to write — a finished campaign must not be kicked, and this
+    // is also what stops a pathological lead being retried forever: leads past
+    // the 3-failure cap are not counted as pending, so the campaign goes quiet
+    // instead of burning LLM calls on every pass.
+    if ((await countPendingDrafts(db, campaignId)) === 0) continue;
+
     const { data: lastDraft } = await db
       .from("email_drafts")
       .select("created_at")
-      .eq("campaign_id", campaign.id)
+      .eq("campaign_id", campaignId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    // Still producing — leave it alone.
+    // Still producing — leave it alone rather than hand a second worker the
+    // same targets.
     if (lastDraft?.created_at && lastDraft.created_at > staleBefore) continue;
 
     void fetch(`${baseUrl}/api/enrich/generate-drafts`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-internal-secret": secret },
-      body: JSON.stringify({ campaign_id: campaign.id }),
+      body: JSON.stringify({ campaign_id: campaignId }),
     }).catch(() => {});
   }
 }
