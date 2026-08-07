@@ -1067,6 +1067,8 @@ export type Profile = {
   is_active: boolean;
   availability_status: AvailabilityStatus;
   is_super_admin: boolean;
+  /** Instantly mailbox this person's leads are mailed from. null = company default. */
+  sending_email: string | null;
   created_at: string;
 };
 
@@ -1097,7 +1099,7 @@ export type HandoverSummary = {
 };
 
 export async function patchUser(token: string, id: string, body: Partial<{
-  full_name: string; role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: AvailabilityStatus; password: string; handover_strategy: HandoverStrategy; reassign_to: string;
+  full_name: string; role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: AvailabilityStatus; password: string; handover_strategy: HandoverStrategy; reassign_to: string; sending_email: string | null;
 }>): Promise<Profile & { handover?: HandoverSummary }> {
   return apiFetch(`/api/v1/settings/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }, token);
 }

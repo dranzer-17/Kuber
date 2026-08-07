@@ -42,6 +42,11 @@ export const PatchUserSchema = z
     is_active: z.boolean().optional(),
     // Online/offline availability (spec §2B) — separate from is_active.
     availability_status: z.enum(["online", "offline"]).optional(),
+    // The Instantly mailbox this person's leads are mailed from. null clears it,
+    // which falls the user back to the company default sender. Checked against
+    // the connected Instantly accounts in the route — a mailbox that isn't
+    // connected would silently fail at send time instead.
+    sending_email: z.string().trim().email().nullable().optional(),
     password: z.string().min(8).optional(),
     // How the held work is redistributed on deactivation. Omitting it while the
     // user still holds leads/campaigns is what triggers REASSIGN_REQUIRED.

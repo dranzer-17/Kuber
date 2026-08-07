@@ -10,6 +10,7 @@ import {
   type HandoverStrategy,
   type HandoverSummary,
 } from "@/lib/services/handover";
+import { listInstantlyAccounts } from "@/lib/services/instantly";
 import { dbForUser } from "@/lib/supabase/scoped";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -20,7 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => null);
   const parsed = PatchUserSchema.safeParse(body);
   if (!parsed.success) return fail(400, "VALIDATION_ERROR", "Invalid request", parsed.error.flatten());
-  const { password, role, territory_countries, full_name, is_active, availability_status, reassign_to, handover_strategy } = parsed.data;
+  const { password, role, territory_countries, full_name, is_active, availability_status, reassign_to, handover_strategy, sending_email } = parsed.data;
 
   const db = dbForUser(caller);
 
@@ -126,7 +127,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (authError) return fail(400, "USER_UPDATE_FAILED", authError.message);
   }
 
+  // A mailbox that isn't connected in Instantly (or can't send) would not fail
+  // here — it would fail much later, when a campaign built around it is created,
+  // by which time the manager has moved on. Check it at the point of assignment.
+  let normalizedSender: string | null | undefined = sending_email;
+  if (sending_email) {
+    let accounts: Awaited<ReturnType<typeof listInstantlyAccounts>>;
+    try {
+      accounts = await listInstantlyAccounts();
+    } catch (e) {
+      return fail(502, "INSTANTLY_ERROR", (e as Error).message);
+    }
+    const match = accounts.find((a) => a.email.toLowerCase() === sending_email.toLowerCase());
+    if (!match) return fail(400, "ACCOUNT_NOT_FOUND", "That mailbox is not connected in Instantly");
+    if (match.status !== 1) {
+      return fail(400, "ACCOUNT_CANNOT_SEND", `${match.email} cannot send right now (status ${match.status})`);
+    }
+    normalizedSender = match.email.toLowerCase();
+  }
+
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  // null clears the assignment — that person falls back to the company default.
+  if (normalizedSender !== undefined) patch.sending_email = normalizedSender;
   if (full_name !== undefined) patch.full_name = full_name;
   if (role !== undefined) patch.role = role;
   if (territory_countries !== undefined) {
@@ -142,7 +164,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .from("profiles")
     .update(patch)
     .eq("id", id)
-    .select("id, email, full_name, role, territory_countries, is_active, availability_status, is_super_admin, created_at")
+    .select("id, email, full_name, role, territory_countries, is_active, availability_status, is_super_admin, sending_email, created_at")
     .single();
 
   if (error) return fail(500, "INTERNAL", error.message);

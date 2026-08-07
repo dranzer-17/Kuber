@@ -164,11 +164,19 @@ export async function sendCampaign(
   if (steps.length === 0) throw new Error("Campaign has no steps — cannot send");
 
   // 3) Sending account — Settings > Email & Sending first, INSTANTLY_SENDING_ACCOUNTS
-  //    as the fallback tier (same precedence as every provider key).
+  //    as the fallback tier (same precedence as every provider key). This is the
+  //    COMPANY DEFAULT: it is used for leads whose owner has no mailbox of their
+  //    own, and for pool leads with no owner at all.
   const emailList = await getSendingAccounts(db);
   if (emailList.length === 0) {
     throw new Error("No Instantly sending account selected — choose one in Settings > Email & Sending");
   }
+  const defaultSender = emailList[0];
+
+  // Older deployments may still hold a comma-separated pool here. Keep handing
+  // Instantly the whole list for the default bucket so its rotation is
+  // preserved; a per-employee bucket is always exactly one mailbox.
+  const emailListFor = (sender: string) => (sender === defaultSender ? emailList : [sender]);
 
   // 4) Eligible leads (certified, not yet pushed to Instantly)
   // leads:lead_id!inner is required (not just a convenience) whenever
@@ -228,15 +236,32 @@ export async function sendCampaign(
     const draftsForLead = (leadId: string) =>
       [...(draftMap.get(leadId) ?? new Map()).entries()].map(([step_number, v]) => ({ step_number, ...v }));
 
-    // Bucket leads by country
+    // Which mailbox each lead's OWNER sends from. Instantly picks the sender at
+    // the campaign level, never per lead, so this has to become part of the
+    // bucket key below — two employees' leads in the same country cannot share
+    // one Instantly campaign and still send as themselves.
     type ClRow = (typeof cls)[number];
-    const buckets = new Map<string, { code: string; countryName: string | null; rows: ClRow[] }>();
+    const leadOf = (r: ClRow) => (Array.isArray(r.leads) ? r.leads[0] : r.leads);
+    const ownerIds = [...new Set(cls.map((r) => leadOf(r)?.assigned_to).filter(Boolean))] as string[];
+    const senderByOwner = new Map<string, string>();
+    if (ownerIds.length > 0) {
+      const { data: owners } = await db.from("profiles").select("id, sending_email").in("id", ownerIds);
+      for (const o of owners ?? []) {
+        if (o.sending_email) senderByOwner.set(o.id as string, (o.sending_email as string).toLowerCase());
+      }
+    }
+    const senderFor = (r: ClRow) => senderByOwner.get(leadOf(r)?.assigned_to ?? "") ?? defaultSender;
+
+    // Bucket leads by (country, sending mailbox)
+    const buckets = new Map<string, { code: string; countryName: string | null; sender: string; rows: ClRow[] }>();
     for (const r of cls) {
-      const lead = Array.isArray(r.leads) ? r.leads[0] : r.leads;
+      const lead = leadOf(r);
       const countryName = lead?.country ?? null;
       const code = resolveCountryCode(countryName);
-      if (!buckets.has(code)) buckets.set(code, { code, countryName, rows: [] });
-      buckets.get(code)!.rows.push(r);
+      const sender = senderFor(r);
+      const key = `${code}::${sender}`;
+      if (!buckets.has(key)) buckets.set(key, { code, countryName, sender, rows: [] });
+      buckets.get(key)!.rows.push(r);
     }
 
     for (const b of buckets.values()) {
@@ -251,12 +276,17 @@ export async function sendCampaign(
         );
         const bucketLabel = b.countryName ?? "Other";
 
-        // Upsert sub-campaign row (status stays 'creating' until real activation in step 6)
+        // Upsert sub-campaign row (status stays 'creating' until real activation in step 6).
+        // Matched on the sender too: a sub-campaign that already exists for a
+        // different mailbox is left completely alone — re-pointing its
+        // email_list would move the follow-ups of leads already inside it onto
+        // someone else's mailbox mid-sequence.
         let { data: sub } = await db
           .from("instantly_campaigns")
           .select("id,instantly_campaign_id")
           .eq("campaign_id", campaignId)
           .eq("country_code", b.code)
+          .eq("sender_email", b.sender)
           .maybeSingle();
 
         if (!sub) {
@@ -269,7 +299,8 @@ export async function sendCampaign(
               timezone: tz,
               status: "creating",
               daily_limit: campaign.daily_limit ?? 30,
-              email_list: emailList,
+              sender_email: b.sender,
+              email_list: emailListFor(b.sender),
               created_at: new Date().toISOString(),
             })
             .select("id,instantly_campaign_id")
@@ -282,14 +313,21 @@ export async function sendCampaign(
         let instId = sub!.instantly_campaign_id;
         if (!instId) {
           instId = await createInstantlyCampaign({
-            name: `${campaign.name}_${bucketLabel}`,
+            // Two mailboxes can now own a sub-campaign for the same country, so
+            // the sender's name goes in the title — otherwise they'd be two
+            // identically-named campaigns in the Instantly UI. Default-sender
+            // buckets keep the original name so existing campaigns and new ones
+            // stay consistent.
+            name: b.sender === defaultSender
+              ? `${campaign.name}_${bucketLabel}`
+              : `${campaign.name}_${bucketLabel}_${b.sender.split("@")[0]}`,
             dailyLimit: campaign.daily_limit ?? 30,
             windowFrom: effWindowFrom,
             windowTo: effWindowTo,
             timezone: tz,
             sendDays: effSendDays,
             steps,
-            emailList,
+            emailList: emailListFor(b.sender),
           });
           await db
             .from("instantly_campaigns")
@@ -410,7 +448,10 @@ export async function sendCampaign(
         await db.from("instantly_campaigns")
           .update({ status: "failed", last_error: message, updated_at: new Date().toISOString() })
           .eq("campaign_id", campaignId)
-          .eq("country_code", b.code);
+          .eq("country_code", b.code)
+          // Same country can now hold one sub per mailbox — without this, one
+          // employee's failed bucket would mark a co-worker's healthy one failed.
+          .eq("sender_email", b.sender);
         continue;
       }
     }

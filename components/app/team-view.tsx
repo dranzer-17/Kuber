@@ -24,9 +24,13 @@ import { summarizeTerritory } from "@/lib/territory";
 import { LOCATION_CATEGORIES } from "@/lib/constants";
 import {
   fetchUsers, createUser, patchUser,
-  fetchOversight,
+  fetchOversight, fetchSendingAccounts,
   type Profile, type HandoverStrategy, type HandoverSummary,
+  type InstantlySendingAccount,
 } from "@/lib/api-client";
+
+/** Select value standing in for "no mailbox of their own" — Radix forbids "". */
+const DEFAULT_MAILBOX = "__default__";
 
 const TERRITORY_HELP =
   "Which countries' leads route to this person under territory-based assignment. Tick a region header to take the whole region.";
@@ -58,6 +62,8 @@ export function TeamView() {
 
   const [users, setUsers] = useState<Profile[]>([]);
   const [counts, setCounts] = useState<Record<string, { assigned_lead_count: number; campaign_count: number }>>({});
+  const [mailboxes, setMailboxes] = useState<InstantlySendingAccount[]>([]);
+  const [defaultMailbox, setDefaultMailbox] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -97,6 +103,13 @@ export function TeamView() {
       })
       .catch((e) => toast.error((e as Error).message))
       .finally(() => setLoading(false));
+
+    // Separate from the roster load on purpose: this one calls Instantly, so a
+    // missing key or a provider outage must not blank out the whole team page.
+    // Without it the mailbox column just has nothing to offer.
+    fetchSendingAccounts(session.access_token)
+      .then((s) => { setMailboxes(s.accounts); setDefaultMailbox(s.selected_email); })
+      .catch(() => { /* column degrades to read-only text */ });
   }, [session, role]);
 
   async function handleCreate(e: React.FormEvent) {
@@ -128,7 +141,7 @@ export function TeamView() {
   // what actually happened rather than just that something did.
   async function handlePatch(
     id: string,
-    patch: Partial<{ role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: "online" | "offline"; handover_strategy: HandoverStrategy; reassign_to: string }>,
+    patch: Partial<{ role: "manager" | "employee"; territory_countries: string[]; is_active: boolean; availability_status: "online" | "offline"; handover_strategy: HandoverStrategy; reassign_to: string; sending_email: string | null }>,
   ): Promise<(Profile & { handover?: HandoverSummary }) | null> {
     if (!session) return null;
     try {
@@ -366,6 +379,7 @@ export function TeamView() {
                 <TableHead className="pl-5 eyebrow">User</TableHead>
                 <TableHead className="eyebrow w-30">Workload</TableHead>
                 <TableHead className="eyebrow w-34">Role</TableHead>
+                <TableHead className="eyebrow w-52">Sends from</TableHead>
                 <TableHead className="eyebrow w-34">Territory</TableHead>
                 <TableHead className="eyebrow w-26">Status</TableHead>
                 <TableHead className="pr-5 eyebrow text-right w-30">Actions</TableHead>
@@ -375,6 +389,11 @@ export function TeamView() {
               {users.map((u) => {
                 const canEditRole = !u.is_super_admin && isSuperAdmin;
                 const canToggleActive = !u.is_super_admin && (isSuperAdmin || u.role === "employee");
+                // Mirrors the API's rule exactly: the Super Admin edits anyone
+                // (themselves included), a manager only employees. Unlike
+                // deactivation, there is nothing dangerous about a Super Admin
+                // choosing their own sending mailbox.
+                const canEditMailbox = isSuperAdmin || u.role === "employee";
                 const leadCount = counts[u.id]?.assigned_lead_count ?? 0;
                 const campaignCount = counts[u.id]?.campaign_count ?? 0;
                 const displayName = u.full_name || u.email;
@@ -396,6 +415,14 @@ export function TeamView() {
                             {u.is_super_admin && (
                               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-primary/15 text-primary border border-primary/25">
                                 Super Admin
+                              </span>
+                            )}
+                            {u.role === "employee" && u.is_active && !u.sending_email && (
+                              <span
+                                className="shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25"
+                                title="Their leads are mailed from the company default mailbox, not their own"
+                              >
+                                No mailbox
                               </span>
                             )}
                             {u.role === "employee" && u.is_active && (u.territory_countries ?? []).length === 0 && (
@@ -437,6 +464,16 @@ export function TeamView() {
                           {roleLabel(u)}
                         </span>
                       )}
+                    </TableCell>
+
+                    <TableCell className="py-3">
+                      <MailboxCell
+                        value={u.sending_email}
+                        accounts={mailboxes}
+                        defaultMailbox={defaultMailbox}
+                        disabled={!canEditMailbox}
+                        onChange={(next) => handlePatch(u.id, { sending_email: next })}
+                      />
                     </TableCell>
 
                     <TableCell className="py-3">
@@ -714,6 +751,60 @@ function HandoverBeforeDeactivateModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Which Instantly mailbox this person's leads go out from.
+ *
+ * Instantly picks the sender per campaign, not per lead, so this choice is what
+ * splits a campaign's country buckets into one Instantly campaign per sender.
+ * Changing it only affects leads sent from here on: a sub-campaign already
+ * running keeps its original mailbox, and replies always go back out from the
+ * mailbox that owns the thread.
+ */
+function MailboxCell({
+  value,
+  accounts,
+  defaultMailbox,
+  disabled,
+  onChange,
+}: {
+  value: string | null;
+  accounts: InstantlySendingAccount[];
+  defaultMailbox: string | null;
+  disabled: boolean;
+  onChange: (next: string | null) => void;
+}) {
+  // The assigned mailbox may be missing from `accounts` — the list is still
+  // loading, Instantly is unreachable, or the mailbox was disconnected there.
+  // Carry it as its own option so the cell never renders blank.
+  const known = accounts.some((a) => a.email.toLowerCase() === (value ?? "").toLowerCase());
+
+  return (
+    <Select
+      value={value ?? DEFAULT_MAILBOX}
+      onValueChange={(v) => onChange(v === DEFAULT_MAILBOX ? null : v)}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        title={value ?? (defaultMailbox ? `Company default — ${defaultMailbox}` : "Company default")}
+        className={cn("h-9 w-48 bg-card font-mono text-xs", !value && "text-muted-foreground")}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT_MAILBOX}>
+          Default{defaultMailbox ? ` · ${defaultMailbox.split("@")[0]}` : ""}
+        </SelectItem>
+        {value && !known && <SelectItem value={value}>{value.split("@")[0]} (not connected)</SelectItem>}
+        {accounts.map((a) => (
+          <SelectItem key={a.email} value={a.email} disabled={!a.can_send}>
+            {a.email.split("@")[0]}{a.can_send ? "" : ` · ${a.status_label}`}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
