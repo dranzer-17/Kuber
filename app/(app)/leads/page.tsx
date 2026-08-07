@@ -629,6 +629,7 @@ export default function LeadsPage() {
     loadAllLeads,
     loadingAllLeads,
     searchLeads,
+    leadsByIds,
     checkedIds,
     setCheckedIds,
     setSelectedLead,
@@ -924,7 +925,10 @@ export default function LeadsPage() {
   const eligibleInView = pagedLeads.filter(isCampaignEligible);
   const allEligibleChecked = eligibleInView.length > 0 && eligibleInView.every((l) => checkedIds.has(l.id));
   const someChecked = pagedLeads.some((l) => checkedIds.has(l.id));
-  const checkedLeads = leads.filter((l) => checkedIds.has(l.id));
+  // Resolve against every lead seen this session, not the loaded page —
+  // a selection made under a filter is mostly outside `leads`, which made
+  // checkedCount undercount and canCreateCampaign go false.
+  const checkedLeads = leadsByIds(checkedIds);
   const checkedCount = checkedLeads.length;
   const eligibleCheckedCount = checkedLeads.filter(isCampaignEligible).length;
   const ineligibleCheckedCount = checkedCount - eligibleCheckedCount;
@@ -1478,7 +1482,7 @@ export default function LeadsPage() {
 
       {/* Bulk assign modal */}
       {showBulkAssign && (() => {
-        const alreadyAssignedCount = leads.filter((l) => checkedIds.has(l.id) && l.assignedTo).length;
+        const alreadyAssignedCount = leadsByIds(checkedIds).filter((l) => l.assignedTo).length;
         // With "skip already assigned" on, nothing gets overwritten, so no
         // reassignment confirmation is needed (spec §4).
         const needsOverwriteConfirm = alreadyAssignedCount > 0 && !assignSkipAssigned && !assignOverwriteConfirmed;
