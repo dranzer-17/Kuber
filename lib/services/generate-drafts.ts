@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { plainToHtml, htmlToPlainText } from "@/lib/utils/email-html";
 import { complete } from "@/lib/services/llm";
 import {
   resolveDraftSystemPrompt,
@@ -89,38 +90,6 @@ function unwrapOrg(raw: OrgData | OrgData[] | null | undefined): OrgData | null 
 function unwrapLead(raw: LeadRow | LeadRow[] | null | undefined): LeadRow | null {
   if (!raw) return null;
   return Array.isArray(raw) ? (raw[0] ?? null) : raw;
-}
-
-// Converts assembled plain-text body (with **bold** markers and \n newlines) to HTML
-// so the DB stores a renderable email and Instantly sends proper bold formatting.
-function plainToHtml(plain: string): string {
-  const escaped = plain
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return (
-    "<p>" +
-    escaped
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\n{2,}/g, "<br><br>")
-      .replace(/\n/g, "<br>") +
-    "</p>"
-  );
-}
-
-function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/div>/gi, "\n")
-    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 /** Drop the appended signature so the model edits the email body only. */
@@ -533,7 +502,9 @@ export async function generateOneDraft(
 
     const effectiveSignature = isRevision
       ? resolveRevisedSignature(
-          "signature" in validated.data ? validated.data.signature : undefined,
+          "signature" in validated.data && typeof validated.data.signature === "string"
+            ? validated.data.signature
+            : undefined,
           signatureBlock,
         )
       : signatureBlock;

@@ -1,0 +1,66 @@
+/**
+ * The one place email bodies cross between HTML (what we store and send) and
+ * plain text (what the model reads and writes).
+ *
+ * These two functions MUST be exact inverses. They were not: plainToHtml turned
+ * `**bold**` into <strong>, but htmlToPlainText had no rule for <strong> — it
+ * fell through to the catch-all tag strip. So every regenerate silently flattened
+ * the draft:
+ *
+ *     stored   <strong>Ankit Singh</strong>
+ *     -> model sees   Ankit Singh          (markers gone)
+ *     -> saved as     Ankit Singh          (never bold again)
+ *
+ * Unrecoverable, and worse on each pass. The same held for <em>, <u> and links —
+ * <a href="...">brochure</a> kept the word and threw the URL away.
+ *
+ * Two copies of htmlToPlainText existed (generate-drafts and generate-reply),
+ * both with the bug. One copy now, so an inverse rule can never be added to one
+ * side and forgotten on the other.
+ */
+
+/** Markdown-ish plain text (what the model writes) -> HTML (what we store/send). */
+export function plainToHtml(plain: string): string {
+  const escaped = plain
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return (
+    "<p>" +
+    escaped
+      // Links first: their label may itself be bold/italic.
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // ** before * — otherwise `**x**` matches the italic rule and yields `<em>*x*</em>`.
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/__(.+?)__/g, "<u>$1</u>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/\n{2,}/g, "<br><br>")
+      .replace(/\n/g, "<br>") +
+    "</p>"
+  );
+}
+
+/** HTML -> markdown-ish plain text. The exact inverse of plainToHtml. */
+export function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<\/div>/gi, "\n")
+    // Formatting -> markers, BEFORE the catch-all strip below eats the tags.
+    // Without these three lines the model never sees that anything was
+    // formatted, so it cannot preserve it and every regenerate loses it.
+    .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, "**$2**")
+    .replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, "*$2*")
+    .replace(/<u\b[^>]*>([\s\S]*?)<\/u>/gi, "__$1__")
+    // Keep the URL, not just the label — a regenerated draft used to keep the
+    // word "brochure" and lose the download link behind it.
+    .replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, "[$2]($1)")
+    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

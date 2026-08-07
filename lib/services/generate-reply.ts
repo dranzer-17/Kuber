@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { htmlToPlainText } from "@/lib/utils/email-html";
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
 import { resolveCampaignSignature, resolveReplyPrompt, getProductOfferings, getCompanyContext } from "@/lib/services/settings";
@@ -30,21 +31,6 @@ const REPLY_REVISION_PREFIX = [
   "\"body\" is the reply WITHOUT the signature/footer. \"signature\" is the footer block.",
   "",
 ].join("\n");
-
-function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<\/div>/gi, "\n")
-    .replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
 function stripTrailingSignature(plain: string, signatureBlock: string): string {
   if (!signatureBlock.trim()) return plain;
@@ -198,7 +184,9 @@ export async function generateReplyDraft(
 
     const effectiveSignature = isRevision
       ? resolveRevisedSignature(
-          "signature" in parsed.data ? parsed.data.signature : undefined,
+          "signature" in parsed.data && typeof parsed.data.signature === "string"
+            ? parsed.data.signature
+            : undefined,
           signatureBlock,
         )
       : signatureBlock;
