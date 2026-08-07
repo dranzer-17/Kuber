@@ -1107,7 +1107,9 @@ export default function LeadsPage() {
               )
             )}
             <span className="font-mono text-xs text-muted-foreground tabular-nums">
-              {leadsEntityMode === "orgs" ? `${orgRows.length} orgs` : `${displayLeads.length} leads`}
+              {leadsEntityMode === "orgs"
+                ? `${orgRows.length} orgs`
+                : searchLoading ? "…" : `${displayLeads.length} leads`}
             </span>
           </div>
         </div>
@@ -1115,7 +1117,10 @@ export default function LeadsPage() {
 
       {/* ── Content ── */}
       <div className="flex-1 overflow-auto px-4 py-5">
-        {loadingLeads || (q && searchLoading) ? (
+        {/* Not gated on `q`: a filter with no search text also fetches from the
+            server, and skipping the skeleton there rendered the stale 500-row
+            window through matchesFilters — i.e. "No leads yet" — until it landed. */}
+        {loadingLeads || searchLoading ? (
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <div className="divide-y divide-border animate-pulse">
               <div className="flex items-center gap-4 px-4 py-3">
@@ -1409,8 +1414,11 @@ export default function LeadsPage() {
               500-lead first page that silently stranded everything older than
               the newest 500 (every unassigned lead among them) unless someone
               thought to switch to Kanban, load more there, and switch back.
-              Hidden while searching: searchLeads already pulls every match. */}
-          {!q && leadsTotal !== null && leads.length < leadsTotal && (
+              Hidden whenever the server result set is in play (search OR
+              filter) — searchLeads already pulled every match, and `leads`/
+              `leadsTotal` describe the unfiltered window, so showing
+              "500 of 1769" beside a filtered list of 859 was just wrong. */}
+          {!searchResults && leadsTotal !== null && leads.length < leadsTotal && (
             <Button
               type="button"
               variant="outline"
