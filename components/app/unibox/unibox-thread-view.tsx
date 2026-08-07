@@ -7,6 +7,7 @@ import { ChevronDown, ExternalLink, Loader2, Reply } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { splitQuotedBody, emailPreview } from "@/lib/email-display";
+import { convertResidualMarkdownInHtml } from "@/lib/utils/email-html";
 import type { ReplyDraft, UniboxMessage } from "@/lib/api-client";
 import { generateReplyDraftForThread } from "@/lib/api-client";
 import { ReplyDraftBox, replyDraftHasContent } from "@/components/app/reply-draft-box";
@@ -48,7 +49,7 @@ function QuotedBlock({ quoted, isHtml }: { quoted: string; isHtml: boolean }) {
           {isHtml ? (
             <div
               className="[&_p]:mb-1.5 [&_blockquote]:opacity-80"
-              dangerouslySetInnerHTML={{ __html: quoted }}
+              dangerouslySetInnerHTML={{ __html: convertResidualMarkdownInHtml(quoted) }}
             />
           ) : (
             <p className="whitespace-pre-wrap">{quoted}</p>
@@ -153,7 +154,7 @@ function MessageRow({
           isHtml ? (
             <div
               className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
-              dangerouslySetInnerHTML={{ __html: main }}
+              dangerouslySetInnerHTML={{ __html: convertResidualMarkdownInHtml(main) }}
             />
           ) : (
             <p className="whitespace-pre-wrap">{main}</p>

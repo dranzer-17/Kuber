@@ -1,30 +1,10 @@
 import { z } from "zod";
 import { complete } from "@/lib/services/llm";
+import { plainToHtml, htmlToPlainText } from "@/lib/utils/email-html";
 
 const FollowUpRewriteSchema = z.object({
   body: z.string(),
 });
-
-function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function plainToHtml(plain: string): string {
-  const escaped = plain
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return "<p>" + escaped.replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>") + "</p>";
-}
 
 /**
  * Isolated follow-up rewrite — deliberately independent of the step-1 draft

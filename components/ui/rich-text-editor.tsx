@@ -11,6 +11,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { markdownInlineToHtml, convertResidualMarkdownInHtml } from "@/lib/utils/email-html";
 
 const TEMPLATE_VAR_TOOLTIPS: Record<string, string> = {
   firstName:  "Lead's first name · e.g. \"John\"",
@@ -59,8 +60,9 @@ import {
 
 function normalizeToHtml(raw: string): string {
   if (!raw) return "";
-  // Already block-level HTML (saved by TipTap on a previous edit) — return as-is.
-  if (/^\s*<(p|div|ul|ol|h[1-6])\b/i.test(raw)) return raw;
+  // Already block-level HTML (saved by TipTap on a previous edit) — safety net
+  // for residual markdown markers, otherwise return as-is.
+  if (/^\s*<(p|div|ul|ol|h[1-6])\b/i.test(raw)) return convertResidualMarkdownInHtml(raw);
   // Plain text (possibly with **bold** markers): match Gmail's rendering exactly.
   // Escape entities first, then convert **bold** → <strong>, then newlines → <br>.
   const escaped = raw
@@ -69,8 +71,7 @@ function normalizeToHtml(raw: string): string {
     .replace(/>/g, "&gt;");
   return (
     "<p>" +
-    escaped
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    markdownInlineToHtml(escaped)
       .replace(/\n{2,}/g, "<br><br>")
       .replace(/\n/g, "<br>") +
     "</p>"

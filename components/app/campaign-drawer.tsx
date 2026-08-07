@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatChatDate, startsNewChatDay } from "@/lib/chat-format";
 import { emailPreview, splitQuotedBody } from "@/lib/email-display";
+import { convertResidualMarkdownInHtml } from "@/lib/utils/email-html";
 import { Avatar } from "@/components/leads/lead-ui";
 import { Button } from "@/components/ui/button";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -298,7 +299,7 @@ function OutboxQuotedBlock({ quoted, isHtml }: { quoted: string; isHtml: boolean
           {isHtml ? (
             <div
               className="[&_p]:mb-1.5 [&_blockquote]:opacity-80"
-              dangerouslySetInnerHTML={{ __html: quoted }}
+              dangerouslySetInnerHTML={{ __html: convertResidualMarkdownInHtml(quoted) }}
             />
           ) : (
             <p className="whitespace-pre-wrap">{quoted}</p>
@@ -378,7 +379,7 @@ function OutboxMessageRow({
           isHtml ? (
             <div
               className="leading-relaxed [&_p]:mb-2 [&_p:last-child]:mb-0"
-              dangerouslySetInnerHTML={{ __html: main }}
+              dangerouslySetInnerHTML={{ __html: convertResidualMarkdownInHtml(main) }}
             />
           ) : (
             <p className="whitespace-pre-wrap">{main}</p>

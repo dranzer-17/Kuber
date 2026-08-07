@@ -1,3 +1,5 @@
+import { markdownInlineToHtml } from "@/lib/utils/email-html";
+
 /** Escape text for safe HTML insertion. */
 export function escapeHtml(text: string): string {
   return text
@@ -6,14 +8,19 @@ export function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/** Tight signature block: one `<p>` with `<br>` line breaks (TipTap hardBreak-safe). */
+/**
+ * Tight signature block: one `<p>` with `<br>` line breaks (TipTap hardBreak-safe).
+ * Signatures are stored as markdown-ish plain text (e.g. `**Ankit Singh**`), so
+ * markers must be converted to real tags here — escaping alone left the literal
+ * `**` visible in the rendered email (planning.md / signature bold bug).
+ */
 export function signatureToHtml(block: string): string {
   const lines = block
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
   if (lines.length === 0) return "";
-  return `<p>${lines.map(escapeHtml).join("<br>")}</p>`;
+  return `<p>${lines.map((l) => markdownInlineToHtml(escapeHtml(l))).join("<br>")}</p>`;
 }
 
 /** Append signature to reply body. */
@@ -22,8 +29,7 @@ export function appendSignatureToBody(body: string, signatureBlock: string): str
   const sigHtml = signatureToHtml(signatureBlock);
   const isHtml = /^\s*<(p|div|ul|ol|h[1-6])\b/i.test(body);
   if (isHtml) return `${body}${sigHtml}`;
-  const escaped = escapeHtml(body)
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+  const escaped = markdownInlineToHtml(escapeHtml(body))
     .replace(/\n{2,}/g, "</p><p>")
     .replace(/\n/g, "<br>");
   return `<p>${escaped}</p>${sigHtml}`;

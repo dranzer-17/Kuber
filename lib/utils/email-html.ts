@@ -19,6 +19,46 @@
  * side and forgotten on the other.
  */
 
+/**
+ * Convert markdown-ish inline markers to HTML tags. Input must already be
+ * HTML-entity-escaped. Shared by every place that turns plain/markdown text
+ * (model output, settings signatures, reply signatures) into HTML, so a
+ * fix to how `**bold**` is recognised never has to be duplicated.
+ */
+export function markdownInlineToHtml(escaped: string): string {
+  return escaped
+    // Links first: their label may itself be bold/italic.
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    // ** before * — otherwise `**x**` matches the italic rule and yields `<em>*x*</em>`.
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<u>$1</u>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+}
+
+/**
+ * Convert residual markdown-ish markers (`**bold**`, `__underline__`, `*italic*`)
+ * that ended up stored INSIDE real HTML — e.g. a signature appended through a
+ * path that escaped text but never ran the `**` → `<strong>` conversion (see
+ * `signatureToHtml` history). Only text nodes are touched; tags/attributes pass
+ * through untouched, so this is safe to run on any already-HTML content, not
+ * just freshly authored drafts. Cheap no-op when there is nothing to convert.
+ *
+ * Some legacy signatures had a mismatched (odd) count of `**` markers, so a
+ * previous conversion pass already turned the pairs that DID line up into
+ * `<strong>`, leaving genuinely unpairable `**`/`***`/`****` runs stranded next
+ * to (or inside) those tags — e.g. `<strong>**Business Head</strong>**(NA)`.
+ * Those can never become a valid pair, so after converting whatever pairs
+ * remain, any leftover run of 2+ asterisks is stripped rather than shown
+ * literally — legitimate prose essentially never contains "**".
+ */
+export function convertResidualMarkdownInHtml(html: string): string {
+  if (!html || !/[*_]/.test(html)) return html;
+  return html.replace(/(<[^>]+>)|([^<]+)/g, (_match, tag?: string, text?: string) => {
+    if (tag !== undefined) return tag;
+    return markdownInlineToHtml(text ?? "").replace(/\*{2,}/g, "");
+  });
+}
+
 /** Markdown-ish plain text (what the model writes) -> HTML (what we store/send). */
 export function plainToHtml(plain: string): string {
   const escaped = plain
@@ -27,13 +67,7 @@ export function plainToHtml(plain: string): string {
     .replace(/>/g, "&gt;");
   return (
     "<p>" +
-    escaped
-      // Links first: their label may itself be bold/italic.
-      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-      // ** before * — otherwise `**x**` matches the italic rule and yields `<em>*x*</em>`.
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/__(.+?)__/g, "<u>$1</u>")
-      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    markdownInlineToHtml(escaped)
       .replace(/\n{2,}/g, "<br><br>")
       .replace(/\n/g, "<br>") +
     "</p>"
