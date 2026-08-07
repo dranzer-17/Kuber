@@ -81,17 +81,11 @@ export const EXTRACTION_SYSTEM = `You extract company facts for B2B sales. Retur
 // everything" block did on the reply path (see generate-reply.ts history —
 // that one dictated sentence counts and got reverted for contradicting the
 // prompt it was appended to).
-export const MANDATORY_FORMATTING_RULES =
-  "\n\nFORMATTING (always applies, independent of the drafting style above):\n" +
-  "- Bold the 2 to 4 most load-bearing facts using **double asterisks** — the matched " +
-  "product/service name, and any concrete number, spec, or certification actually present " +
-  "in the material (years of experience, capacity, certifications, countries served).\n" +
-  "- Beyond those, bold any other word or short phrase that is genuinely important for a " +
-  "skimming reader to catch at a glance (a key benefit, a name, a specific ask). Use judgement " +
-  "— the email should never read as entirely plain text with nothing standing out, but never " +
-  "bold a whole sentence or a vague phrase either.\n" +
-  "- Use bullet pointers for any list of two or more items (offerings, strengths, features, " +
-  "steps): each on its own line starting with \"- \", never run together in a single sentence.";
+//
+// Defined in lib/constants.ts (not here) so Settings — a client component —
+// can show employees the same text without pulling this server-only module
+// (admin client, provider keys) into the browser bundle.
+export { MANDATORY_FORMATTING_RULES } from "@/lib/constants";
 
 // Appended only to a drafting prompt that does not already declare this JSON
 // contract itself (see resolveDraftSystemPrompt) — e.g. a user's personal

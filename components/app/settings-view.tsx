@@ -7,7 +7,7 @@ import {
   User, Bot, LogOut, Plus,
   ChevronRight, PenLine, Bold, Italic, Underline,
   List, ListOrdered, Link2, Undo2, Redo2, Eraser, Type, Palette, Check, Sun, Moon,
-  Building2, Package, FileText, X, KeyRound, Gauge,
+  Building2, Package, FileText, X, KeyRound, Gauge, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import { fetchLogo, fetchSettings, patchSettings, fetchMySettings, patchMySettin
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/lib/branding";
+import { MANDATORY_FORMATTING_RULES } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { useApp } from "@/lib/app-context";
 import dynamic from "next/dynamic";
@@ -225,6 +226,35 @@ function SettingsRow({
         {description && <p className="text-xs text-muted-foreground mt-1">{description}</p>}
       </div>
       <div className="sm:col-span-2 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+// A personal drafting/reply prompt fully REPLACES the company default, so it
+// looks like it controls everything the AI writes. It doesn't — a small set of
+// formatting rules (bold key facts, use bullet pointers) is always appended in
+// code after whichever prompt is in effect, so it survives no matter what
+// someone writes above. Surfaced here so that isn't a surprise, and someone
+// writing their own prompt knows not to duplicate it.
+function MandatoryFormattingNotice() {
+  const bullets = MANDATORY_FORMATTING_RULES
+    .split("\n")
+    .filter((line) => line.trim().startsWith("- "))
+    .map((line) => line.trim().slice(2));
+  return (
+    <div className="rounded-md border border-primary/20 bg-primary/5 p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+        <Lock className="size-3.5 text-primary" />
+        Always applied on top of the prompt above
+      </div>
+      <ul className="space-y-1 pl-1 text-xs text-muted-foreground">
+        {bullets.map((bullet, i) => (
+          <li key={i} className="flex gap-1.5">
+            <span className="text-primary/70">•</span>
+            <span>{bullet}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -723,6 +753,7 @@ export function SettingsView() {
                           placeholder="Leave empty to use the company default, or write your own subject patterns, openings, offerings and tone here..."
                           helper="Company details, the product library and campaign context are appended automatically. Structure, length and tone come from this prompt, so anything you want changed you change here."
                         />
+                        <MandatoryFormattingNotice />
                         {!myDraftPrompt.trim() && myDefaults.draft_prompt && (
                           <details className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
                             <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
@@ -760,6 +791,7 @@ export function SettingsView() {
                           placeholder="Leave empty to use the company default reply prompt..."
                           helper="Must return JSON with subject and body. Safety rules are appended automatically."
                         />
+                        <MandatoryFormattingNotice />
                         {!myReplyPrompt.trim() && myDefaults.reply_prompt && (
                           <details className="rounded-md border border-border bg-secondary/20 p-3 text-xs text-muted-foreground">
                             <summary className="cursor-pointer select-none font-medium text-foreground">View the company default you&apos;re inheriting</summary>
@@ -847,6 +879,7 @@ export function SettingsView() {
                         placeholder="Write the full email template here including subject patterns, intro options, offerings, closing..."
                         helper="Campaign-level context and matched product details are appended automatically."
                       />
+                      <MandatoryFormattingNotice />
                     </section>
                   )}
 
@@ -903,6 +936,7 @@ export function SettingsView() {
 
                       <RichTextEditor label="Reply drafter prompt" value={replyDrafterPrompt} onChange={setReplyDrafterPrompt} minHeight={220}
                         helper="Must return JSON with subject and body. Still in active use — this is what writes our human-reviewed reply drafts." />
+                      <MandatoryFormattingNotice />
                     </section>
                   )}
 
