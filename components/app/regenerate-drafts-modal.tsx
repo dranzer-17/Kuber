@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { X, RotateCcw, Loader2, Lock } from "lucide-react";
 import type { RegenerationSkipped } from "@/lib/api-client";
 
@@ -101,13 +102,15 @@ function RegenerateDraftsModalInner({
 
           <div className="px-6 py-4 border-t border-border space-y-2">
             <p className="eyebrow">Instruction (optional)</p>
-            <Input
+            <Textarea
               value={instruction}
               autoFocus
               disabled={submitting}
+              rows={4}
+              className="text-sm resize-y"
               onChange={(e) => setInstruction(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !submitting) onConfirm(instruction.trim()); }}
-              placeholder="e.g. Make it shorter and less salesy"
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !submitting) onConfirm(instruction.trim()); }}
+              placeholder="e.g. Make it shorter and less salesy — multi-line instructions are fine"
             />
             <p className="text-[11px] text-muted-foreground">
               Applied to every draft in this run only — the campaign&apos;s saved AI context is unchanged.

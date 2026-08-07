@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, RotateCcw, Save, Check, ThumbsDown, Send, Paperclip, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { cn } from "@/lib/utils";
@@ -293,12 +294,13 @@ export function ReplyDraftBox({
         {regenOpen && (
           <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-2">
             <p className="eyebrow">Regenerate instructions</p>
-            <Input
+            <Textarea
               value={regenQuery}
               onChange={(e) => setRegenQuery(e.target.value)}
+              rows={3}
               placeholder={aiUsed ? 'Describe the change, e.g. "remove the last paragraph"…' : "Optional instruction, e.g. Focus on pricing…"}
-              className="text-sm"
-              onKeyDown={(e) => { if (e.key === "Enter") void handleRegenerate(); }}
+              className="text-sm resize-y"
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handleRegenerate(); }}
             />
             <Button size="sm" disabled={regenerating} onClick={() => void handleRegenerate()} className="gap-1.5">
               {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : (aiUsed ? <RotateCcw className="size-3.5" /> : <Sparkles className="size-3.5" />)}

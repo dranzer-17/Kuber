@@ -2596,11 +2596,17 @@ export function CampaignDetail({
                     {/* Regenerate panel */}
                     {regenOpen && (
                       <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
-                        <Input
+                        {/* A multi-line instruction is normal here — people paste a block of
+                            bullets and say "remove this". An <input> cannot hold newlines: the
+                            browser strips them on paste and joins them onto one line, and Enter
+                            submitted instead of breaking the line. Ctrl/Cmd+Enter still sends. */}
+                        <Textarea
                           value={regenQuery}
                           onChange={(e) => setRegenQuery(e.target.value)}
-                          placeholder='Describe the change, e.g. "remove the last paragraph", change the footer, or use "Dear Sir,"…'
-                          onKeyDown={(e) => e.key === "Enter" && handleRegenerate()}
+                          rows={4}
+                          className="text-sm resize-y"
+                          placeholder='Describe the change — multiple lines are fine, e.g. paste a block and say "remove this"'
+                          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleRegenerate(); }}
                         />
                         <Button size="sm" onClick={handleRegenerate} disabled={regenerating} className="gap-1.5">
                           <RotateCcw className="size-3.5" /> Regenerate
