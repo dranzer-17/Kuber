@@ -73,6 +73,15 @@ export function ReplyDraftBox({
   const [regenerating, setRegenerating] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const regenTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Toggling "Regenerate" only reveals a small panel right below the button —
+  // easy to read as "the click did nothing" if focus doesn't move there.
+  useEffect(() => {
+    if (!regenOpen) return;
+    const id = requestAnimationFrame(() => regenTextareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [regenOpen]);
 
   // Rehydrate when the draft row changes (e.g. after regenerate creates a new
   // version). Do not depend on subject/body — that would wipe in-progress edits
@@ -235,6 +244,7 @@ export function ReplyDraftBox({
             onClick={() => (aiUsed ? setRegenOpen((o) => !o) : void handleRegenerate())}
             className={cn(
               "h-6 gap-1 text-[11px] px-2",
+              aiUsed && regenOpen ? "text-primary bg-primary/10 hover:text-primary hover:bg-primary/10" :
               aiUsed ? "text-muted-foreground hover:text-foreground" : "text-primary hover:text-primary",
             )}
           >
@@ -295,9 +305,10 @@ export function ReplyDraftBox({
         </div>
 
         {regenOpen && (
-          <div className="rounded-md border border-border bg-secondary/30 p-3 space-y-2">
+          <div className="enter swatch-bar-top rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
             <p className="eyebrow">Regenerate instructions</p>
             <Textarea
+              ref={regenTextareaRef}
               value={regenQuery}
               onChange={(e) => setRegenQuery(e.target.value)}
               rows={3}

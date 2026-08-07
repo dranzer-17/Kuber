@@ -412,6 +412,9 @@ export function CampaignDetail({
   const [editBody, setEditBody] = useState("");
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenQuery, setRegenQuery] = useState("");
+  const regenPanelRef = useRef<HTMLDivElement>(null);
+  const regenTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const historyPanelRef = useRef<HTMLDivElement>(null);
   // Bulk regeneration: the confirm modal's server-resolved preview, the live job, and submit state.
   const [bulkRegenPreview, setBulkRegenPreview] = useState<{
     counts: { draft: number; failed: number };
@@ -699,6 +702,28 @@ export function CampaignDetail({
     setOutboxReplyOpen(false);
     setOutboxReplyStartBlank(true);
   }, [selectedId]);
+
+  // Clicking "Regenerate" only reveals a collapsed panel below the button —
+  // easy to miss if it lands below the fold, which reads as "nothing happened."
+  // Scroll it into view and focus the textarea so the click has an unmistakable result.
+  useEffect(() => {
+    if (!regenOpen) return;
+    const id = requestAnimationFrame(() => {
+      regenPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      regenTextareaRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [regenOpen]);
+
+  // Same fix as Regenerate: "Version history" only reveals a panel below the
+  // button, which can land off-screen and read as a dead click.
+  useEffect(() => {
+    if (!historyOpen) return;
+    const id = requestAnimationFrame(() => {
+      historyPanelRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [historyOpen]);
 
   /** The "AI draft" button — the only thing that starts an LLM reply now.
    *  Opening the composer no longer generates anything on its own. */
@@ -2547,12 +2572,21 @@ export function CampaignDetail({
                           so a fresh draft can be regenerated against the current prompt without an extra
                           reopen step, matching what the regenerate API already allows. */}
                       {["draft", "approved", "failed", "rejected"].includes(selected.email_drafts.status) && !isPreviewingHistory && (
-                        <Button variant="outline" className="gap-1.5" onClick={() => setRegenOpen((o) => !o)}>
+                        <Button
+                          variant="outline"
+                          className={cn("gap-1.5", regenOpen && "border-primary text-primary bg-primary/5 hover:bg-primary/10 hover:text-primary")}
+                          onClick={() => setRegenOpen((o) => !o)}
+                        >
                           <RotateCcw className="size-3.5" /> Regenerate
+                          <ChevronDown className={cn("size-3.5 transition-transform", regenOpen && "rotate-180")} />
                         </Button>
                       )}
                       {versions.length > 1 && (
-                        <Button variant="outline" className="gap-1.5" onClick={() => setHistoryOpen((o) => !o)}>
+                        <Button
+                          variant="outline"
+                          className={cn("gap-1.5", historyOpen && "border-primary text-primary bg-primary/5 hover:bg-primary/10 hover:text-primary")}
+                          onClick={() => setHistoryOpen((o) => !o)}
+                        >
                           <History className="size-3.5" />
                           Version history
                           <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
@@ -2562,7 +2596,7 @@ export function CampaignDetail({
 
                     {/* Version history */}
                     {historyOpen && versions.length > 1 && (
-                      <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
+                      <div ref={historyPanelRef} className="enter space-y-2 rounded-lg border border-border bg-secondary/30 p-3">
                         <div className="flex flex-wrap gap-2">
                           {versions.map((v) => (
                             <Button
@@ -2602,21 +2636,22 @@ export function CampaignDetail({
 
                     {/* Regenerate panel */}
                     {regenOpen && (
-                      <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-2">
+                      <div ref={regenPanelRef} className="enter swatch-bar-top rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
                         {/* A multi-line instruction is normal here — people paste a block of
                             bullets and say "remove this". An <input> cannot hold newlines: the
                             browser strips them on paste and joins them onto one line, and Enter
                             submitted instead of breaking the line. Ctrl/Cmd+Enter still sends. */}
                         <Textarea
+                          ref={regenTextareaRef}
                           value={regenQuery}
                           onChange={(e) => setRegenQuery(e.target.value)}
                           rows={4}
-                          className="text-sm resize-y"
+                          className="text-sm resize-y bg-card"
                           placeholder='Describe the change — multiple lines are fine, e.g. paste a block and say "remove this"'
                           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleRegenerate(); }}
                         />
                         <Button size="sm" onClick={handleRegenerate} disabled={regenerating || !regenQuery.trim()} className="gap-1.5">
-                          <RotateCcw className="size-3.5" /> Regenerate
+                          {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />} Regenerate
                         </Button>
                         {!regenQuery.trim() && (
                           <p className="text-[11px] text-muted-foreground">
