@@ -44,7 +44,7 @@ const EmailSendingView = dynamic(
 
 type Section = "profile" | "ai" | "knowledge" | "appearance" | "account" | "team" | "email" | "keys";
 type AiSection = "my-writing" | "my-signature" | "template" | "default" | "replies" | "footer";
-type KnowledgeSection = "company" | "products" | "documents";
+type KnowledgeSection = "company" | "products";
 type KeysSection = "credentials" | "usage";
 type ProductOffering = { name: string; description: string };
 
@@ -90,7 +90,6 @@ const KEYS_NAV_ITEMS: { id: KeysSection; label: string; icon: React.ComponentTyp
 const KNOWLEDGE_NAV_ITEMS: { id: KnowledgeSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "company",   label: "Company Details",   icon: Building2 },
   { id: "products",  label: "Product Offerings", icon: Package },
-  { id: "documents", label: "Extra Documents",   icon: FileText },
 ];
 
 type EditorCommand = "bold" | "italic" | "underline" | "insertUnorderedList" | "insertOrderedList" | "undo" | "redo" | "removeFormat";
@@ -549,13 +548,7 @@ export function SettingsView() {
     </div>
   ) : null;
 
-  // Extra Documents has nothing to save (it's a static "coming soon" message) — hide
-  // the save bar specifically for that sub-tab while keeping it for Company Details
-  // and Product Offerings, which both still need it.
-  const showSaveBar = !loading && (
-    section === "ai" ||
-    (section === "knowledge" && knowledgeSection !== "documents")
-  );
+  const showSaveBar = !loading && (section === "ai" || section === "knowledge");
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -1030,26 +1023,6 @@ export function SettingsView() {
                         ))}
                       </div>
                     </div>
-                  )}
-
-                  {/* Extra Documents */}
-                  {knowledgeSection === "documents" && (
-                    <section className="space-y-5">
-                      <div className="flex items-center gap-2 border-b border-border pb-4">
-                        <FileText className="size-4 text-muted-foreground" />
-                        <div>
-                          <p className="eyebrow">Knowledge source</p>
-                          <h3 className="font-display text-base font-semibold mt-0.5">Extra Documents</h3>
-                        </div>
-                      </div>
-                      <div className="rounded-md border border-dashed border-border p-8 text-center space-y-2">
-                        <FileText className="size-8 text-muted-foreground mx-auto" />
-                        <p className="text-sm font-medium">Document upload — coming soon</p>
-                        <p className="text-xs text-muted-foreground">
-                          You&apos;ll be able to upload PDFs, FAQs, and product specs here to give the AI additional context.
-                        </p>
-                      </div>
-                    </section>
                   )}
 
                   {error && <p className="text-xs text-destructive">{error}</p>}
