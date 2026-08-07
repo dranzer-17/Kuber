@@ -107,6 +107,9 @@ export async function triggerRegenerationWatchdog(baseUrl: string, db: Db) {
 /** A campaign that has written no draft in this long has lost its chain. */
 const DRAFT_STALE_MINUTES = 5;
 
+/** How many stalled campaigns one watchdog pass will restart. */
+const MAX_DRAFT_KICKS_PER_PASS = 5;
+
 /** Revive INITIAL draft generation whose self-chain died mid-run.
  *
  *  triggerRegenerationWatchdog above covers bulk *re*generation; first-pass
@@ -144,6 +147,17 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
   // 'processing' afterwards finds nothing and the stalled campaign is never
   // revived. draft_generation_started_at is the signal that survives: it means
   // generation was asked for, whatever the status has since been set to.
+  //
+  // The cap is on how many campaigns are KICKED, not on how many are examined.
+  // Limiting the query itself starves the campaign that needs help: every
+  // completed campaign still matches this filter (status 'draft',
+  // draft_generation_started_at set long ago), and there are dozens of them, so
+  // the five slots were filled by finished work and the stalled campaign was
+  // never reached. Same trap the enrich watchdog above documents.
+  //
+  // ponytail: examines every non-deleted draft/processing campaign, which is
+  // fine at this scale (~50). If that ever runs into thousands, push the
+  // "has pending leads" test into the query instead of filtering here.
   const { data: candidates } = await db
     .from("campaigns")
     .select("id")
@@ -151,9 +165,11 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
     .eq("is_deleted", false)
     .not("draft_generation_started_at", "is", null)
     .lt("draft_generation_started_at", staleBefore)
-    .limit(5);
+    .order("draft_generation_started_at", { ascending: false });
 
+  let kicked = 0;
   for (const campaign of candidates ?? []) {
+    if (kicked >= MAX_DRAFT_KICKS_PER_PASS) break;
     const campaignId = campaign.id as string;
 
     // Nothing left to write — a finished campaign must not be kicked, and this
@@ -174,6 +190,7 @@ export async function triggerDraftGenerationWatchdog(baseUrl: string, db: Db) {
     // same targets.
     if (lastDraft?.created_at && lastDraft.created_at > staleBefore) continue;
 
+    kicked++;
     void fetch(`${baseUrl}/api/enrich/generate-drafts`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-internal-secret": secret },
