@@ -99,9 +99,14 @@ export const MAX_ENRICH_ATTEMPTS = 2;
  * us a bookkeeping row — never another credit.
  */
 async function settleAsAnswered(db: SupabaseClient, target: EnrichTarget): Promise<void> {
-  await db.from("leads")
+  const { error } = await db.from("leads")
     .update({ has_email: false, enrich_locked_at: null, updated_at: new Date().toISOString() })
     .eq("id", target.id);
+  // Swallowing this failure is precisely what keeps a paid-for lead eligible:
+  // `has_email` stays true, the next pass re-selects it, and Apollo bills again
+  // for an answer we already own. Surface it and let the caller's catch apply
+  // the release/archive policy.
+  if (error) throw new Error(`settleAsAnswered failed for lead ${target.id}: ${error.message}`);
 }
 
 async function archiveUnenrichableLead(
@@ -266,8 +271,11 @@ export async function enrichLeads(
           continue;
         }
 
-        matched++;
-        if (match.email_status === "verified") verified++; else unverified++;
+        // NOTE: `matched`/`verified` are counted only once the email is actually
+        // written (below). They used to be incremented here, which reported a
+        // paid match as a success even when the write that followed was rejected
+        // and dropped — the 8 Aug 2026 charge logged "matched: 1, verified: 1"
+        // for a lead whose email never landed.
 
         // Org upsert-merge (§4.2 rule)
         let orgId = lead.organization_id;
@@ -395,7 +403,33 @@ export async function enrichLeads(
         // per company, so an unscoped update keyed on it wrote this email into
         // every tenant holding the same person — a cross-tenant write on the
         // watchdog path, and one that silently masked duplicate spend.
-        await db.from("leads").update(leadUpdate).eq("id", lead.id);
+        const { error: writeError } = await db.from("leads").update(leadUpdate).eq("id", lead.id);
+        if (writeError) {
+          // 23505 = unique violation, in practice always
+          // `leads_company_lower_email_active_uidx`: Apollo handed back a real
+          // address that this TENANT (not just this org) already holds on
+          // another active lead — two Apollo person records sharing one mailbox.
+          // The answer is final and already paid for, and re-asking buys the
+          // identical collision, so settle it on exactly the same terms as "no
+          // email on file". Previously this error was never read: the credit was
+          // spent, the email discarded, and the lead left `has_email = true /
+          // email = null` — still eligible, to be billed again next pass.
+          if (writeError.code === "23505") {
+            await settleAsAnswered(db, lead);
+            await archiveUnenrichableLead(db, lead, match.linkedin_url, "duplicate_email");
+            archived++;
+            resolvedLeadIds.add(lead.id);
+            if (lead.organization_id) resolvedOrgIds.add(lead.organization_id);
+            continue;
+          }
+          // Anything else is a genuine write failure on a request we have paid
+          // for. Never swallow it — throwing hands it to the catch below, which
+          // records it and applies the release/archive policy.
+          throw new Error(`lead email write failed for ${lead.id}: ${writeError.message}`);
+        }
+
+        matched++;
+        if (match.email_status === "verified") verified++; else unverified++;
 
         // Only reset the CRM status of leads still in a pre-send stage — never clobber
         // a lead that's already sent/replied/won in another campaign (§3.1).
